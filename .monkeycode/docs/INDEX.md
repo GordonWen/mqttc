@@ -1,0 +1,46 @@
+# mqttc 文档
+
+## 项目概述
+
+mqttc 是一个跨平台桌面 MQTT 调试客户端，面向开发者和运维人员的日常 Broker 联调。用户通过图形界面连接 MQTT Broker，订阅 Topic、发布消息，并在日志区观察收发内容。
+
+**目标用户**: 需要快速验证 MQTT 连通性与消息流的开发者、测试与运维人员
+
+**核心价值**:
+- 打开即可连接、订阅、发布，覆盖日常调试最短路径
+- 基于 Rust 与 Slint，同一套代码覆盖 Windows、macOS、Linux
+- 消息日志即时可见，便于对照 Topic 与 Payload
+
+## 技术选型
+
+| 类别 | 选择 | 理由 |
+|------|------|------|
+| 语言 | Rust | 跨平台、内存安全、适合长期运行的网络客户端 |
+| UI | Slint | 声明式桌面 UI，官方支持 Win/macOS/Linux |
+| MQTT | rumqttc | 成熟的 MQTT 3.1.1 客户端，同步 API 易与 UI 线程协作 |
+| 协议 | MQTT 3.1.1 | 生产环境最常见，作为 MVP 协议基线 |
+| 首发平台 | Windows | 先完成最小可用，再复用到 macOS / Linux |
+
+## 核心功能
+
+### 连接 Broker
+- **目的**: 与 MQTT Broker 建立 TCP 会话
+- **描述**: 用户填写主机、端口、Client ID，一键连接或断开；界面展示连接状态
+
+### 订阅 Topic
+- **目的**: 接收指定主题的消息
+- **描述**: 已连接状态下订阅 Topic（支持通配符），后续 PUBLISH 显示在日志中
+
+### 发布消息
+- **目的**: 向 Broker 发送调试消息
+- **描述**: 已连接状态下向指定 Topic 发布文本 Payload
+
+### 消息日志
+- **目的**: 观察调试过程
+- **描述**: 按时间列出连接事件、收发消息与错误信息，支持清空
+
+## 文档导航
+
+- 当前工作区 `/ .monkeycode/docs/ARCHITECTURE.md` - 架构设计
+- 当前工作区 `/ .monkeycode/docs/INTERFACES.md` - 接口定义
+- 当前工作区 `/ .monkeycode/docs/DEVELOPER_GUIDE.md` - 开发指南

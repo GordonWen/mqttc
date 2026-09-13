@@ -1,0 +1,272 @@
+import { Button, LineEdit, ListView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export struct LogEntry {
+    time: string,
+    kind: string,
+    topic: string,
+    payload: string,
+}
+
+export component AppWindow inherits Window {
+    title: "mqttc";
+    min-width: 860px;
+    min-height: 560px;
+    preferred-width: 960px;
+    preferred-height: 640px;
+    background: #16181d;
+    default-font-family: "Segoe UI";
+    default-font-size: 13px;
+
+    in-out property <string> host: "127.0.0.1";
+    in-out property <string> port: "1883";
+    in-out property <string> client-id: "";
+    in-out property <string> status: "未连接";
+    in-out property <color> status-color: #9aa0a6;
+    in-out property <bool> connected: false;
+    in-out property <bool> connecting: false;
+    in-out property <string> sub-topic: "mqttc/mvp/#";
+    in-out property <string> pub-topic: "mqttc/mvp/hello";
+    in-out property <string> pub-payload: "hello from mqttc";
+    in-out property <[LogEntry]> logs: [];
+
+    callback connect-requested();
+    callback disconnect-requested();
+    callback subscribe-requested();
+    callback publish-requested();
+    callback clear-logs-requested();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        HorizontalBox {
+            spacing: 12px;
+            alignment: stretch;
+            Text {
+                text: "mqttc";
+                color: #f2f4f8;
+                font-size: 20px;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: "MQTT 3.1.1 调试客户端";
+                color: #8b919a;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Rectangle {
+                border-radius: 11px;
+                background: #242830;
+                vertical-stretch: 0;
+                VerticalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: center;
+                        Rectangle {
+                            width: 8px;
+                            height: 8px;
+                            border-radius: 4px;
+                            background: root.status-color;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: root.status;
+                            color: root.status-color;
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            border-radius: 10px;
+            background: #1e2229;
+            VerticalBox {
+                padding: 12px;
+                spacing: 8px;
+                Text { text: "连接"; color: #c5cad3; font-weight: 600; }
+                HorizontalBox {
+                    spacing: 8px;
+                    VerticalBox {
+                        spacing: 4px;
+                        Text { text: "主机"; color: #8b919a; font-size: 11px; }
+                        LineEdit {
+                            text <=> root.host;
+                            placeholder-text: "127.0.0.1";
+                            enabled: !root.connected && !root.connecting;
+                        }
+                    }
+                    VerticalBox {
+                        spacing: 4px;
+                        width: 90px;
+                        Text { text: "端口"; color: #8b919a; font-size: 11px; }
+                        LineEdit {
+                            text <=> root.port;
+                            placeholder-text: "1883";
+                            enabled: !root.connected && !root.connecting;
+                        }
+                    }
+                    VerticalBox {
+                        spacing: 4px;
+                        Text { text: "Client ID"; color: #8b919a; font-size: 11px; }
+                        LineEdit {
+                            text <=> root.client-id;
+                            placeholder-text: "空则自动生成";
+                            enabled: !root.connected && !root.connecting;
+                        }
+                    }
+                    VerticalBox {
+                        spacing: 4px;
+                        width: 92px;
+                        Text { text: " "; color: transparent; font-size: 11px; }
+                        Button {
+                            text: "连接";
+                            enabled: !root.connected && !root.connecting;
+                            clicked => { root.connect-requested(); }
+                        }
+                    }
+                    VerticalBox {
+                        spacing: 4px;
+                        width: 92px;
+                        Text { text: " "; color: transparent; font-size: 11px; }
+                        Button {
+                            text: "断开";
+                            enabled: root.connected || root.connecting;
+                            clicked => { root.disconnect-requested(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 12px;
+
+            Rectangle {
+                border-radius: 10px;
+                background: #1e2229;
+                VerticalBox {
+                    padding: 12px;
+                    spacing: 8px;
+                    Text { text: "订阅"; color: #c5cad3; font-weight: 600; }
+                    HorizontalBox {
+                        spacing: 8px;
+                        LineEdit {
+                            text <=> root.sub-topic;
+                            placeholder-text: "topic/filter/#";
+                            enabled: root.connected;
+                        }
+                        Button {
+                            width: 92px;
+                            text: "订阅";
+                            enabled: root.connected;
+                            clicked => { root.subscribe-requested(); }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                border-radius: 10px;
+                background: #1e2229;
+                VerticalBox {
+                    padding: 12px;
+                    spacing: 8px;
+                    Text { text: "发布"; color: #c5cad3; font-weight: 600; }
+                    HorizontalBox {
+                        spacing: 8px;
+                        LineEdit {
+                            text <=> root.pub-topic;
+                            placeholder-text: "topic";
+                            enabled: root.connected;
+                        }
+                        LineEdit {
+                            text <=> root.pub-payload;
+                            placeholder-text: "payload";
+                            enabled: root.connected;
+                        }
+                        Button {
+                            width: 92px;
+                            text: "发布";
+                            enabled: root.connected;
+                            clicked => { root.publish-requested(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            border-radius: 10px;
+            background: #1e2229;
+            vertical-stretch: 1;
+            VerticalBox {
+                padding: 12px;
+                spacing: 8px;
+                HorizontalBox {
+                    Text { text: "日志"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        text: "清空";
+                        clicked => { root.clear-logs-requested(); }
+                    }
+                }
+                Rectangle {
+                    background: #12141a;
+                    border-radius: 8px;
+                    vertical-stretch: 1;
+                    clip: true;
+                    ListView {
+                        for entry in root.logs: Rectangle {
+                            height: 30px;
+                            background: #12141a;
+                            HorizontalLayout {
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                spacing: 10px;
+                                Text {
+                                    text: entry.time;
+                                    color: #6d737c;
+                                    width: 70px;
+                                    font-family: "Consolas";
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: entry.kind;
+                                    color: entry.kind == "ERR" ? #e85d5d : entry.kind == "RECV" ? #4ecf7a : entry.kind == "SEND" ? #5aa7ff : #9aa0a6;
+                                    width: 48px;
+                                    font-weight: 700;
+                                    font-family: "Consolas";
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: entry.topic;
+                                    color: #d7dde6;
+                                    width: 220px;
+                                    overflow: elide;
+                                    font-family: "Consolas";
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    text: entry.payload;
+                                    color: #b8c0cc;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                    font-family: "Consolas";
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

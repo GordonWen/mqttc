@@ -1,0 +1,53 @@
+# 开发指南
+
+## 环境要求
+
+- Rust stable（rustup）
+- 系统库（Linux 编译）：`build-essential`、`pkg-config`、`libfontconfig1-dev`、`libxcb*`、`libxkbcommon-dev`
+- Windows：MSVC Build Tools 或与 Rust GNU 工具链匹配的环境
+- 一台可访问的 MQTT Broker（本地 Mosquitto 或 `test.mosquitto.org:1883`）
+
+## 快速开始
+
+```bash
+# 安装 Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# 编译
+cargo build
+
+# 运行
+cargo run
+```
+
+## 项目结构说明
+
+- `ui/app-window.slint`：界面布局与数据绑定
+- `src/main.rs`：窗口创建与回调
+- `src/mqtt.rs`：MQTT 连接与事件
+- `build.rs`：编译 `.slint` 文件
+
+## 开发规范
+
+- 模块、类型、函数使用 Rust 惯例命名
+- UI 文案使用中文
+- 不在代码中硬编码密钥；MVP 无认证
+- 提交信息使用 `feat` / `fix` / `chore` 前缀
+
+## 常见任务
+
+- 改界面：编辑 `ui/app-window.slint` 后 `cargo build`
+- 改协议行为：编辑 `src/mqtt.rs`
+- 增加日志种类：扩展 `LogEntry.kind` 并在 UI 着色
+
+## 构建与发布
+
+```bash
+# 调试构建
+cargo build
+
+# 发布构建
+cargo build --release
+```
+
+Windows 发布产物为 `target/release/mqttc.exe`。macOS / Linux 使用同一命令，产物名为 `mqttc`。
