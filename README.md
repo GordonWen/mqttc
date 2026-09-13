@@ -16,10 +16,19 @@ cargo run
 发布构建：
 
 ```bash
+# 本机 Windows
 cargo build --release
+
+# 在 Linux 上交叉编译 Windows 64 位
+cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-Windows 产物：`target/release/mqttc.exe`
+Windows 产物：
+
+- 本机编译：`target/release/mqttc.exe`
+- 交叉编译：`target/x86_64-pc-windows-gnu/release/mqttc.exe`
+
+当前交叉编译好的文件已放到 当前工作区 `/dist/mqttc.exe`（约 36MB），拷到 Windows 后双击即可运行。
 
 ## 最小用法
 

@@ -46,8 +46,18 @@ cargo run
 # 调试构建
 cargo build
 
-# 发布构建
+# 本机发布构建
 cargo build --release
+
+# Linux 交叉编译 Windows 64 位 exe
+# 需要：rustup target add x86_64-pc-windows-gnu
+# 以及 gcc-mingw-w64-x86-64
+cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-Windows 发布产物为 `target/release/mqttc.exe`。macOS / Linux 使用同一命令，产物名为 `mqttc`。
+Windows 发布产物：
+
+- 本机：`target/release/mqttc.exe`
+- 交叉编译：`target/x86_64-pc-windows-gnu/release/mqttc.exe`
+
+产物为单文件 exe，依赖 Windows 系统 DLL（gdi32、user32、opengl32 等），无需额外安装 MinGW 运行库。macOS / Linux 本机产物名为 `mqttc`。
