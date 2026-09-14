@@ -2854,6 +2854,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "rumqttc",
+ "serde",
+ "serde_json",
  "slint",
  "slint-build",
 ]

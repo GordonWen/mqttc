@@ -62,3 +62,15 @@ mqttc Windows 最小可用版本：用户通过桌面窗口连接 MQTT 3.1.1 Bro
 2. WHEN 发生连接、断开或错误, the System SHALL 追加 SYS 或 ERR 日志
 3. WHEN 日志条数超过 500, the System SHALL 丢弃最早的条目并保留最近 500 条
 4. WHEN 用户点击清空, the System SHALL 删除当前全部日志条目
+
+### Requirement 5: 本地配置持久化
+
+**User Story:** AS 调试人员, I want 下次打开程序时自动填入上次的连接参数, so that 我不用重复输入
+
+#### Acceptance Criteria
+
+1. WHEN System 启动且可执行文件同目录存在 `mqttc.json`, the System SHALL 读取该文件并把主机、端口、Client ID、用户名、密码、订阅 Topic、发布 Topic、发布 Payload 填入界面
+2. WHEN System 启动且该文件不存在, the System SHALL 使用内置默认值，保持未连接
+3. WHEN 用户成功发起连接、订阅或发布, the System SHALL 把当前表单写入可执行文件同目录的 `mqttc.json`
+4. WHEN 用户关闭窗口, the System SHALL 把当前表单写入该配置文件
+5. IF 配置文件无法读取或解析, the System SHALL 使用内置默认值，并在日志中写入错误原因

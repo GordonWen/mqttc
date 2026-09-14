@@ -51,6 +51,25 @@
 | Subscribe | topic |
 | Publish | topic, payload |
 
+## 配置文件
+
+路径：可执行文件所在目录下的 `mqttc.json`。
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": "1883",
+  "client_id": "",
+  "username": "",
+  "password": "",
+  "sub_topic": "mqttc/mvp/#",
+  "pub_topic": "mqttc/mvp/hello",
+  "pub_payload": "hello from mqttc"
+}
+```
+
+启动时读取；连接、订阅、发布成功以及退出时写入。
+
 ## Broker 约定（MVP）
 
 - 传输：TCP

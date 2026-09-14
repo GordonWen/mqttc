@@ -25,13 +25,14 @@ cargo run
 - `ui/app-window.slint`：界面布局与数据绑定
 - `src/main.rs`：窗口创建与回调
 - `src/mqtt.rs`：MQTT 连接与事件
+- `src/config.rs`：同目录 `mqttc.json` 的读写
 - `build.rs`：编译 `.slint` 文件
 
 ## 开发规范
 
 - 模块、类型、函数使用 Rust 惯例命名
 - UI 文案使用中文
-- 不在代码中硬编码密钥；MVP 无认证
+- 不在代码中硬编码密钥；用户名密码由界面输入并写入本地配置
 - 提交信息使用 `feat` / `fix` / `chore` 前缀
 
 ## 常见任务

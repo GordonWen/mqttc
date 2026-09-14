@@ -1,8 +1,10 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod config;
 mod mqtt;
 
 use chrono::Local;
+use config::AppConfig;
 use mqtt::{MqttHandle, UiEvent};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::rc::Rc;
@@ -14,6 +16,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     let mqtt = MqttHandle::new();
     let ui_weak = ui.as_weak();
+    apply_startup_config(&ui);
 
     ui.on_connect_requested({
         let ui_weak = ui_weak.clone();
@@ -57,6 +60,7 @@ fn main() -> Result<(), slint::PlatformError> {
             );
 
             let ui_weak = ui_weak.clone();
+            persist_config(&ui);
             mqtt.connect(host, port, client_id, username, password, move |event| {
                 let ui_weak = ui_weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
@@ -94,7 +98,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             match mqtt.subscribe(&topic) {
-                Ok(()) => append_log(&ui, "SYS", &topic, "已发送订阅"),
+                Ok(()) => {
+                    persist_config(&ui);
+                    append_log(&ui, "SYS", &topic, "已发送订阅");
+                }
                 Err(err) => append_log(&ui, "ERR", &topic, &err),
             }
         }
@@ -116,7 +123,10 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let payload = ui.get_pub_payload().to_string();
             match mqtt.publish(&topic, &payload) {
-                Ok(()) => append_log(&ui, "SEND", &topic, &payload),
+                Ok(()) => {
+                    persist_config(&ui);
+                    append_log(&ui, "SEND", &topic, &payload);
+                }
                 Err(err) => append_log(&ui, "ERR", &topic, &err),
             }
         }
@@ -130,7 +140,9 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    ui.run()
+    let result = ui.run();
+    persist_config(&ui);
+    result
 }
 
 fn apply_event(ui: &AppWindow, event: UiEvent) {
@@ -182,6 +194,52 @@ fn append_log(ui: &AppWindow, kind: &str, topic: &str, payload: &str) {
         entries.drain(0..extra);
     }
     ui.set_logs(Rc::new(VecModel::from(entries)).into());
+}
+
+fn apply_startup_config(ui: &AppWindow) {
+    match config::load() {
+        Ok(Some(cfg)) => {
+            apply_config(ui, &cfg);
+            append_log(
+                ui,
+                "SYS",
+                "",
+                &format!("已加载配置 {}", config::config_path().display()),
+            );
+        }
+        Ok(None) => {}
+        Err(err) => append_log(ui, "ERR", "", &err),
+    }
+}
+
+fn collect_config(ui: &AppWindow) -> AppConfig {
+    AppConfig {
+        host: ui.get_host().to_string(),
+        port: ui.get_port().to_string(),
+        client_id: ui.get_client_id().to_string(),
+        username: ui.get_username().to_string(),
+        password: ui.get_password().to_string(),
+        sub_topic: ui.get_sub_topic().to_string(),
+        pub_topic: ui.get_pub_topic().to_string(),
+        pub_payload: ui.get_pub_payload().to_string(),
+    }
+}
+
+fn apply_config(ui: &AppWindow, cfg: &AppConfig) {
+    ui.set_host(cfg.host.clone().into());
+    ui.set_port(cfg.port.clone().into());
+    ui.set_client_id(cfg.client_id.clone().into());
+    ui.set_username(cfg.username.clone().into());
+    ui.set_password(cfg.password.clone().into());
+    ui.set_sub_topic(cfg.sub_topic.clone().into());
+    ui.set_pub_topic(cfg.pub_topic.clone().into());
+    ui.set_pub_payload(cfg.pub_payload.clone().into());
+}
+
+fn persist_config(ui: &AppWindow) {
+    if let Err(err) = config::save(&collect_config(ui)) {
+        append_log(ui, "ERR", "", &err);
+    }
 }
 
 fn now_hms() -> String {

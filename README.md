@@ -37,3 +37,5 @@ Windows 产物：
 3. 点击连接
 4. 订阅 Topic（默认 `mqttc/mvp/#`）
 5. 发布文本消息，在日志中查看 SEND / RECV
+
+连接参数会写入可执行文件同目录的 `mqttc.json`，下次打开自动加载。

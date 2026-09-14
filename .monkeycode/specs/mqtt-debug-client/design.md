@@ -73,12 +73,18 @@ MqttOptions {
   connection_timeout: 10s
   credentials: optional username and password
 }
+
+AppConfig {
+  host, port, client_id, username, password
+  sub_topic, pub_topic, pub_payload
+}
 ```
 
 ## Correctness Properties
 
 - 同一时刻最多一个活动 `Connection` 轮询线程
 - 仅 ConnAck 成功后 `connected == true`
+- 配置文件路径为可执行文件同目录的 `mqttc.json`
 - 未连接时订阅与发布只写日志，不调用 `Client`
 - 后台线程不直接触碰 Slint 组件句柄，只提交到事件循环
 - 日志上限 500 条
