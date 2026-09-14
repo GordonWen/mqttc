@@ -20,6 +20,8 @@ export component AppWindow inherits Window {
     in-out property <string> host: "127.0.0.1";
     in-out property <string> port: "1883";
     in-out property <string> client-id: "";
+    in-out property <string> username: "";
+    in-out property <string> password: "";
     in-out property <string> status: "未连接";
     in-out property <color> status-color: #9aa0a6;
     in-out property <bool> connected: false;
@@ -140,6 +142,28 @@ export component AppWindow inherits Window {
                             text: "断开";
                             enabled: root.connected || root.connecting;
                             clicked => { root.disconnect-requested(); }
+                        }
+                    }
+                }
+                HorizontalBox {
+                    spacing: 8px;
+                    VerticalBox {
+                        spacing: 4px;
+                        Text { text: "用户名"; color: #8b919a; font-size: 11px; }
+                        LineEdit {
+                            text <=> root.username;
+                            placeholder-text: "可选，空则匿名";
+                            enabled: !root.connected && !root.connecting;
+                        }
+                    }
+                    VerticalBox {
+                        spacing: 4px;
+                        Text { text: "密码"; color: #8b919a; font-size: 11px; }
+                        LineEdit {
+                            text <=> root.password;
+                            placeholder-text: "可选";
+                            input-type: InputType.password;
+                            enabled: !root.connected && !root.connecting;
                         }
                     }
                 }

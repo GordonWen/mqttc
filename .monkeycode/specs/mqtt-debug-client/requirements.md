@@ -2,7 +2,7 @@
 
 ## Introduction
 
-mqttc Windows 最小可用版本：用户通过桌面窗口连接 MQTT 3.1.1 Broker，完成订阅、发布，并在日志中查看消息。本文件描述 MVP 范围；TLS、用户名密码、MQTT 5.0、多会话为后续需求。
+mqttc Windows 最小可用版本：用户通过桌面窗口连接 MQTT 3.1.1 Broker，完成订阅、发布，并在日志中查看消息。本文件描述 MVP 范围；TLS、MQTT 5.0、多会话为后续需求。
 
 ## Glossary
 
@@ -23,9 +23,12 @@ mqttc Windows 最小可用版本：用户通过桌面窗口连接 MQTT 3.1.1 Bro
 
 1. WHEN 用户点击连接且主机非空、端口为 1 到 65535 的整数, the System SHALL 使用 MQTT 3.1.1、Clean Session、TCP 向该地址发起连接
 2. WHEN Client ID 为空, the System SHALL 生成以 `mqttc-` 为前缀的 Client ID 再发起连接
-3. WHEN Broker 返回 ConnAck, the System SHALL 将状态显示为已连接并允许订阅与发布
-4. IF 端口非法或连接失败, the System SHALL 保持未连接，并在日志中写入错误原因
-5. WHEN 用户在已连接状态下点击断开, the System SHALL 断开会话并将状态显示为未连接
+3. WHEN 用户填写了非空用户名, the System SHALL 在 CONNECT 中携带该用户名和密码
+4. WHEN 用户名为空, the System SHALL 以匿名方式连接，CONNECT 中不携带用户名密码
+5. WHEN Broker 返回 ConnAck Success, the System SHALL 将状态显示为已连接并允许订阅与发布
+6. IF Broker 返回 BadUserNamePassword 或 NotAuthorized, the System SHALL 保持未连接，并在日志中写入认证失败原因
+7. IF 端口非法或连接失败, the System SHALL 保持未连接，并在日志中写入错误原因
+8. WHEN 用户在已连接状态下点击断开, the System SHALL 断开会话并将状态显示为未连接
 
 ### Requirement 2: 订阅 Topic
 

@@ -11,6 +11,8 @@
 | host | string | Broker 主机，默认 `127.0.0.1` |
 | port | string | Broker 端口，默认 `1883` |
 | client-id | string | MQTT Client ID，空则自动生成 |
+| username | string | MQTT 用户名，空则匿名连接 |
+| password | string | MQTT 密码，仅在用户名非空时发送 |
 | status | string | 连接状态文案 |
 | status-color | color | 状态指示颜色 |
 | connected | bool | 是否已连接，控制按钮可用性 |
@@ -44,7 +46,7 @@
 
 | 命令 | 参数 |
 |------|------|
-| Connect | host, port, client_id |
+| Connect | host, port, client_id, username, password |
 | Disconnect | 无 |
 | Subscribe | topic |
 | Publish | topic, payload |

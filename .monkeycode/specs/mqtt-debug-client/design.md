@@ -16,7 +16,7 @@ sequenceDiagram
     participant S as mqtt session
     participant B as Broker
     U->>W: connect
-    W->>S: Connect host port client_id
+    W->>S: Connect host port client_id username password
     S->>B: CONNECT
     B-->>S: CONNACK
     S-->>W: status connected
@@ -40,7 +40,7 @@ sequenceDiagram
 
 ### Session
 
-- `connect`: 若已有会话先断开，再 `MqttOptions::new` + `Client::new`，`spawn` 轮询线程
+- `connect`: 若已有会话先断开，再 `MqttOptions::new` + `Client::new`；用户名非空时调用 `set_credentials`，然后 `spawn` 轮询线程
 - `subscribe` / `publish`: 对当前 `Client` 调用对应方法
 - `disconnect`: `Client::disconnect()`，轮询线程在 `iter()` 出错或结束后退出
 - 使用单调 `generation`，避免旧线程在重连后写 UI
@@ -71,6 +71,7 @@ MqttOptions {
   keep_alive: 30s
   clean_session: true
   connection_timeout: 10s
+  credentials: optional username and password
 }
 ```
 

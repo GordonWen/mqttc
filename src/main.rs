@@ -37,6 +37,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 client_id = default_client_id();
                 ui.set_client_id(client_id.clone().into());
             }
+            let username = ui.get_username().trim().to_string();
+            let password = ui.get_password().to_string();
+            let auth_hint = if username.is_empty() {
+                "匿名".to_string()
+            } else {
+                format!("用户 {username}")
+            };
 
             ui.set_connecting(true);
             ui.set_connected(false);
@@ -46,11 +53,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 &ui,
                 "SYS",
                 "",
-                &format!("正在连接 {host}:{port} ({client_id})"),
+                &format!("正在连接 {host}:{port} ({client_id}, {auth_hint})"),
             );
 
             let ui_weak = ui_weak.clone();
-            mqtt.connect(host, port, client_id, move |event| {
+            mqtt.connect(host, port, client_id, username, password, move |event| {
                 let ui_weak = ui_weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {

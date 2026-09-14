@@ -21,6 +21,17 @@ struct Inner {
     client: Option<Client>,
 }
 
+fn connack_reason(code: ConnectReturnCode) -> &'static str {
+    match code {
+        ConnectReturnCode::Success => "连接成功",
+        ConnectReturnCode::RefusedProtocolVersion => "协议版本不被接受",
+        ConnectReturnCode::BadClientId => "Client ID 不被接受",
+        ConnectReturnCode::ServiceUnavailable => "服务不可用",
+        ConnectReturnCode::BadUserNamePassword => "用户名或密码错误",
+        ConnectReturnCode::NotAuthorized => "未授权",
+    }
+}
+
 impl MqttHandle {
     pub fn new() -> Self {
         Self {
@@ -31,8 +42,15 @@ impl MqttHandle {
         }
     }
 
-    pub fn connect<F>(&self, host: String, port: u16, client_id: String, on_event: F)
-    where
+    pub fn connect<F>(
+        &self,
+        host: String,
+        port: u16,
+        client_id: String,
+        username: String,
+        password: String,
+        on_event: F,
+    ) where
         F: Fn(UiEvent) + Send + 'static,
     {
         let mut inner = self.inner.lock().expect("mqtt lock");
@@ -45,6 +63,9 @@ impl MqttHandle {
         let mut opts = MqttOptions::new(client_id, host, port);
         opts.set_keep_alive(Duration::from_secs(30));
         opts.set_clean_session(true);
+        if !username.is_empty() {
+            opts.set_credentials(username, password);
+        }
 
         let mut network = NetworkOptions::new();
         network.set_connection_timeout(10);
@@ -69,7 +90,7 @@ impl MqttHandle {
                             on_event(UiEvent::Connected);
                         } else {
                             on_event(UiEvent::Error {
-                                message: format!("连接被拒绝: {:?}", ack.code),
+                                message: format!("连接被拒绝: {}", connack_reason(ack.code)),
                             });
                             on_event(UiEvent::Disconnected {
                                 reason: format!("{:?}", ack.code),
