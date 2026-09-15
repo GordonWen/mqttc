@@ -61,11 +61,13 @@ fn main() -> Result<(), slint::PlatformError> {
 
             let ui_weak = ui_weak.clone();
             persist_config(&ui);
+            let mqtt_events = mqtt.clone();
             mqtt.connect(host, port, client_id, username, password, move |event| {
                 let ui_weak = ui_weak.clone();
+                let mqtt_events = mqtt_events.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
-                        apply_event(&ui, event);
+                        apply_event(&ui, event, &mqtt_events);
                     }
                 });
             });
@@ -99,8 +101,38 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             match mqtt.subscribe(&topic) {
                 Ok(()) => {
+                    let mut subs = collect_subscriptions(&ui);
+                    if subs.iter().any(|item| item == &topic) {
+                        append_log(&ui, "SYS", &topic, "已在订阅列表中");
+                    } else {
+                        subs.push(topic.clone());
+                        set_subscriptions(&ui, subs);
+                        append_log(&ui, "SYS", &topic, "已发送订阅");
+                    }
                     persist_config(&ui);
-                    append_log(&ui, "SYS", &topic, "已发送订阅");
+                }
+                Err(err) => append_log(&ui, "ERR", &topic, &err),
+            }
+        }
+    });
+
+    ui.on_unsubscribe_requested({
+        let ui_weak = ui_weak.clone();
+        let mqtt = mqtt.clone();
+        move |index| {
+            let ui = ui_weak.unwrap();
+            let mut subs = collect_subscriptions(&ui);
+            let idx = index.max(0) as usize;
+            if idx >= subs.len() {
+                return;
+            }
+            let topic = subs[idx].clone();
+            match mqtt.unsubscribe(&topic) {
+                Ok(()) => {
+                    subs.remove(idx);
+                    set_subscriptions(&ui, subs);
+                    persist_config(&ui);
+                    append_log(&ui, "SYS", &topic, "已发送取消订阅");
                 }
                 Err(err) => append_log(&ui, "ERR", &topic, &err),
             }
@@ -132,6 +164,25 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    ui.on_save_logs_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let ui = ui_weak.unwrap();
+            let model = ui.get_logs();
+            let entries: Vec<LogEntry> = (0..model.row_count())
+                .filter_map(|i| model.row_data(i))
+                .collect();
+            if entries.is_empty() {
+                append_log(&ui, "ERR", "", "当前没有可保存的日志");
+                return;
+            }
+            match save_logs_to_file(&entries) {
+                Ok(path) => append_log(&ui, "SYS", "", &format!("日志已保存到 {}", path.display())),
+                Err(err) => append_log(&ui, "ERR", "", &err),
+            }
+        }
+    });
+
     ui.on_clear_logs_requested({
         let ui_weak = ui_weak.clone();
         move || {
@@ -145,7 +196,7 @@ fn main() -> Result<(), slint::PlatformError> {
     result
 }
 
-fn apply_event(ui: &AppWindow, event: UiEvent) {
+fn apply_event(ui: &AppWindow, event: UiEvent, mqtt: &MqttHandle) {
     match event {
         UiEvent::Connected => {
             ui.set_connecting(false);
@@ -153,6 +204,7 @@ fn apply_event(ui: &AppWindow, event: UiEvent) {
             ui.set_status("已连接".into());
             ui.set_status_color(slint::Color::from_rgb_u8(0x4e, 0xcf, 0x7a));
             append_log(ui, "SYS", "", "连接成功");
+            resubscribe_all(ui, mqtt);
         }
         UiEvent::Disconnected { reason } => {
             if ui.get_connected() || ui.get_connecting() {
@@ -178,6 +230,31 @@ fn set_disconnected(ui: &AppWindow, status: &str) {
     ui.set_status_color(slint::Color::from_rgb_u8(0x9a, 0xa0, 0xa6));
 }
 
+fn collect_subscriptions(ui: &AppWindow) -> Vec<String> {
+    let model = ui.get_subscriptions();
+    (0..model.row_count())
+        .filter_map(|i| model.row_data(i))
+        .map(|item| item.topic.to_string())
+        .collect()
+}
+
+fn set_subscriptions(ui: &AppWindow, topics: Vec<String>) {
+    let items: Vec<Subscription> = topics
+        .into_iter()
+        .map(|topic| Subscription { topic: topic.into() })
+        .collect();
+    ui.set_subscriptions(Rc::new(VecModel::from(items)).into());
+}
+
+fn resubscribe_all(ui: &AppWindow, mqtt: &MqttHandle) {
+    for topic in collect_subscriptions(ui) {
+        match mqtt.subscribe(&topic) {
+            Ok(()) => append_log(ui, "SYS", &topic, "已重新订阅"),
+            Err(err) => append_log(ui, "ERR", &topic, &err),
+        }
+    }
+}
+
 fn append_log(ui: &AppWindow, kind: &str, topic: &str, payload: &str) {
     let model = ui.get_logs();
     let mut entries: Vec<LogEntry> = (0..model.row_count())
@@ -185,6 +262,7 @@ fn append_log(ui: &AppWindow, kind: &str, topic: &str, payload: &str) {
         .collect();
     entries.push(LogEntry {
         time: now_hms().into(),
+        timestamp: now_timestamp().into(),
         kind: kind.into(),
         topic: topic.into(),
         payload: payload.into(),
@@ -222,6 +300,7 @@ fn collect_config(ui: &AppWindow) -> AppConfig {
         sub_topic: ui.get_sub_topic().to_string(),
         pub_topic: ui.get_pub_topic().to_string(),
         pub_payload: ui.get_pub_payload().to_string(),
+        subscriptions: collect_subscriptions(ui),
     }
 }
 
@@ -234,6 +313,7 @@ fn apply_config(ui: &AppWindow, cfg: &AppConfig) {
     ui.set_sub_topic(cfg.sub_topic.clone().into());
     ui.set_pub_topic(cfg.pub_topic.clone().into());
     ui.set_pub_payload(cfg.pub_payload.clone().into());
+    set_subscriptions(ui, cfg.subscriptions.clone());
 }
 
 fn persist_config(ui: &AppWindow) {
@@ -244,6 +324,32 @@ fn persist_config(ui: &AppWindow) {
 
 fn now_hms() -> String {
     Local::now().format("%H:%M:%S").to_string()
+}
+
+fn now_timestamp() -> String {
+    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn save_logs_to_file(entries: &[LogEntry]) -> Result<std::path::PathBuf, String> {
+    let dir = config::log_dir();
+    std::fs::create_dir_all(&dir).map_err(|err| format!("创建日志目录失败: {err}"))?;
+    let file_name = format!("mqttc-{}.log", Local::now().format("%Y%m%d-%H%M%S"));
+    let path = dir.join(file_name);
+
+    let mut content = String::new();
+    for entry in entries {
+        if entry.topic.is_empty() {
+            content.push_str(&format!("[{}] [{}] {}\n", entry.timestamp, entry.kind, entry.payload));
+        } else {
+            content.push_str(&format!(
+                "[{}] [{}] {} {}\n",
+                entry.timestamp, entry.kind, entry.topic, entry.payload
+            ));
+        }
+    }
+
+    std::fs::write(&path, content).map_err(|err| format!("写入日志文件失败: {err}"))?;
+    Ok(path)
 }
 
 fn default_client_id() -> String {

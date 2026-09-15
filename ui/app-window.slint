@@ -1,10 +1,15 @@
-import { Button, LineEdit, ListView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit, ListView, TextEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
 
 export struct LogEntry {
     time: string,
+    timestamp: string,
     kind: string,
     topic: string,
     payload: string,
+}
+
+export struct Subscription {
+    topic: string,
 }
 
 export component AppWindow inherits Window {
@@ -30,11 +35,16 @@ export component AppWindow inherits Window {
     in-out property <string> pub-topic: "mqttc/mvp/hello";
     in-out property <string> pub-payload: "hello from mqttc";
     in-out property <[LogEntry]> logs: [];
+    in-out property <[Subscription]> subscriptions: [];
+    in-out property <bool> auto-scroll: true;
+    in-out property <length> log-scroll-y: 0px;
 
     callback connect-requested();
     callback disconnect-requested();
     callback subscribe-requested();
+    callback unsubscribe-requested(int);
     callback publish-requested();
+    callback save-logs-requested();
     callback clear-logs-requested();
 
     VerticalBox {
@@ -194,6 +204,49 @@ export component AppWindow inherits Window {
                             clicked => { root.subscribe-requested(); }
                         }
                     }
+                    Text { text: "订阅列表"; color: #8b919a; font-size: 11px; }
+                    Rectangle {
+                        background: #12141a;
+                        border-radius: 6px;
+                        height: 92px;
+                        clip: true;
+                        ListView {
+                            for sub[index] in root.subscriptions: Rectangle {
+                                height: 28px;
+                                background: transparent;
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 6px;
+                                    spacing: 6px;
+                                    Text {
+                                        text: sub.topic;
+                                        color: #d7dde6;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                        font-family: "Consolas";
+                                        vertical-alignment: center;
+                                    }
+                                    cancel-area := Rectangle {
+                                        width: 22px;
+                                        height: 22px;
+                                        border-radius: 11px;
+                                        background: cancel-touch.has-hover ? #3a3f49 : transparent;
+                                        y: (parent.height - self.height) / 2;
+                                        Text {
+                                            text: "×";
+                                            color: #e85d5d;
+                                            font-size: 15px;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        cancel-touch := TouchArea {
+                                            clicked => { root.unsubscribe-requested(index); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -211,17 +264,20 @@ export component AppWindow inherits Window {
                             placeholder-text: "topic";
                             enabled: root.connected;
                         }
-                        LineEdit {
-                            text <=> root.pub-payload;
-                            placeholder-text: "payload";
-                            enabled: root.connected;
-                        }
                         Button {
                             width: 92px;
                             text: "发布";
                             enabled: root.connected;
                             clicked => { root.publish-requested(); }
                         }
+                    }
+                    TextEdit {
+                        text <=> root.pub-payload;
+                        placeholder-text: "payload（支持多行，回车换行）";
+                        enabled: root.connected;
+                        wrap: word-wrap;
+                        font-family: "Consolas";
+                        height: 84px;
                     }
                 }
             }
@@ -237,6 +293,14 @@ export component AppWindow inherits Window {
                 HorizontalBox {
                     Text { text: "日志"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
+                    CheckBox {
+                        text: "自动滚动";
+                        checked <=> root.auto-scroll;
+                    }
+                    Button {
+                        text: "保存日志";
+                        clicked => { root.save-logs-requested(); }
+                    }
                     Button {
                         text: "清空";
                         clicked => { root.clear-logs-requested(); }
@@ -247,11 +311,13 @@ export component AppWindow inherits Window {
                     border-radius: 8px;
                     vertical-stretch: 1;
                     clip: true;
-                    ListView {
+                    log-view := ListView {
+                        viewport-y <=> root.log-scroll-y;
                         for entry in root.logs: Rectangle {
-                            height: 30px;
+                            min-height: 30px;
                             background: #12141a;
                             HorizontalLayout {
+                                padding: 8px;
                                 padding-left: 10px;
                                 padding-right: 10px;
                                 spacing: 10px;
@@ -260,7 +326,7 @@ export component AppWindow inherits Window {
                                     color: #6d737c;
                                     width: 70px;
                                     font-family: "Consolas";
-                                    vertical-alignment: center;
+                                    vertical-alignment: top;
                                 }
                                 Text {
                                     text: entry.kind;
@@ -268,23 +334,23 @@ export component AppWindow inherits Window {
                                     width: 48px;
                                     font-weight: 700;
                                     font-family: "Consolas";
-                                    vertical-alignment: center;
+                                    vertical-alignment: top;
                                 }
                                 Text {
                                     text: entry.topic;
                                     color: #d7dde6;
-                                    width: 220px;
-                                    overflow: elide;
+                                    width: 200px;
+                                    wrap: word-wrap;
                                     font-family: "Consolas";
-                                    vertical-alignment: center;
+                                    vertical-alignment: top;
                                 }
                                 Text {
                                     text: entry.payload;
                                     color: #b8c0cc;
                                     horizontal-stretch: 1;
-                                    overflow: elide;
+                                    wrap: word-wrap;
                                     font-family: "Consolas";
-                                    vertical-alignment: center;
+                                    vertical-alignment: top;
                                 }
                             }
                         }
@@ -293,4 +359,10 @@ export component AppWindow inherits Window {
             }
         }
     }
+
+    states [
+        auto-scrolling when root.auto-scroll: {
+            log-scroll-y: min(0px, log-view.visible-height - log-view.viewport-height);
+        }
+    ]
 }

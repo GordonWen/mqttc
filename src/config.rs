@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 const CONFIG_FILE: &str = "mqttc.json";
+const LOG_DIR: &str = "logs";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -22,6 +23,8 @@ pub struct AppConfig {
     pub pub_topic: String,
     #[serde(default = "default_pub_payload")]
     pub pub_payload: String,
+    #[serde(default)]
+    pub subscriptions: Vec<String>,
 }
 
 fn default_host() -> String {
@@ -55,6 +58,7 @@ impl Default for AppConfig {
             sub_topic: default_sub_topic(),
             pub_topic: default_pub_topic(),
             pub_payload: default_pub_payload(),
+            subscriptions: Vec::new(),
         }
     }
 }
@@ -66,6 +70,15 @@ pub fn config_path() -> PathBuf {
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
     dir.join(CONFIG_FILE)
+}
+
+pub fn log_dir() -> PathBuf {
+    let dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    dir.join(LOG_DIR)
 }
 
 pub fn load() -> Result<Option<AppConfig>, String> {

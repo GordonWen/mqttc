@@ -139,6 +139,14 @@ impl MqttHandle {
             .map_err(|err| err.to_string())
     }
 
+    pub fn unsubscribe(&self, topic: &str) -> Result<(), String> {
+        let inner = self.inner.lock().expect("mqtt lock");
+        let client = inner.client.as_ref().ok_or_else(|| "未连接".to_string())?;
+        client
+            .unsubscribe(topic)
+            .map_err(|err| err.to_string())
+    }
+
     pub fn publish(&self, topic: &str, payload: &str) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
         let client = inner.client.as_ref().ok_or_else(|| "未连接".to_string())?;

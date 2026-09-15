@@ -1,6 +1,6 @@
 /target
-/dist
 mqttc.json
+logs/
 **/*.rs.bk
 .idea/
 .vscode/
