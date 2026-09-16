@@ -6,6 +6,7 @@ description = "A desktop MQTT debug client"
 license = "MIT"
 
 [dependencies]
+base64 = "0.22"
 chrono = "0.4"
 rumqttc = "0.24"
 serde = { version = "1", features = ["derive"] }

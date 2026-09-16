@@ -2,91 +2,103 @@
 
 ## UI 组件接口
 
-`AppWindow` 是唯一窗口组件，属性与回调如下。
+`AppWindow` 是唯一窗口组件，左侧为连接列表，右侧为当前连接的表单与日志。
+
+### 通用组件
+
+| 组件 | 说明 |
+|------|------|
+| Segmented | 轻量分段选择器，属性 `options`、`current-index`、`interactive`、`item-width`，回调 `activated(int)` |
+| ConnectionEntry | 左侧连接列表条目，字段 `id`、`name`、`status`、`status-color` |
+| Subscription | 订阅条目，字段 `topic`、`qos` |
+| LogEntry | 日志条目，字段 `time`、`timestamp`、`kind`、`topic`、`payload` |
 
 ### 属性
 
 | 属性 | 类型 | 含义 |
 |------|------|------|
-| host | string | Broker 主机，默认 `127.0.0.1` |
-| port | string | Broker 端口，默认 `1883` |
-| client-id | string | MQTT Client ID，空则自动生成 |
-| username | string | MQTT 用户名，空则匿名连接 |
-| password | string | MQTT 密码，仅在用户名非空时发送 |
-| status | string | 连接状态文案 |
-| status-color | color | 状态指示颜色 |
-| connected | bool | 是否已连接，控制按钮可用性 |
-| sub-topic | string | 待订阅 Topic |
-| pub-topic | string | 待发布 Topic |
-| pub-payload | string | 待发布文本，支持多行 |
-| logs | [LogEntry] | 日志列表 |
-| subscriptions | [Subscription] | 已订阅 Topic 列表 |
-| auto-scroll | bool | 日志自动滚动开关，默认 true |
+| active-connection-id | string | 当前选中连接的 id |
+| connections | [ConnectionEntry] | 左侧连接列表 |
+| connection-name | string | 当前连接名称 |
+| host / port / client-id | string | Broker 地址与 Client ID |
+| username / password | string | 可选认证信息，密码用密文输入 |
+| status / status-color | string / color | 当前连接状态文案与颜色 |
+| connected / connecting | bool | 控制按钮可用性 |
+| sub-topic / sub-qos | string / int | 待订阅 Topic 与 QoS（0/1/2） |
+| subscriptions | [Subscription] | 当前连接的订阅列表 |
+| pub-topic / pub-payload | string | 待发布 Topic 与内容（payload 支持多行） |
+| pub-qos / pub-retain | int / bool | 发布 QoS 与保留消息开关 |
+| pub-format | int | 发送格式索引：0 文本、1 JSON、2 Base64、3 Hex |
+| logs | [LogEntry] | 当前连接的日志列表 |
+| log-format | int | 接收显示格式索引，同上 |
+| auto-scroll | bool | 日志自动滚动开关 |
 | log-scroll-y | length | 日志滚动偏移，与日志列表双向绑定 |
 
 ### 回调
 
 | 回调 | 触发时机 |
 |------|----------|
-| connect-requested | 点击连接 |
-| disconnect-requested | 点击断开 |
+| new-connection-requested | 点击连接列表的 `+` |
+| select-connection-requested | 点击连接列表条目，参数为 id |
+| delete-connection-requested | 点击连接条目右侧 `×`，参数为 id |
+| connect-requested / disconnect-requested | 点击连接 / 断开 |
 | subscribe-requested | 点击订阅 |
-| unsubscribe-requested | 点击订阅列表中的取消按钮，参数为索引 |
+| unsubscribe-requested | 点击订阅条目右侧 `×`，参数为索引 |
 | publish-requested | 点击发布 |
-| save-logs-requested | 点击保存日志，导出为文件 |
-| clear-logs-requested | 点击清空日志 |
-
-### LogEntry
-
-| 字段 | 类型 | 含义 |
-|------|------|------|
-| time | string | 本地时间 `HH:MM:SS` |
-| timestamp | string | 完整时间戳 `YYYY-MM-DD HH:MM:SS`，用于导出 |
-| kind | string | `SYS` / `RECV` / `SEND` / `ERR` |
-| topic | string | 相关 Topic，系统事件可为空 |
-| payload | string | 消息内容或说明 |
-
-日志列表按条目高度自适应，Topic 与 Payload 均支持换行显示。
-
-### Subscription
-
-| 字段 | 类型 | 含义 |
-|------|------|------|
-| topic | string | 已订阅的 Topic |
-
-订阅成功后写入列表并持久化；取消时移出列表。连接成功后自动重新订阅列表内全部 Topic（Clean Session 下重连需恢复订阅）。
+| format-payload-requested | 点击美化，按 JSON 格式化 payload 编辑框 |
+| log-format-changed | 切换接收显示格式 |
+| save-logs-requested / clear-logs-requested | 保存 / 清空日志 |
 
 ## MQTT 会话命令
 
-应用内部命令（UI 到会话）：
+每个连接对应独立的 `MqttHandle`，应用内部命令：
 
 | 命令 | 参数 |
 |------|------|
 | Connect | host, port, client_id, username, password |
 | Disconnect | 无 |
-| Subscribe | topic |
+| Subscribe | topic, qos |
 | Unsubscribe | topic |
-| Publish | topic, payload |
+| Publish | topic, qos, retain, payload（字节） |
+
+`QoS` 由 `mqtt::qos_from_u8` 从 0/1/2 映射为 `AtMostOnce` / `AtLeastOnce` / `ExactlyOnce`。
 
 ## 配置文件
 
-路径：可执行文件所在目录下的 `mqttc.json`。
+路径：可执行文件所在目录下的 `mqttc.json`。保存多个连接与界面偏好。
 
 ```json
 {
-  "host": "127.0.0.1",
-  "port": "1883",
-  "client_id": "",
-  "username": "",
-  "password": "",
-  "sub_topic": "mqttc/mvp/#",
-  "pub_topic": "mqttc/mvp/hello",
-  "pub_payload": "hello from mqttc",
-  "subscriptions": []
+  "active_id": "c18f2a0e0",
+  "log_format": "text",
+  "auto_scroll": true,
+  "connections": [
+    {
+      "id": "c18f2a0e0",
+      "name": "本地 Broker",
+      "host": "127.0.0.1",
+      "port": "1883",
+      "client_id": "",
+      "username": "",
+      "password": "",
+      "sub_topic": "mqttc/mvp/#",
+      "sub_qos": 0,
+      "pub_topic": "mqttc/mvp/hello",
+      "pub_payload": "hello from mqttc",
+      "pub_qos": 0,
+      "pub_retain": false,
+      "pub_format": "text",
+      "subscriptions": [
+        { "topic": "mqttc/mvp/#", "qos": 1 }
+      ]
+    }
+  ]
 }
 ```
 
-启动时读取；连接、订阅、取消订阅、发布成功以及退出时写入。
+旧版扁平结构（仅有 `host`、`port`、`pub_topic` 等字段）会在加载时自动迁移为一条连接，`subscriptions` 中的纯字符串 Topic 迁移为 `{topic, qos: 0}`。
+
+写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、切换接收格式，以及退出时。
 
 ## 日志文件
 
@@ -100,14 +112,15 @@
 [YYYY-MM-DD HH:MM:SS] [KIND] TOPIC PAYLOAD
 ```
 
-系统事件无 Topic 时省略该字段。文本按 UTF-8 写入。
+系统事件无 Topic 时省略该字段。Payload 按当前接收显示格式渲染（JSON 会美化，Base64/Hex 会编码），文本按 UTF-8 写入。
 
-## Broker 约定（MVP）
+## Broker 约定
 
 - 传输：TCP
 - 协议：MQTT 3.1.1
 - Clean Session：true
 - Keep Alive：30 秒
 - 连接超时：10 秒
-- 订阅与发布 QoS：0
-- Payload：按 UTF-8 有损显示
+- 订阅与发布 QoS：可选 0/1/2，默认 0
+- 发布支持 Retain 保留消息
+- 重连后按订阅列表自动重新订阅

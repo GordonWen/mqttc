@@ -22,10 +22,10 @@ cargo run
 
 ## 项目结构说明
 
-- `ui/app-window.slint`：界面布局与数据绑定
-- `src/main.rs`：窗口创建与回调
-- `src/mqtt.rs`：MQTT 连接与事件
-- `src/config.rs`：同目录 `mqttc.json` 的读写
+- `ui/app-window.slint`：界面布局与数据绑定，含 `Segmented` 分段选择器组件
+- `src/main.rs`：窗口创建与回调、多连接运行时状态、Payload 编解码
+- `src/mqtt.rs`：单连接 MQTT 会话与事件
+- `src/config.rs`：多连接配置 `mqttc.json` 的读写与旧格式迁移
 - `build.rs`：编译 `.slint` 文件
 
 ## 开发规范
@@ -34,11 +34,21 @@ cargo run
 - UI 文案使用中文
 - 不在代码中硬编码密钥；用户名密码由界面输入并写入本地配置
 - 提交信息使用 `feat` / `fix` / `chore` 前缀
+- 新增的纯逻辑（编解码、配置迁移）需附单元测试
+
+## 测试
+
+```bash
+cargo test
+```
+
+覆盖 Payload 编解码（文本 / JSON / Base64 / Hex）、格式索引与键的往返、以及配置的序列化与旧格式迁移。
 
 ## 常见任务
 
 - 改界面：编辑 `ui/app-window.slint` 后 `cargo build`
 - 改协议行为：编辑 `src/mqtt.rs`
+- 改连接模型或持久化：编辑 `src/config.rs` 与 `src/main.rs` 的 `AppState`
 - 增加日志种类：扩展 `LogEntry.kind` 并在 UI 着色
 
 ## 构建与发布

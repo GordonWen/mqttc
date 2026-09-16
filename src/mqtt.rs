@@ -7,7 +7,7 @@ use std::time::Duration;
 pub enum UiEvent {
     Connected,
     Disconnected { reason: String },
-    Recv { topic: String, payload: String },
+    Recv { topic: String, payload: Vec<u8> },
     Error { message: String },
 }
 
@@ -98,10 +98,9 @@ impl MqttHandle {
                         }
                     }
                     Ok(Event::Incoming(Incoming::Publish(packet))) => {
-                        let payload = String::from_utf8_lossy(&packet.payload).into_owned();
                         on_event(UiEvent::Recv {
                             topic: packet.topic,
-                            payload,
+                            payload: packet.payload.to_vec(),
                         });
                     }
                     Err(err) => {
@@ -131,11 +130,11 @@ impl MqttHandle {
         }
     }
 
-    pub fn subscribe(&self, topic: &str) -> Result<(), String> {
+    pub fn subscribe(&self, topic: &str, qos: QoS) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
         let client = inner.client.as_ref().ok_or_else(|| "未连接".to_string())?;
         client
-            .subscribe(topic, QoS::AtMostOnce)
+            .subscribe(topic, qos)
             .map_err(|err| err.to_string())
     }
 
@@ -147,11 +146,25 @@ impl MqttHandle {
             .map_err(|err| err.to_string())
     }
 
-    pub fn publish(&self, topic: &str, payload: &str) -> Result<(), String> {
+    pub fn publish(
+        &self,
+        topic: &str,
+        qos: QoS,
+        retain: bool,
+        payload: Vec<u8>,
+    ) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
         let client = inner.client.as_ref().ok_or_else(|| "未连接".to_string())?;
         client
-            .publish(topic, QoS::AtMostOnce, false, payload.as_bytes())
+            .publish(topic, qos, retain, payload)
             .map_err(|err| err.to_string())
+    }
+}
+
+pub fn qos_from_u8(qos: u8) -> QoS {
+    match qos {
+        1 => QoS::AtLeastOnce,
+        2 => QoS::ExactlyOnce,
+        _ => QoS::AtMostOnce,
     }
 }
