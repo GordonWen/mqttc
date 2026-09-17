@@ -27,14 +27,14 @@ mqttc/
 
 ## 核心模块/组件
 
-- **UI 层** (`ui/app-window.slint`): 左侧连接列表、连接表单、订阅/发布表单、日志列表
-- **应用入口** (`src/main.rs`): 窗口创建、回调绑定、多连接运行时与状态刷新、Payload 编解码
+- **UI 层** (`ui/app-window.slint`): 左侧连接列表、连接/高级参数、订阅/发布/定时发布、聊天气泡日志
+- **应用入口** (`src/main.rs`): 窗口创建、回调绑定、多连接运行时与状态刷新、Payload 编解码、日志筛选、定时发布
 - **配置层** (`src/config.rs`): 多连接配置与界面偏好的读写、旧配置迁移
-- **MQTT 会话** (`src/mqtt.rs`): 单连接生命周期、订阅、取消订阅、发布、事件翻译
+- **MQTT 会话** (`src/mqtt.rs`): 单连接生命周期、Keep Alive / Clean Session / 超时 / Last Will、订阅、取消订阅、发布、事件翻译
 
 ## 运行时状态
 
-`AppState` 持有 `AppConfig`（持久化配置）与 `runtimes: HashMap<连接 id, ConnRuntime>`。每个 `ConnRuntime` 拥有独立的 `MqttHandle`、日志缓冲 `Vec<LogData>` 与连接状态，因此多个连接可同时在线、各自收发。
+`AppState` 持有 `AppConfig`（持久化配置）与 `runtimes: HashMap<连接 id, ConnRuntime>`。每个 `ConnRuntime` 拥有独立的 `MqttHandle`、日志缓冲 `Vec<LogData>`、连接状态与定时发布代数，因此多个连接可同时在线、各自收发。定时发布按连接配置循环发送，切换界面查看其它连接时后台仍继续。
 
 界面同一时刻只显示当前选中连接：`active_id` 指向的连接。后台事件到达时按连接 id 写入对应 runtime，命中当前连接才刷新界面。日志缓冲保留原始字节，切换接收格式时由原始字节重新渲染。
 
@@ -63,11 +63,11 @@ graph TD
 
 1. 启动：加载 `mqttc.json`，旧格式迁移为一条连接；为空则创建默认连接；为每条连接建立 `ConnRuntime`。
 2. 新建 / 切换 / 删除连接：切换前先把表单写回配置，保证未提交的编辑不丢失；删除时断开该连接的会话。
-3. 用户点击连接：按该连接的 host/port/client-id/认证信息创建 `Client` 与 `Connection`，启动轮询线程。
+3. 用户点击连接：按该连接的 host/port/client-id/认证/Keep Alive/Clean Session/超时/Last Will 创建 `Client` 与 `Connection`，启动轮询线程。Client ID 为空时自动生成。
 4. `ConnAck` 到达后标记为已连接，并按该连接的订阅列表自动重新订阅（Clean Session 下重连需要恢复订阅）。
-5. 订阅/发布在主线程调用 `Client` 方法；发布前按所选格式把文本编码为字节。
-6. 收到 `Publish` 后按连接 id 写入日志缓冲；命中当前连接则重新渲染日志列表。
-7. 断开时调用 `disconnect`，轮询线程退出。
+5. 订阅/发布在主线程调用 `Client` 方法；发布前按所选格式把文本编码为字节。定时发布用独立线程按间隔回调主线程发送。
+6. 收到 `Publish` 后按连接 id 写入日志缓冲；命中当前连接则按筛选条件重新渲染聊天气泡。
+7. 断开时调用 `disconnect`，停止该连接的定时发布，轮询线程退出。
 
 ## 设计决策
 

@@ -6,13 +6,16 @@ mod mqtt;
 use base64::Engine;
 use chrono::Local;
 use config::{AppConfig, ConnectionConfig, SubscriptionConfig};
-use mqtt::{qos_from_u8, MqttHandle, UiEvent};
+use mqtt::{qos_from_u8, ConnectParams, MqttHandle, UiEvent};
 use slint::{ComponentHandle, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 slint::include_modules!();
 
@@ -106,6 +109,8 @@ struct ConnRuntime {
     mqtt: MqttHandle,
     logs: Vec<LogData>,
     status: ConnStatus,
+    timed_generation: Arc<AtomicU64>,
+    timed_running: bool,
 }
 
 impl ConnRuntime {
@@ -114,6 +119,8 @@ impl ConnRuntime {
             mqtt: MqttHandle::new(),
             logs: Vec::new(),
             status: ConnStatus::Disconnected,
+            timed_generation: Arc::new(AtomicU64::new(0)),
+            timed_running: false,
         }
     }
 }
@@ -160,6 +167,13 @@ impl AppState {
 
     fn is_connected(&self, id: &str) -> bool {
         self.status_of(id) == ConnStatus::Connected
+    }
+
+    fn stop_timed(&mut self, id: &str) {
+        if let Some(runtime) = self.runtimes.get_mut(id) {
+            runtime.timed_generation.fetch_add(1, Ordering::Relaxed);
+            runtime.timed_running = false;
+        }
     }
 }
 
@@ -277,6 +291,7 @@ fn register_callbacks(ui: &AppWindow) {
             let Some(ui) = ui_weak.upgrade() else { return };
             let id = id.to_string();
             with_state(|st| {
+                st.stop_timed(&id);
                 if let Some(runtime) = st.runtimes.remove(&id) {
                     runtime.mqtt.disconnect();
                 }
@@ -325,6 +340,7 @@ fn register_callbacks(ui: &AppWindow) {
                 };
                 if cfg.client_id.trim().is_empty() {
                     cfg.client_id = default_client_id();
+                    ui.set_client_id(cfg.client_id.clone().into());
                 }
                 cfg.host = host.clone();
                 cfg.username = cfg.username.trim().to_string();
@@ -336,35 +352,58 @@ fn register_callbacks(ui: &AppWindow) {
                     format!("用户 {}", cfg.username)
                 };
                 let id = cfg.id.clone();
+                st.stop_timed(&id);
                 st.runtime_mut(&id).status = ConnStatus::Connecting;
+                let will_hint = if cfg.will_topic.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("，遗嘱 {}", cfg.will_topic.trim())
+                };
                 push_log(
                     &ui,
                     st,
                     "SYS",
                     "",
-                    format!("正在连接 {}:{} ({}, {})", cfg.host, cfg.port, cfg.client_id, auth_hint)
-                        .into_bytes(),
+                    format!(
+                        "正在连接 {}:{} ({}, {}，Keep Alive {}s，超时 {}s{})",
+                        cfg.host,
+                        cfg.port,
+                        cfg.client_id,
+                        auth_hint,
+                        cfg.keep_alive,
+                        cfg.connect_timeout,
+                        will_hint
+                    )
+                    .into_bytes(),
                 );
 
+                let will_payload = cfg.will_payload.as_bytes().to_vec();
+                let params = ConnectParams {
+                    host: cfg.host.clone(),
+                    port,
+                    client_id: cfg.client_id.clone(),
+                    username: cfg.username.clone(),
+                    password: cfg.password.clone(),
+                    keep_alive: cfg.keep_alive,
+                    clean_session: cfg.clean_session,
+                    connect_timeout: cfg.connect_timeout,
+                    will_topic: cfg.will_topic.clone(),
+                    will_payload,
+                    will_qos: cfg.will_qos,
+                    will_retain: cfg.will_retain,
+                };
                 let ui_weak2 = ui.as_weak();
                 let conn_id = id.clone();
                 let mqtt = st.runtime_mut(&id).mqtt.clone();
-                mqtt.connect(
-                    cfg.host.clone(),
-                    port,
-                    cfg.client_id.clone(),
-                    cfg.username.clone(),
-                    cfg.password.clone(),
-                    move |event| {
-                        let ui_weak3 = ui_weak2.clone();
-                        let conn_id = conn_id.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak3.upgrade() {
-                                with_state(|st| handle_event(&ui, st, &conn_id, event));
-                            }
-                        });
-                    },
-                );
+                mqtt.connect(params, move |event| {
+                    let ui_weak3 = ui_weak2.clone();
+                    let conn_id = conn_id.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak3.upgrade() {
+                            with_state(|st| handle_event(&ui, st, &conn_id, event));
+                        }
+                    });
+                });
 
                 refresh_status(&ui, st);
                 refresh_connections(&ui, st);
@@ -380,8 +419,10 @@ fn register_callbacks(ui: &AppWindow) {
             with_state(|st| {
                 sync_form(&ui, st);
                 let Some(id) = st.active_id() else { return };
+                st.stop_timed(&id);
                 st.runtime_mut(&id).mqtt.disconnect();
                 st.runtime_mut(&id).status = ConnStatus::Disconnected;
+                ui.set_timed_running(false);
                 push_log(&ui, st, "SYS", "", "已断开连接".as_bytes().to_vec());
                 refresh_status(&ui, st);
                 refresh_connections(&ui, st);
@@ -474,37 +515,116 @@ fn register_callbacks(ui: &AppWindow) {
             let Some(ui) = ui_weak.upgrade() else { return };
             with_state(|st| {
                 sync_form(&ui, st);
+                let _ = publish_from_form(&ui, st, true);
+            });
+        }
+    });
+
+    ui.on_generate_client_id_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            let id = default_client_id();
+            ui.set_client_id(id.clone().into());
+            with_state(|st| {
+                if let Some(idx) = st.active_index() {
+                    st.config.connections[idx].client_id = id;
+                    persist(st);
+                }
+            });
+        }
+    });
+
+    ui.on_advanced_toggled({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_prefs(&ui, st);
+                persist(st);
+            });
+        }
+    });
+
+    ui.on_timed_toggle_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
                 let Some(id) = st.active_id() else { return };
+                if st.runtime_mut(&id).timed_running {
+                    st.stop_timed(&id);
+                    ui.set_timed_running(false);
+                    push_log(&ui, st, "SYS", "", "已停止定时发布".as_bytes().to_vec());
+                    persist(st);
+                    return;
+                }
                 if !st.is_connected(&id) {
                     push_log(&ui, st, "ERR", "", "请先连接 Broker".as_bytes().to_vec());
                     return;
                 }
-                let topic = ui.get_pub_topic().trim().to_string();
-                if topic.is_empty() {
-                    push_log(&ui, st, "ERR", "", "Topic 为空".as_bytes().to_vec());
-                    return;
-                }
-                let format = PayloadFormat::from_index(ui.get_pub_format());
-                let payload = match encode_payload(&ui.get_pub_payload(), format) {
-                    Ok(bytes) => bytes,
+                let interval = match parse_timed_interval(&ui.get_timed_interval()) {
+                    Ok(secs) => secs,
                     Err(err) => {
-                        push_log(&ui, st, "ERR", &topic, err.into_bytes());
+                        push_log(&ui, st, "ERR", "", err.into_bytes());
                         return;
                     }
                 };
-                let qos = ui.get_pub_qos().clamp(0, 2) as u8;
-                let retain = ui.get_pub_retain();
-                let mqtt = st.runtime_mut(&id).mqtt.clone();
-                match mqtt.publish(&topic, qos_from_u8(qos), retain, payload.clone()) {
-                    Ok(()) => {
-                        push_log(&ui, st, "SEND", &topic, payload);
-                        if retain {
-                            push_log(&ui, st, "SYS", &topic, "已发布，Retain 保留消息".as_bytes().to_vec());
-                        }
-                        persist(st);
-                    }
-                    Err(err) => push_log(&ui, st, "ERR", &topic, err.into_bytes()),
+                if let Some(idx) = st.active_index() {
+                    st.config.connections[idx].timed_interval = interval;
                 }
+                if publish_from_connection(&ui, st, &id).is_err() {
+                    return;
+                }
+                let generation = {
+                    let runtime = st.runtime_mut(&id);
+                    let next = runtime.timed_generation.load(Ordering::Relaxed) + 1;
+                    runtime.timed_generation.store(next, Ordering::Relaxed);
+                    runtime.timed_running = true;
+                    next
+                };
+                ui.set_timed_running(true);
+                push_log(
+                    &ui,
+                    st,
+                    "SYS",
+                    "",
+                    format!("已启动定时发布，每 {interval} 秒").into_bytes(),
+                );
+                persist(st);
+
+                let ui_weak2 = ui.as_weak();
+                let conn_id = id.clone();
+                let gen = st.runtime_mut(&id).timed_generation.clone();
+                thread::spawn(move || loop {
+                    thread::sleep(Duration::from_secs(interval as u64));
+                    if gen.load(Ordering::Relaxed) != generation {
+                        break;
+                    }
+                    let ui_weak3 = ui_weak2.clone();
+                    let conn_id = conn_id.clone();
+                    let gen = gen.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if gen.load(Ordering::Relaxed) != generation {
+                            return;
+                        }
+                        let Some(ui) = ui_weak3.upgrade() else { return };
+                        with_state(|st| {
+                            if !st.is_connected(&conn_id) {
+                                st.stop_timed(&conn_id);
+                                if st.config.active_id == conn_id {
+                                    ui.set_timed_running(false);
+                                }
+                                return;
+                            }
+                            if st.config.active_id == conn_id {
+                                sync_form(&ui, st);
+                            }
+                            let _ = publish_from_connection(&ui, st, &conn_id);
+                        });
+                    });
+                });
             });
         }
     });
@@ -532,6 +652,17 @@ fn register_callbacks(ui: &AppWindow) {
                 sync_prefs(&ui, st);
                 refresh_logs(&ui, st);
                 persist(st);
+            });
+        }
+    });
+
+    ui.on_log_filter_changed({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_prefs(&ui, st);
+                refresh_logs(&ui, st);
             });
         }
     });
@@ -583,6 +714,15 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
             resubscribe_all(ui, st, conn_id);
         }
         UiEvent::Disconnected { reason } => {
+            let was_timed = st
+                .runtimes
+                .get(conn_id)
+                .map(|rt| rt.timed_running)
+                .unwrap_or(false);
+            st.stop_timed(conn_id);
+            if st.config.active_id == conn_id {
+                ui.set_timed_running(false);
+            }
             let previous = st.runtime_mut(conn_id).status;
             st.runtime_mut(conn_id).status = ConnStatus::Disconnected;
             if previous != ConnStatus::Disconnected && !reason.is_empty() {
@@ -593,6 +733,16 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
                     "SYS",
                     "",
                     format!("连接结束: {reason}").into_bytes(),
+                );
+            }
+            if was_timed {
+                push_log_for(
+                    ui,
+                    st,
+                    conn_id,
+                    "SYS",
+                    "",
+                    "连接断开，已停止定时发布".as_bytes().to_vec(),
                 );
             }
         }
@@ -671,6 +821,9 @@ fn push_log_for(
 fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_log_format(PayloadFormat::from_key(&st.config.log_format).to_index());
     ui.set_auto_scroll(st.config.auto_scroll);
+    ui.set_show_advanced(st.config.show_advanced);
+    ui.set_log_filter(st.config.log_filter.clone().into());
+    ui.set_log_kind_filter(st.config.log_kind_filter.clamp(0, 4));
 }
 
 fn refresh_all(ui: &AppWindow, st: &mut AppState) {
@@ -709,6 +862,20 @@ fn refresh_active_form(ui: &AppWindow, st: &AppState) {
     ui.set_client_id(cfg.client_id.clone().into());
     ui.set_username(cfg.username.clone().into());
     ui.set_password(cfg.password.clone().into());
+    ui.set_keep_alive(cfg.keep_alive.to_string().into());
+    ui.set_clean_session(cfg.clean_session);
+    ui.set_connect_timeout(cfg.connect_timeout.to_string().into());
+    ui.set_will_topic(cfg.will_topic.clone().into());
+    ui.set_will_payload(cfg.will_payload.clone().into());
+    ui.set_will_qos(cfg.will_qos.min(2) as i32);
+    ui.set_will_retain(cfg.will_retain);
+    ui.set_timed_interval(cfg.timed_interval.max(1).to_string().into());
+    ui.set_timed_running(
+        st.runtimes
+            .get(&cfg.id)
+            .map(|rt| rt.timed_running)
+            .unwrap_or(false),
+    );
     ui.set_sub_topic(cfg.sub_topic.clone().into());
     ui.set_sub_qos(cfg.sub_qos.min(2) as i32);
     ui.set_pub_topic(cfg.pub_topic.clone().into());
@@ -745,12 +912,15 @@ fn refresh_subscriptions(ui: &AppWindow, st: &AppState) {
 
 fn refresh_logs(ui: &AppWindow, st: &AppState) {
     let format = PayloadFormat::from_index(ui.get_log_format());
+    let filter = ui.get_log_filter().trim().to_lowercase();
+    let kind_filter = ui.get_log_kind_filter();
     let entries: Vec<LogEntry> = st
         .active_id()
         .and_then(|id| st.runtimes.get(&id))
         .map(|runtime| runtime.logs.clone())
         .unwrap_or_default()
         .iter()
+        .filter(|log| log_matches(log, format, &filter, kind_filter))
         .map(|log| render_log(log, format))
         .collect();
     ui.set_logs(Rc::new(VecModel::from(entries)).into());
@@ -765,6 +935,16 @@ fn sync_form(ui: &AppWindow, st: &mut AppState) {
     cfg.client_id = ui.get_client_id().to_string();
     cfg.username = ui.get_username().to_string();
     cfg.password = ui.get_password().to_string();
+    cfg.keep_alive = parse_u16_clamped(&ui.get_keep_alive(), 1, 65535, 60);
+    cfg.clean_session = ui.get_clean_session();
+    cfg.connect_timeout = parse_u16_clamped(&ui.get_connect_timeout(), 1, 300, 10);
+    cfg.will_topic = ui.get_will_topic().to_string();
+    cfg.will_payload = ui.get_will_payload().to_string();
+    cfg.will_qos = ui.get_will_qos().clamp(0, 2) as u8;
+    cfg.will_retain = ui.get_will_retain();
+    if let Ok(interval) = parse_timed_interval(&ui.get_timed_interval()) {
+        cfg.timed_interval = interval;
+    }
     cfg.sub_topic = ui.get_sub_topic().to_string();
     cfg.sub_qos = ui.get_sub_qos().clamp(0, 2) as u8;
     cfg.pub_topic = ui.get_pub_topic().to_string();
@@ -784,6 +964,135 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
         .to_key()
         .to_string();
     st.config.auto_scroll = ui.get_auto_scroll();
+    st.config.show_advanced = ui.get_show_advanced();
+    st.config.log_filter = ui.get_log_filter().to_string();
+    st.config.log_kind_filter = ui.get_log_kind_filter().clamp(0, 4);
+}
+
+fn publish_from_form(ui: &AppWindow, st: &mut AppState, persist_on_ok: bool) -> Result<(), ()> {
+    let Some(id) = st.active_id() else {
+        return Err(());
+    };
+    publish_from_connection_inner(ui, st, &id, persist_on_ok, true)
+}
+
+fn publish_from_connection(ui: &AppWindow, st: &mut AppState, conn_id: &str) -> Result<(), ()> {
+    publish_from_connection_inner(ui, st, conn_id, false, false)
+}
+
+fn publish_from_connection_inner(
+    ui: &AppWindow,
+    st: &mut AppState,
+    conn_id: &str,
+    persist_on_ok: bool,
+    from_form: bool,
+) -> Result<(), ()> {
+    if !st.is_connected(conn_id) {
+        push_log_for(ui, st, conn_id, "ERR", "", "请先连接 Broker".as_bytes().to_vec());
+        return Err(());
+    }
+    let Some(idx) = st
+        .config
+        .connections
+        .iter()
+        .position(|conn| conn.id == conn_id)
+    else {
+        return Err(());
+    };
+    let cfg = &st.config.connections[idx];
+    let topic = if from_form {
+        ui.get_pub_topic().trim().to_string()
+    } else {
+        cfg.pub_topic.trim().to_string()
+    };
+    if topic.is_empty() {
+        push_log_for(ui, st, conn_id, "ERR", "", "Topic 为空".as_bytes().to_vec());
+        return Err(());
+    }
+    let format = if from_form {
+        PayloadFormat::from_index(ui.get_pub_format())
+    } else {
+        PayloadFormat::from_key(&cfg.pub_format)
+    };
+    let source = if from_form {
+        ui.get_pub_payload().to_string()
+    } else {
+        cfg.pub_payload.clone()
+    };
+    let payload = match encode_payload(&source, format) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            push_log_for(ui, st, conn_id, "ERR", &topic, err.into_bytes());
+            return Err(());
+        }
+    };
+    let qos = if from_form {
+        ui.get_pub_qos().clamp(0, 2) as u8
+    } else {
+        cfg.pub_qos.min(2)
+    };
+    let retain = if from_form {
+        ui.get_pub_retain()
+    } else {
+        cfg.pub_retain
+    };
+    let mqtt = st.runtime_mut(conn_id).mqtt.clone();
+    match mqtt.publish(&topic, qos_from_u8(qos), retain, payload.clone()) {
+        Ok(()) => {
+            push_log_for(ui, st, conn_id, "SEND", &topic, payload);
+            if persist_on_ok {
+                persist(st);
+            }
+            Ok(())
+        }
+        Err(err) => {
+            push_log_for(ui, st, conn_id, "ERR", &topic, err.into_bytes());
+            Err(())
+        }
+    }
+}
+
+fn log_matches(log: &LogData, format: PayloadFormat, filter: &str, kind_filter: i32) -> bool {
+    if !kind_matches(&log.kind, kind_filter) {
+        return false;
+    }
+    if filter.is_empty() {
+        return true;
+    }
+    let payload = log_payload_text(log, format).to_lowercase();
+    log.topic.to_lowercase().contains(filter)
+        || payload.contains(filter)
+        || log.kind.to_lowercase().contains(filter)
+}
+
+fn kind_matches(kind: &str, filter: i32) -> bool {
+    match filter {
+        1 => kind == "RECV",
+        2 => kind == "SEND",
+        3 => kind == "SYS",
+        4 => kind == "ERR",
+        _ => true,
+    }
+}
+
+fn parse_u16_clamped(text: &str, min: u16, max: u16, fallback: u16) -> u16 {
+    text.trim()
+        .parse::<u16>()
+        .ok()
+        .filter(|v| *v >= min && *v <= max)
+        .unwrap_or(fallback)
+}
+
+fn parse_timed_interval(text: &str) -> Result<u32, String> {
+    let value = text
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| "定时间隔无效，范围为 1-3600 秒".to_string())?;
+    if (1..=3600).contains(&value) {
+        Ok(value)
+    } else {
+        Err("定时间隔无效，范围为 1-3600 秒".to_string())
+    }
 }
 
 fn persist(st: &AppState) {
@@ -979,5 +1288,46 @@ mod tests {
             assert_eq!(PayloadFormat::from_index(format.to_index()), format);
             assert_eq!(PayloadFormat::from_key(format.to_key()), format);
         }
+    }
+
+    fn sample_log(kind: &str, topic: &str, payload: &str) -> LogData {
+        LogData {
+            time: "12:00:00".to_string(),
+            timestamp: "2026-09-17 12:00:00".to_string(),
+            kind: kind.to_string(),
+            topic: topic.to_string(),
+            payload: payload.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn log_filter_matches_topic_and_payload() {
+        let log = sample_log("RECV", "sensors/temp", "hello world");
+        assert!(log_matches(&log, PayloadFormat::Text, "temp", 0));
+        assert!(log_matches(&log, PayloadFormat::Text, "hello", 0));
+        assert!(!log_matches(&log, PayloadFormat::Text, "missing", 0));
+        assert!(!log_matches(&log, PayloadFormat::Text, "hello", 2));
+        assert!(log_matches(&log, PayloadFormat::Text, "hello", 1));
+    }
+
+    #[test]
+    fn kind_filter_selects_send_recv_sys_err() {
+        assert!(kind_matches("RECV", 0));
+        assert!(kind_matches("RECV", 1));
+        assert!(!kind_matches("SEND", 1));
+        assert!(kind_matches("SEND", 2));
+        assert!(kind_matches("SYS", 3));
+        assert!(kind_matches("ERR", 4));
+        assert!(!kind_matches("SYS", 4));
+    }
+
+    #[test]
+    fn timed_interval_rejects_out_of_range() {
+        assert_eq!(parse_timed_interval("5").unwrap(), 5);
+        assert!(parse_timed_interval("0").is_err());
+        assert!(parse_timed_interval("3601").is_err());
+        assert!(parse_timed_interval("abc").is_err());
+        assert_eq!(parse_u16_clamped("0", 1, 300, 10), 10);
+        assert_eq!(parse_u16_clamped("8", 1, 300, 10), 8);
     }
 }

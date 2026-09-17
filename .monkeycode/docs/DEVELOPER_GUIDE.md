@@ -22,9 +22,9 @@ cargo run
 
 ## 项目结构说明
 
-- `ui/app-window.slint`：界面布局与数据绑定，含 `Segmented` 分段选择器组件
-- `src/main.rs`：窗口创建与回调、多连接运行时状态、Payload 编解码
-- `src/mqtt.rs`：单连接 MQTT 会话与事件
+- `ui/app-window.slint`：界面布局与数据绑定，含 `Segmented` 分段选择器、高级参数、聊天气泡日志
+- `src/main.rs`：窗口创建与回调、多连接运行时状态、Payload 编解码、日志筛选、定时发布
+- `src/mqtt.rs`：单连接 MQTT 会话与事件，含 Keep Alive / Clean Session / 超时 / Last Will
 - `src/config.rs`：多连接配置 `mqttc.json` 的读写与旧格式迁移
 - `build.rs`：编译 `.slint` 文件
 
@@ -42,7 +42,7 @@ cargo run
 cargo test
 ```
 
-覆盖 Payload 编解码（文本 / JSON / Base64 / Hex）、格式索引与键的往返、以及配置的序列化与旧格式迁移。
+覆盖 Payload 编解码（文本 / JSON / Base64 / Hex）、格式索引与键的往返、日志筛选、定时间隔校验、以及配置的序列化与旧格式迁移。
 
 ## 常见任务
 

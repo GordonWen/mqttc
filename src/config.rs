@@ -47,6 +47,22 @@ pub struct ConnectionConfig {
     pub pub_retain: bool,
     #[serde(default = "default_payload_format")]
     pub pub_format: String,
+    #[serde(default = "default_keep_alive")]
+    pub keep_alive: u16,
+    #[serde(default = "default_clean_session")]
+    pub clean_session: bool,
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout: u16,
+    #[serde(default)]
+    pub will_topic: String,
+    #[serde(default)]
+    pub will_payload: String,
+    #[serde(default)]
+    pub will_qos: u8,
+    #[serde(default)]
+    pub will_retain: bool,
+    #[serde(default = "default_timed_interval")]
+    pub timed_interval: u32,
     #[serde(default)]
     pub subscriptions: Vec<SubscriptionConfig>,
 }
@@ -61,6 +77,12 @@ pub struct AppConfig {
     pub log_format: String,
     #[serde(default = "default_true")]
     pub auto_scroll: bool,
+    #[serde(default)]
+    pub show_advanced: bool,
+    #[serde(default)]
+    pub log_filter: String,
+    #[serde(default)]
+    pub log_kind_filter: i32,
 }
 
 fn default_host() -> String {
@@ -91,6 +113,22 @@ fn default_true() -> bool {
     true
 }
 
+fn default_keep_alive() -> u16 {
+    60
+}
+
+fn default_clean_session() -> bool {
+    true
+}
+
+fn default_connect_timeout() -> u16 {
+    10
+}
+
+fn default_timed_interval() -> u32 {
+    5
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -98,6 +136,9 @@ impl Default for AppConfig {
             connections: Vec::new(),
             log_format: default_payload_format(),
             auto_scroll: true,
+            show_advanced: false,
+            log_filter: String::new(),
+            log_kind_filter: 0,
         }
     }
 }
@@ -119,6 +160,14 @@ impl ConnectionConfig {
             pub_qos: 0,
             pub_retain: false,
             pub_format: default_payload_format(),
+            keep_alive: default_keep_alive(),
+            clean_session: default_clean_session(),
+            connect_timeout: default_connect_timeout(),
+            will_topic: String::new(),
+            will_payload: String::new(),
+            will_qos: 0,
+            will_retain: false,
+            timed_interval: default_timed_interval(),
             subscriptions: Vec::new(),
         }
     }
@@ -269,6 +318,14 @@ mod tests {
         conn.pub_qos = 1;
         conn.pub_retain = true;
         conn.pub_format = "hex".to_string();
+        conn.keep_alive = 45;
+        conn.clean_session = false;
+        conn.connect_timeout = 8;
+        conn.will_topic = "status/lwt".to_string();
+        conn.will_payload = "offline".to_string();
+        conn.will_qos = 1;
+        conn.will_retain = true;
+        conn.timed_interval = 12;
         conn.subscriptions.push(SubscriptionConfig {
             topic: "a/#".to_string(),
             qos: 2,
@@ -286,6 +343,14 @@ mod tests {
         assert_eq!(back.connections[0].pub_qos, 1);
         assert!(back.connections[0].pub_retain);
         assert_eq!(back.connections[0].pub_format, "hex");
+        assert_eq!(back.connections[0].keep_alive, 45);
+        assert!(!back.connections[0].clean_session);
+        assert_eq!(back.connections[0].connect_timeout, 8);
+        assert_eq!(back.connections[0].will_topic, "status/lwt");
+        assert_eq!(back.connections[0].will_payload, "offline");
+        assert_eq!(back.connections[0].will_qos, 1);
+        assert!(back.connections[0].will_retain);
+        assert_eq!(back.connections[0].timed_interval, 12);
         assert_eq!(back.connections[0].subscriptions[0].qos, 2);
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);

@@ -1,7 +1,25 @@
-use rumqttc::{Client, ConnectReturnCode, Event, Incoming, MqttOptions, NetworkOptions, QoS};
+use rumqttc::{
+    Client, ConnectReturnCode, Event, Incoming, LastWill, MqttOptions, NetworkOptions, QoS,
+};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+#[derive(Clone, Debug)]
+pub struct ConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub client_id: String,
+    pub username: String,
+    pub password: String,
+    pub keep_alive: u16,
+    pub clean_session: bool,
+    pub connect_timeout: u16,
+    pub will_topic: String,
+    pub will_payload: Vec<u8>,
+    pub will_qos: u8,
+    pub will_retain: bool,
+}
 
 #[derive(Clone, Debug)]
 pub enum UiEvent {
@@ -42,15 +60,8 @@ impl MqttHandle {
         }
     }
 
-    pub fn connect<F>(
-        &self,
-        host: String,
-        port: u16,
-        client_id: String,
-        username: String,
-        password: String,
-        on_event: F,
-    ) where
+    pub fn connect<F>(&self, params: ConnectParams, on_event: F)
+    where
         F: Fn(UiEvent) + Send + 'static,
     {
         let mut inner = self.inner.lock().expect("mqtt lock");
@@ -60,15 +71,24 @@ impl MqttHandle {
         inner.generation += 1;
         let generation = inner.generation;
 
-        let mut opts = MqttOptions::new(client_id, host, port);
-        opts.set_keep_alive(Duration::from_secs(30));
-        opts.set_clean_session(true);
-        if !username.is_empty() {
-            opts.set_credentials(username, password);
+        let mut opts = MqttOptions::new(params.client_id, params.host, params.port);
+        opts.set_keep_alive(Duration::from_secs(params.keep_alive.max(1) as u64));
+        opts.set_clean_session(params.clean_session);
+        if !params.username.is_empty() {
+            opts.set_credentials(params.username, params.password);
+        }
+        let will_topic = params.will_topic.trim();
+        if !will_topic.is_empty() {
+            opts.set_last_will(LastWill::new(
+                will_topic,
+                params.will_payload,
+                qos_from_u8(params.will_qos),
+                params.will_retain,
+            ));
         }
 
         let mut network = NetworkOptions::new();
-        network.set_connection_timeout(10);
+        network.set_connection_timeout(params.connect_timeout.max(1) as u64);
 
         let (client, mut connection) = Client::new(opts, 32);
         connection.eventloop.set_network_options(network);

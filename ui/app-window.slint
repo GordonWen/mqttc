@@ -60,10 +60,10 @@ component Segmented inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "mqttc";
-    min-width: 1120px;
-    min-height: 660px;
-    preferred-width: 1280px;
-    preferred-height: 780px;
+    min-width: 1280px;
+    min-height: 720px;
+    preferred-width: 1440px;
+    preferred-height: 860px;
     background: #16181d;
     default-font-family: "Segoe UI";
     default-font-size: 13px;
@@ -77,6 +77,14 @@ export component AppWindow inherits Window {
     in-out property <string> client-id: "";
     in-out property <string> username: "";
     in-out property <string> password: "";
+    in-out property <string> keep-alive: "60";
+    in-out property <bool> clean-session: true;
+    in-out property <string> connect-timeout: "10";
+    in-out property <string> will-topic: "";
+    in-out property <string> will-payload: "";
+    in-out property <int> will-qos: 0;
+    in-out property <bool> will-retain: false;
+    in-out property <bool> show-advanced: false;
     in-out property <string> status: "未连接";
     in-out property <color> status-color: #9aa0a6;
     in-out property <bool> connected: false;
@@ -91,10 +99,14 @@ export component AppWindow inherits Window {
     in-out property <int> pub-qos: 0;
     in-out property <bool> pub-retain: false;
     in-out property <int> pub-format: 0;
+    in-out property <string> timed-interval: "5";
+    in-out property <bool> timed-running: false;
 
     in-out property <[LogEntry]> logs: [];
     in-out property <int> log-format: 0;
     in-out property <bool> auto-scroll: true;
+    in-out property <string> log-filter: "";
+    in-out property <int> log-kind-filter: 0;
     in-out property <length> log-scroll-y: 0px;
 
     callback new-connection-requested();
@@ -106,7 +118,11 @@ export component AppWindow inherits Window {
     callback unsubscribe-requested(int);
     callback publish-requested();
     callback format-payload-requested();
+    callback generate-client-id-requested();
+    callback advanced-toggled();
+    callback timed-toggle-requested();
     callback log-format-changed();
+    callback log-filter-changed();
     callback save-logs-requested();
     callback clear-logs-requested();
 
@@ -283,10 +299,19 @@ export component AppWindow inherits Window {
                         VerticalBox {
                             spacing: 4px;
                             Text { text: "Client ID"; color: #8b919a; font-size: 11px; }
-                            LineEdit {
-                                text <=> root.client-id;
-                                placeholder-text: "空则自动生成";
-                                enabled: !root.connected && !root.connecting;
+                            HorizontalBox {
+                                spacing: 6px;
+                                LineEdit {
+                                    text <=> root.client-id;
+                                    placeholder-text: "空则自动生成";
+                                    enabled: !root.connected && !root.connecting;
+                                }
+                                Button {
+                                    width: 52px;
+                                    text: "生成";
+                                    enabled: !root.connected && !root.connecting;
+                                    clicked => { root.generate-client-id-requested(); }
+                                }
                             }
                         }
                         VerticalBox {
@@ -324,16 +349,102 @@ export component AppWindow inherits Window {
                         VerticalBox {
                             spacing: 4px;
                             Text { text: "密码"; color: #8b919a; font-size: 11px; }
-                            LineEdit {
-                                text <=> root.password;
-                                placeholder-text: "可选";
-                                input-type: InputType.password;
-                                enabled: !root.connected && !root.connecting;
-                            }
-                        }
-                    }
-                }
-            }
+                             LineEdit {
+                                 text <=> root.password;
+                                 placeholder-text: "可选";
+                                 input-type: InputType.password;
+                                 enabled: !root.connected && !root.connecting;
+                             }
+                         }
+                         VerticalBox {
+                             spacing: 4px;
+                             width: 92px;
+                             Text { text: " "; color: transparent; font-size: 11px; }
+                             Button {
+                                 text: root.show-advanced ? "收起高级" : "高级参数";
+                                 clicked => {
+                                     root.show-advanced = !root.show-advanced;
+                                     root.advanced-toggled();
+                                 }
+                             }
+                         }
+                     }
+                     if root.show-advanced: VerticalBox {
+                         spacing: 8px;
+                         HorizontalBox {
+                             spacing: 8px;
+                             VerticalBox {
+                                 spacing: 4px;
+                                 width: 110px;
+                                 Text { text: "Keep Alive"; color: #8b919a; font-size: 11px; }
+                                 LineEdit {
+                                     text <=> root.keep-alive;
+                                     placeholder-text: "秒";
+                                     enabled: !root.connected && !root.connecting;
+                                 }
+                             }
+                             VerticalBox {
+                                 spacing: 4px;
+                                 width: 110px;
+                                 Text { text: "超时"; color: #8b919a; font-size: 11px; }
+                                 LineEdit {
+                                     text <=> root.connect-timeout;
+                                     placeholder-text: "秒";
+                                     enabled: !root.connected && !root.connecting;
+                                 }
+                             }
+                             VerticalBox {
+                                 spacing: 4px;
+                                 alignment: end;
+                                 CheckBox {
+                                     text: "Clean Session";
+                                     checked <=> root.clean-session;
+                                     enabled: !root.connected && !root.connecting;
+                                 }
+                             }
+                             Rectangle { horizontal-stretch: 1; background: transparent; }
+                         }
+                         Text { text: "遗嘱消息 (Last Will)"; color: #c5cad3; font-weight: 600; }
+                         HorizontalBox {
+                             spacing: 8px;
+                             VerticalBox {
+                                 spacing: 4px;
+                                 Text { text: "遗嘱 Topic"; color: #8b919a; font-size: 11px; }
+                                 LineEdit {
+                                     text <=> root.will-topic;
+                                     placeholder-text: "留空则不发送遗嘱";
+                                     enabled: !root.connected && !root.connecting;
+                                 }
+                             }
+                             VerticalBox {
+                                 spacing: 4px;
+                                 Text { text: "遗嘱 Payload"; color: #8b919a; font-size: 11px; }
+                                 LineEdit {
+                                     text <=> root.will-payload;
+                                     placeholder-text: "断开时由 Broker 代发";
+                                     enabled: !root.connected && !root.connecting;
+                                 }
+                             }
+                         }
+                         HorizontalBox {
+                             spacing: 8px;
+                             Text { text: "遗嘱 QoS"; color: #8b919a; font-size: 11px; vertical-alignment: center; }
+                             Segmented {
+                                 options: ["0", "1", "2"];
+                                 item-width: 42px;
+                                 current-index <=> root.will-qos;
+                                 interactive: !root.connected && !root.connecting;
+                             }
+                             CheckBox {
+                                 text: "Retain";
+                                 checked <=> root.will-retain;
+                                 enabled: !root.connected && !root.connecting;
+                             }
+                             Rectangle { horizontal-stretch: 1; background: transparent; }
+                         }
+                     }
+                 }
+             }
 
             HorizontalBox {
                 spacing: 12px;
@@ -474,6 +585,23 @@ export component AppWindow inherits Window {
                                 clicked => { root.format-payload-requested(); }
                             }
                         }
+                        HorizontalBox {
+                            spacing: 8px;
+                            Text { text: "定时(秒)"; color: #8b919a; font-size: 11px; vertical-alignment: center; }
+                            LineEdit {
+                                width: 72px;
+                                text <=> root.timed-interval;
+                                placeholder-text: "5";
+                                enabled: root.connected && !root.timed-running;
+                            }
+                            Button {
+                                width: 92px;
+                                text: root.timed-running ? "停止" : "定时发布";
+                                enabled: root.connected || root.timed-running;
+                                clicked => { root.timed-toggle-requested(); }
+                            }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                        }
                         TextEdit {
                             text <=> root.pub-payload;
                             placeholder-text: "payload（支持多行，回车换行）";
@@ -496,6 +624,18 @@ export component AppWindow inherits Window {
                     HorizontalBox {
                         spacing: 8px;
                         Text { text: "日志"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
+                        LineEdit {
+                            width: 180px;
+                            text <=> root.log-filter;
+                            placeholder-text: "筛选 Topic / Payload";
+                            edited => { root.log-filter-changed(); }
+                        }
+                        Segmented {
+                            options: ["全部", "收", "发", "系统", "错误"];
+                            item-width: 46px;
+                            current-index <=> root.log-kind-filter;
+                            activated(idx) => { root.log-filter-changed(); }
+                        }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                         Text { text: "接收格式"; color: #8b919a; font-size: 11px; vertical-alignment: center; }
                         Segmented {
@@ -525,43 +665,123 @@ export component AppWindow inherits Window {
                         log-view := ListView {
                             viewport-y <=> root.log-scroll-y;
                             for entry in root.logs: Rectangle {
-                                min-height: 30px;
+                                min-height: 36px;
                                 background: #12141a;
-                                HorizontalLayout {
-                                    padding: 8px;
+                                VerticalLayout {
+                                    padding-top: 5px;
+                                    padding-bottom: 5px;
                                     padding-left: 10px;
                                     padding-right: 10px;
-                                    spacing: 10px;
-                                    Text {
-                                        text: entry.time;
-                                        color: #6d737c;
-                                        width: 70px;
-                                        font-family: "Consolas";
-                                        vertical-alignment: top;
+                                    if entry.kind == "RECV": HorizontalLayout {
+                                        alignment: start;
+                                        Rectangle {
+                                            max-width: 560px;
+                                            horizontal-stretch: 0;
+                                            border-radius: 10px;
+                                            background: #1b2f24;
+                                            VerticalLayout {
+                                                padding: 8px;
+                                                spacing: 4px;
+                                                HorizontalLayout {
+                                                    spacing: 8px;
+                                                    Text {
+                                                        text: entry.topic;
+                                                        color: #4ecf7a;
+                                                        font-family: "Consolas";
+                                                        font-size: 11px;
+                                                        overflow: elide;
+                                                        horizontal-stretch: 1;
+                                                    }
+                                                    Text {
+                                                        text: entry.time;
+                                                        color: #6d737c;
+                                                        font-family: "Consolas";
+                                                        font-size: 10px;
+                                                    }
+                                                }
+                                                Text {
+                                                    text: entry.payload;
+                                                    color: #d7e8dc;
+                                                    wrap: word-wrap;
+                                                    font-family: "Consolas";
+                                                }
+                                            }
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
                                     }
-                                    Text {
-                                        text: entry.kind;
-                                        color: entry.kind == "ERR" ? #e85d5d : entry.kind == "RECV" ? #4ecf7a : entry.kind == "SEND" ? #5aa7ff : #9aa0a6;
-                                        width: 48px;
-                                        font-weight: 700;
-                                        font-family: "Consolas";
-                                        vertical-alignment: top;
+                                    if entry.kind == "SEND": HorizontalLayout {
+                                        alignment: end;
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                        Rectangle {
+                                            max-width: 560px;
+                                            horizontal-stretch: 0;
+                                            border-radius: 10px;
+                                            background: #1d2f4a;
+                                            VerticalLayout {
+                                                padding: 8px;
+                                                spacing: 4px;
+                                                HorizontalLayout {
+                                                    spacing: 8px;
+                                                    Text {
+                                                        text: entry.topic;
+                                                        color: #5aa7ff;
+                                                        font-family: "Consolas";
+                                                        font-size: 11px;
+                                                        overflow: elide;
+                                                        horizontal-stretch: 1;
+                                                    }
+                                                    Text {
+                                                        text: entry.time;
+                                                        color: #6d737c;
+                                                        font-family: "Consolas";
+                                                        font-size: 10px;
+                                                    }
+                                                }
+                                                Text {
+                                                    text: entry.payload;
+                                                    color: #d5e4f7;
+                                                    wrap: word-wrap;
+                                                    font-family: "Consolas";
+                                                }
+                                            }
+                                        }
                                     }
-                                    Text {
-                                        text: entry.topic;
-                                        color: #d7dde6;
-                                        width: 200px;
-                                        wrap: word-wrap;
-                                        font-family: "Consolas";
-                                        vertical-alignment: top;
-                                    }
-                                    Text {
-                                        text: entry.payload;
-                                        color: #b8c0cc;
-                                        horizontal-stretch: 1;
-                                        wrap: word-wrap;
-                                        font-family: "Consolas";
-                                        vertical-alignment: top;
+                                    if entry.kind != "RECV" && entry.kind != "SEND": HorizontalLayout {
+                                        alignment: center;
+                                        Rectangle {
+                                            border-radius: 8px;
+                                            background: entry.kind == "ERR" ? #3a2224 : #242830;
+                                            VerticalLayout {
+                                                padding: 6px;
+                                                padding-left: 10px;
+                                                padding-right: 10px;
+                                                HorizontalLayout {
+                                                    spacing: 8px;
+                                                    alignment: center;
+                                                    Text {
+                                                        text: entry.time;
+                                                        color: #6d737c;
+                                                        font-family: "Consolas";
+                                                        font-size: 10px;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    Text {
+                                                        text: entry.kind == "ERR" ? "错误" : "系统";
+                                                        color: entry.kind == "ERR" ? #e85d5d : #9aa0a6;
+                                                        font-size: 11px;
+                                                        font-weight: 600;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    Text {
+                                                        text: entry.topic == "" ? entry.payload : entry.topic + "  " + entry.payload;
+                                                        color: entry.kind == "ERR" ? #f0c4c4 : #b8c0cc;
+                                                        wrap: word-wrap;
+                                                        font-family: "Consolas";
+                                                        vertical-alignment: center;
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

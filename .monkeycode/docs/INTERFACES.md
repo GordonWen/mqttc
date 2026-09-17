@@ -22,6 +22,11 @@
 | connection-name | string | 当前连接名称 |
 | host / port / client-id | string | Broker 地址与 Client ID |
 | username / password | string | 可选认证信息，密码用密文输入 |
+| keep-alive / connect-timeout | string | Keep Alive 与连接超时（秒） |
+| clean-session | bool | MQTT Clean Session |
+| will-topic / will-payload | string | Last Will Topic 与 Payload，Topic 为空则不发送遗嘱 |
+| will-qos / will-retain | int / bool | 遗嘱 QoS 与 Retain |
+| show-advanced | bool | 是否展开高级连接参数 |
 | status / status-color | string / color | 当前连接状态文案与颜色 |
 | connected / connecting | bool | 控制按钮可用性 |
 | sub-topic / sub-qos | string / int | 待订阅 Topic 与 QoS（0/1/2） |
@@ -29,8 +34,12 @@
 | pub-topic / pub-payload | string | 待发布 Topic 与内容（payload 支持多行） |
 | pub-qos / pub-retain | int / bool | 发布 QoS 与保留消息开关 |
 | pub-format | int | 发送格式索引：0 文本、1 JSON、2 Base64、3 Hex |
-| logs | [LogEntry] | 当前连接的日志列表 |
+| timed-interval | string | 定时发布间隔（秒） |
+| timed-running | bool | 当前连接是否正在定时发布 |
+| logs | [LogEntry] | 当前连接的日志列表（已按筛选过滤） |
 | log-format | int | 接收显示格式索引，同上 |
+| log-filter | string | 按 Topic / Payload / 类型关键字筛选 |
+| log-kind-filter | int | 0 全部、1 收、2 发、3 系统、4 错误 |
 | auto-scroll | bool | 日志自动滚动开关 |
 | log-scroll-y | length | 日志滚动偏移，与日志列表双向绑定 |
 
@@ -46,7 +55,11 @@
 | unsubscribe-requested | 点击订阅条目右侧 `×`，参数为索引 |
 | publish-requested | 点击发布 |
 | format-payload-requested | 点击美化，按 JSON 格式化 payload 编辑框 |
+| generate-client-id-requested | 点击生成 Client ID |
+| advanced-toggled | 展开或收起高级参数 |
+| timed-toggle-requested | 启动或停止定时发布 |
 | log-format-changed | 切换接收显示格式 |
+| log-filter-changed | 日志搜索框或类型筛选变化 |
 | save-logs-requested / clear-logs-requested | 保存 / 清空日志 |
 
 ## MQTT 会话命令
@@ -55,7 +68,7 @@
 
 | 命令 | 参数 |
 |------|------|
-| Connect | host, port, client_id, username, password |
+| Connect | ConnectParams：host, port, client_id, username, password, keep_alive, clean_session, connect_timeout, Last Will |
 | Disconnect | 无 |
 | Subscribe | topic, qos |
 | Unsubscribe | topic |
@@ -72,6 +85,9 @@
   "active_id": "c18f2a0e0",
   "log_format": "text",
   "auto_scroll": true,
+  "show_advanced": false,
+  "log_filter": "",
+  "log_kind_filter": 0,
   "connections": [
     {
       "id": "c18f2a0e0",
@@ -81,6 +97,14 @@
       "client_id": "",
       "username": "",
       "password": "",
+      "keep_alive": 60,
+      "clean_session": true,
+      "connect_timeout": 10,
+      "will_topic": "",
+      "will_payload": "",
+      "will_qos": 0,
+      "will_retain": false,
+      "timed_interval": 5,
       "sub_topic": "mqttc/mvp/#",
       "sub_qos": 0,
       "pub_topic": "mqttc/mvp/hello",
@@ -98,7 +122,7 @@
 
 旧版扁平结构（仅有 `host`、`port`、`pub_topic` 等字段）会在加载时自动迁移为一条连接，`subscriptions` 中的纯字符串 Topic 迁移为 `{topic, qos: 0}`。
 
-写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、切换接收格式，以及退出时。
+写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、切换接收格式、日志筛选变化、启动/停止定时发布，以及退出时。
 
 ## 日志文件
 
@@ -118,9 +142,10 @@
 
 - 传输：TCP
 - 协议：MQTT 3.1.1
-- Clean Session：true
-- Keep Alive：30 秒
-- 连接超时：10 秒
+- Clean Session：可配置，默认 true
+- Keep Alive：可配置，默认 60 秒
+- 连接超时：可配置，默认 10 秒
+- Last Will：Topic 非空时随 CONNECT 发送
 - 订阅与发布 QoS：可选 0/1/2，默认 0
-- 发布支持 Retain 保留消息
+- 发布支持 Retain 保留消息与定时循环发送
 - 重连后按订阅列表自动重新订阅

@@ -67,9 +67,11 @@ sudo apt-get install -y libfontconfig1 libfreetype6 libexpat1 zlib1g libpng16-16
 
 1. 左侧连接列表点击 `+` 新建连接，填写名称、主机与端口（默认 `127.0.0.1:1883`）
 2. 需要认证时填写用户名和密码，留空则匿名连接
-3. 点击连接。多个连接可同时在线，点左侧条目切换查看
-4. 订阅 Topic（默认 `mqttc/mvp/#`），先选择 QoS 0/1/2 再点「订阅」。每个订阅在「订阅列表」中显示一行，点右侧 `×` 取消订阅
-5. 发布消息：选择 QoS 与 Retain，选择 Payload 格式（文本 / JSON / Base64 / Hex），输入内容后点「发布」。Payload 为多行编辑框，可直接回车换行
+3. 点击连接。多个连接可同时在线，点左侧条目切换查看。Client ID 留空会在连接时自动生成，也可点「生成」
+4. 「高级参数」可设置 Keep Alive、连接超时、Clean Session，以及 Last Will 遗嘱 Topic / Payload / QoS / Retain
+5. 订阅 Topic（默认 `mqttc/mvp/#`），先选择 QoS 0/1/2 再点「订阅」。每个订阅在「订阅列表」中显示一行，点右侧 `×` 取消订阅
+6. 发布消息：选择 QoS 与 Retain，选择 Payload 格式（文本 / JSON / Base64 / Hex），输入内容后点「发布」。也可填写间隔秒数后点「定时发布」循环发送
+7. 日志为聊天气泡：左侧绿色为收到，右侧蓝色为发出，系统/错误居中。可用搜索框和「全部/收/发/系统/错误」筛选
 
 删除连接：点左侧条目右侧的 `×`。
 
@@ -79,7 +81,7 @@ Payload 格式说明：
 - JSON：发送前校验合法性，点「美化」可格式化编辑框内容
 - Base64 / Hex：编辑框内容按该编码解码为字节后发送
 
-日志区支持 Topic 与 Payload 多行换行显示，右上角「自动滚动」勾选后新日志会自动滚到底部，「接收格式」可切换日志中 Payload 的显示方式。点击「保存日志」会把当前连接的全部日志导出为 `logs/mqttc-YYYYMMDD-HHMMSS.log`，每行带完整时间戳：
+日志区支持 Topic 与 Payload 多行换行显示，右上角「自动滚动」勾选后新日志会自动滚到底部，「接收格式」可切换日志中 Payload 的显示方式。筛选只影响界面展示，保存日志仍导出当前连接的全部记录。点击「保存日志」会把当前连接的全部日志导出为 `logs/mqttc-YYYYMMDD-HHMMSS.log`，每行带完整时间戳：
 
 ```
 [2026-09-15 10:20:30] [RECV] mqttc/mvp/hello hello from mqttc
