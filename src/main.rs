@@ -111,6 +111,7 @@ struct ConnRuntime {
     status: ConnStatus,
     timed_generation: Arc<AtomicU64>,
     timed_running: bool,
+    active_sub_topic: String,
 }
 
 impl ConnRuntime {
@@ -121,6 +122,7 @@ impl ConnRuntime {
             status: ConnStatus::Disconnected,
             timed_generation: Arc::new(AtomicU64::new(0)),
             timed_running: false,
+            active_sub_topic: String::new(),
         }
     }
 }
@@ -262,6 +264,7 @@ fn register_callbacks(ui: &AppWindow) {
                 st.config.connections.push(conn);
                 let id = st.config.active_id.clone();
                 st.runtime_mut(&id);
+                show_page(&ui, 0);
                 refresh_all(&ui, st);
                 persist(st);
             });
@@ -279,6 +282,7 @@ fn register_callbacks(ui: &AppWindow) {
                 }
                 sync_form(&ui, st);
                 st.config.active_id = id;
+                show_page(&ui, 1);
                 refresh_all(&ui, st);
                 persist(st);
             });
@@ -311,6 +315,7 @@ fn register_callbacks(ui: &AppWindow) {
                 }
                 let active = st.config.active_id.clone();
                 st.runtime_mut(&active);
+                show_page(&ui, 1);
                 refresh_all(&ui, st);
                 persist(st);
             });
@@ -405,9 +410,34 @@ fn register_callbacks(ui: &AppWindow) {
                     });
                 });
 
+                show_page(&ui, 1);
                 refresh_status(&ui, st);
                 refresh_connections(&ui, st);
                 persist(st);
+            });
+        }
+    });
+
+    ui.on_edit_connection_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                persist(st);
+                show_page(&ui, 0);
+            });
+        }
+    });
+
+    ui.on_back_to_session_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                persist(st);
+                show_page(&ui, 1);
             });
         }
     });
@@ -503,7 +533,11 @@ fn register_callbacks(ui: &AppWindow) {
                         st.config.connections[idx].subscriptions.remove(pos);
                     }
                 }
+                if st.runtime_mut(&id).active_sub_topic == sub.topic {
+                    st.runtime_mut(&id).active_sub_topic.clear();
+                }
                 refresh_subscriptions(&ui, st);
+                refresh_logs(&ui, st);
                 persist(st);
             });
         }
@@ -535,13 +569,21 @@ fn register_callbacks(ui: &AppWindow) {
         }
     });
 
-    ui.on_advanced_toggled({
+    ui.on_filter_subscription_requested({
         let ui_weak = ui_weak.clone();
-        move || {
+        move |topic| {
             let Some(ui) = ui_weak.upgrade() else { return };
+            let topic = topic.to_string();
             with_state(|st| {
-                sync_prefs(&ui, st);
-                persist(st);
+                let Some(id) = st.active_id() else { return };
+                let current = st.runtime_mut(&id).active_sub_topic.clone();
+                st.runtime_mut(&id).active_sub_topic = if current == topic {
+                    String::new()
+                } else {
+                    topic
+                };
+                refresh_subscriptions(&ui, st);
+                refresh_logs(&ui, st);
             });
         }
     });
@@ -712,6 +754,9 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
             st.runtime_mut(conn_id).status = ConnStatus::Connected;
             push_log_for(ui, st, conn_id, "SYS", "", "连接成功".as_bytes().to_vec());
             resubscribe_all(ui, st, conn_id);
+            if st.config.active_id == conn_id {
+                show_page(ui, 1);
+            }
         }
         UiEvent::Disconnected { reason } => {
             let was_timed = st
@@ -821,9 +866,13 @@ fn push_log_for(
 fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_log_format(PayloadFormat::from_key(&st.config.log_format).to_index());
     ui.set_auto_scroll(st.config.auto_scroll);
-    ui.set_show_advanced(st.config.show_advanced);
     ui.set_log_filter(st.config.log_filter.clone().into());
     ui.set_log_kind_filter(st.config.log_kind_filter.clamp(0, 4));
+    show_page(ui, 1);
+}
+
+fn show_page(ui: &AppWindow, page: i32) {
+    ui.set_page(page);
 }
 
 fn refresh_all(ui: &AppWindow, st: &mut AppState) {
@@ -869,6 +918,7 @@ fn refresh_active_form(ui: &AppWindow, st: &AppState) {
     ui.set_will_payload(cfg.will_payload.clone().into());
     ui.set_will_qos(cfg.will_qos.min(2) as i32);
     ui.set_will_retain(cfg.will_retain);
+    ui.set_connection_summary(format!("{}:{}", cfg.host, cfg.port).into());
     ui.set_timed_interval(cfg.timed_interval.max(1).to_string().into());
     ui.set_timed_running(
         st.runtimes
@@ -897,16 +947,25 @@ fn refresh_status(ui: &AppWindow, st: &AppState) {
 }
 
 fn refresh_subscriptions(ui: &AppWindow, st: &AppState) {
+    let active_topic = st
+        .active_id()
+        .and_then(|id| st.runtimes.get(&id).map(|rt| rt.active_sub_topic.clone()))
+        .unwrap_or_default();
     let items: Vec<Subscription> = st
         .active_index()
         .map(|idx| st.config.connections[idx].subscriptions.clone())
         .unwrap_or_default()
         .into_iter()
-        .map(|sub| Subscription {
-            topic: sub.topic.into(),
-            qos: sub.qos.min(2) as i32,
+        .map(|sub| {
+            let selected = !active_topic.is_empty() && sub.topic == active_topic;
+            Subscription {
+                topic: sub.topic.into(),
+                qos: sub.qos.min(2) as i32,
+                selected,
+            }
         })
         .collect();
+    ui.set_active_sub_topic(active_topic.into());
     ui.set_subscriptions(Rc::new(VecModel::from(items)).into());
 }
 
@@ -914,13 +973,17 @@ fn refresh_logs(ui: &AppWindow, st: &AppState) {
     let format = PayloadFormat::from_index(ui.get_log_format());
     let filter = ui.get_log_filter().trim().to_lowercase();
     let kind_filter = ui.get_log_kind_filter();
+    let active_topic = st
+        .active_id()
+        .and_then(|id| st.runtimes.get(&id).map(|rt| rt.active_sub_topic.clone()))
+        .unwrap_or_default();
     let entries: Vec<LogEntry> = st
         .active_id()
         .and_then(|id| st.runtimes.get(&id))
         .map(|runtime| runtime.logs.clone())
         .unwrap_or_default()
         .iter()
-        .filter(|log| log_matches(log, format, &filter, kind_filter))
+        .filter(|log| log_matches(log, format, &filter, kind_filter, &active_topic))
         .map(|log| render_log(log, format))
         .collect();
     ui.set_logs(Rc::new(VecModel::from(entries)).into());
@@ -964,7 +1027,6 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
         .to_key()
         .to_string();
     st.config.auto_scroll = ui.get_auto_scroll();
-    st.config.show_advanced = ui.get_show_advanced();
     st.config.log_filter = ui.get_log_filter().to_string();
     st.config.log_kind_filter = ui.get_log_kind_filter().clamp(0, 4);
 }
@@ -1052,8 +1114,20 @@ fn publish_from_connection_inner(
     }
 }
 
-fn log_matches(log: &LogData, format: PayloadFormat, filter: &str, kind_filter: i32) -> bool {
+fn log_matches(
+    log: &LogData,
+    format: PayloadFormat,
+    filter: &str,
+    kind_filter: i32,
+    active_topic: &str,
+) -> bool {
     if !kind_matches(&log.kind, kind_filter) {
+        return false;
+    }
+    if !active_topic.is_empty()
+        && (log.kind == "RECV" || log.kind == "SEND")
+        && !topic_matches_filter(&log.topic, active_topic)
+    {
         return false;
     }
     if filter.is_empty() {
@@ -1063,6 +1137,28 @@ fn log_matches(log: &LogData, format: PayloadFormat, filter: &str, kind_filter: 
     log.topic.to_lowercase().contains(filter)
         || payload.contains(filter)
         || log.kind.to_lowercase().contains(filter)
+}
+
+fn topic_matches_filter(topic: &str, filter: &str) -> bool {
+    if filter.is_empty() || topic == filter {
+        return true;
+    }
+    let topic_parts: Vec<&str> = topic.split('/').collect();
+    let filter_parts: Vec<&str> = filter.split('/').collect();
+    let mut ti = 0;
+    for (fi, part) in filter_parts.iter().enumerate() {
+        if *part == "#" {
+            return fi == filter_parts.len() - 1;
+        }
+        if ti >= topic_parts.len() {
+            return false;
+        }
+        if *part != "+" && *part != topic_parts[ti] {
+            return false;
+        }
+        ti += 1;
+    }
+    ti == topic_parts.len()
 }
 
 fn kind_matches(kind: &str, filter: i32) -> bool {
@@ -1303,11 +1399,16 @@ mod tests {
     #[test]
     fn log_filter_matches_topic_and_payload() {
         let log = sample_log("RECV", "sensors/temp", "hello world");
-        assert!(log_matches(&log, PayloadFormat::Text, "temp", 0));
-        assert!(log_matches(&log, PayloadFormat::Text, "hello", 0));
-        assert!(!log_matches(&log, PayloadFormat::Text, "missing", 0));
-        assert!(!log_matches(&log, PayloadFormat::Text, "hello", 2));
-        assert!(log_matches(&log, PayloadFormat::Text, "hello", 1));
+        assert!(log_matches(&log, PayloadFormat::Text, "temp", 0, ""));
+        assert!(log_matches(&log, PayloadFormat::Text, "hello", 0, ""));
+        assert!(!log_matches(&log, PayloadFormat::Text, "missing", 0, ""));
+        assert!(!log_matches(&log, PayloadFormat::Text, "hello", 2, ""));
+        assert!(log_matches(&log, PayloadFormat::Text, "hello", 1, ""));
+        assert!(log_matches(&log, PayloadFormat::Text, "", 0, "sensors/temp"));
+        assert!(!log_matches(&log, PayloadFormat::Text, "", 0, "other"));
+        assert!(log_matches(&log, PayloadFormat::Text, "", 0, "sensors/#"));
+        assert!(log_matches(&log, PayloadFormat::Text, "", 0, "sensors/+"));
+        assert!(!log_matches(&log, PayloadFormat::Text, "", 0, "home/#"));
     }
 
     #[test]
@@ -1329,5 +1430,15 @@ mod tests {
         assert!(parse_timed_interval("abc").is_err());
         assert_eq!(parse_u16_clamped("0", 1, 300, 10), 10);
         assert_eq!(parse_u16_clamped("8", 1, 300, 10), 8);
+    }
+
+    #[test]
+    fn mqtt_wildcard_filter_matches_topic_levels() {
+        assert!(topic_matches_filter("a/b/c", "a/b/c"));
+        assert!(topic_matches_filter("a/b/c", "a/+/c"));
+        assert!(topic_matches_filter("a/b/c", "a/#"));
+        assert!(topic_matches_filter("a/b/c", "#"));
+        assert!(!topic_matches_filter("a/b/c", "a/+"));
+        assert!(!topic_matches_filter("a/b/c", "b/#"));
     }
 }

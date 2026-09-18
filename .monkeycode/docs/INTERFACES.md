@@ -2,7 +2,7 @@
 
 ## UI 组件接口
 
-`AppWindow` 是唯一窗口组件，左侧为连接列表，右侧为当前连接的表单与日志。
+`AppWindow` 是唯一窗口组件。左侧为连接列表，右侧按 `page` 切换：0 连接配置页，1 会话页。
 
 ### 通用组件
 
@@ -10,27 +10,29 @@
 |------|------|
 | Segmented | 轻量分段选择器，属性 `options`、`current-index`、`interactive`、`item-width`，回调 `activated(int)` |
 | ConnectionEntry | 左侧连接列表条目，字段 `id`、`name`、`status`、`status-color` |
-| Subscription | 订阅条目，字段 `topic`、`qos` |
+| Subscription | 订阅条目，字段 `topic`、`qos`、`selected` |
 | LogEntry | 日志条目，字段 `time`、`timestamp`、`kind`、`topic`、`payload` |
 
 ### 属性
 
 | 属性 | 类型 | 含义 |
 |------|------|------|
+| page | int | 0 连接配置页，1 会话页 |
 | active-connection-id | string | 当前选中连接的 id |
 | connections | [ConnectionEntry] | 左侧连接列表 |
 | connection-name | string | 当前连接名称 |
+| connection-summary | string | 会话页标题旁的 host:port |
 | host / port / client-id | string | Broker 地址与 Client ID |
 | username / password | string | 可选认证信息，密码用密文输入 |
 | keep-alive / connect-timeout | string | Keep Alive 与连接超时（秒） |
 | clean-session | bool | MQTT Clean Session |
 | will-topic / will-payload | string | Last Will Topic 与 Payload，Topic 为空则不发送遗嘱 |
 | will-qos / will-retain | int / bool | 遗嘱 QoS 与 Retain |
-| show-advanced | bool | 是否展开高级连接参数 |
 | status / status-color | string / color | 当前连接状态文案与颜色 |
 | connected / connecting | bool | 控制按钮可用性 |
 | sub-topic / sub-qos | string / int | 待订阅 Topic 与 QoS（0/1/2） |
-| subscriptions | [Subscription] | 当前连接的订阅列表 |
+| subscriptions | [Subscription] | 当前连接的订阅列表，含 `selected` 筛选高亮 |
+| active-sub-topic | string | 会话页当前点击筛选的订阅 Topic |
 | pub-topic / pub-payload | string | 待发布 Topic 与内容（payload 支持多行） |
 | pub-qos / pub-retain | int / bool | 发布 QoS 与保留消息开关 |
 | pub-format | int | 发送格式索引：0 文本、1 JSON、2 Base64、3 Hex |
@@ -47,16 +49,18 @@
 
 | 回调 | 触发时机 |
 |------|----------|
-| new-connection-requested | 点击连接列表的 `+` |
-| select-connection-requested | 点击连接列表条目，参数为 id |
+| new-connection-requested | 点击连接列表的 `+`，进入配置页 |
+| select-connection-requested | 点击连接列表条目，参数为 id，进入会话页 |
 | delete-connection-requested | 点击连接条目右侧 `×`，参数为 id |
+| edit-connection-requested | 会话页点击编辑，进入配置页 |
+| back-to-session-requested | 配置页点击返回会话 |
 | connect-requested / disconnect-requested | 点击连接 / 断开 |
 | subscribe-requested | 点击订阅 |
 | unsubscribe-requested | 点击订阅条目右侧 `×`，参数为索引 |
 | publish-requested | 点击发布 |
 | format-payload-requested | 点击美化，按 JSON 格式化 payload 编辑框 |
 | generate-client-id-requested | 点击生成 Client ID |
-| advanced-toggled | 展开或收起高级参数 |
+| filter-subscription-requested | 点击订阅条目按 Topic 筛选消息，再点一次取消 |
 | timed-toggle-requested | 启动或停止定时发布 |
 | log-format-changed | 切换接收显示格式 |
 | log-filter-changed | 日志搜索框或类型筛选变化 |
@@ -85,7 +89,6 @@
   "active_id": "c18f2a0e0",
   "log_format": "text",
   "auto_scroll": true,
-  "show_advanced": false,
   "log_filter": "",
   "log_kind_filter": 0,
   "connections": [
