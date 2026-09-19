@@ -30,7 +30,7 @@ mqttc/
 - **UI 层** (`ui/app-window.slint`): MQTTX 式多页布局。左侧连接列表常驻；`page=0` 为连接配置页，`page=1` 为会话页（订阅栏 + 聊天气泡 + 底部发布）
 - **应用入口** (`src/main.rs`): 窗口创建、回调绑定、多连接运行时与状态刷新、Payload 编解码、日志筛选、定时发布
 - **配置层** (`src/config.rs`): 多连接配置与界面偏好的读写、旧配置迁移
-- **MQTT 会话** (`src/mqtt.rs`): 单连接生命周期、Keep Alive / Clean Session / 超时 / Last Will、订阅、取消订阅、发布、事件翻译
+- **MQTT 会话** (`src/mqtt.rs`): 单连接生命周期、Keep Alive / Clean Session / 超时 / Last Will / TLS、订阅、取消订阅、发布、事件翻译
 
 ## 运行时状态
 
@@ -63,7 +63,7 @@ graph TD
 
 1. 启动：加载 `mqttc.json`，旧格式迁移为一条连接；为空则创建默认连接；为每条连接建立 `ConnRuntime`。
 2. 新建进入配置页，点选已有连接进入会话页；切换前先把表单写回配置。删除时断开该连接的会话。
-3. 用户点击连接：按该连接的 host/port/client-id/认证/Keep Alive/Clean Session/超时/Last Will 创建 `Client` 与 `Connection`，启动轮询线程。Client ID 为空时自动生成。连接成功后切到会话页。
+3. 用户点击连接：按该连接的 host/port/client-id/认证/Keep Alive/Clean Session/超时/Last Will/SSL 创建 `Client` 与 `Connection`，启动轮询线程。Client ID 为空时自动生成。连接成功后切到会话页。启用 SSL 时用 rustls，可校验系统/自定义 CA，也可关闭校验或附带客户端证书。
 4. `ConnAck` 到达后标记为已连接，并按该连接的订阅列表自动重新订阅（Clean Session 下重连需要恢复订阅）。
 5. 订阅/发布在主线程调用 `Client` 方法；发布前按所选格式把文本编码为字节。定时发布用独立线程按间隔回调主线程发送。
 6. 收到 `Publish` 后按连接 id 写入日志缓冲；命中当前连接则按筛选条件重新渲染聊天气泡。

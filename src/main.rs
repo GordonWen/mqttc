@@ -364,19 +364,29 @@ fn register_callbacks(ui: &AppWindow) {
                 } else {
                     format!("，遗嘱 {}", cfg.will_topic.trim())
                 };
+                let ssl_hint = if cfg.ssl {
+                    if cfg.ssl_verify {
+                        "，SSL 校验证书"
+                    } else {
+                        "，SSL 不校验证书"
+                    }
+                } else {
+                    ""
+                };
                 push_log(
                     &ui,
                     st,
                     "SYS",
                     "",
                     format!(
-                        "正在连接 {}:{} ({}, {}，Keep Alive {}s，超时 {}s{})",
+                        "正在连接 {}:{} ({}, {}，Keep Alive {}s，超时 {}s{}{})",
                         cfg.host,
                         cfg.port,
                         cfg.client_id,
                         auth_hint,
                         cfg.keep_alive,
                         cfg.connect_timeout,
+                        ssl_hint,
                         will_hint
                     )
                     .into_bytes(),
@@ -396,6 +406,11 @@ fn register_callbacks(ui: &AppWindow) {
                     will_payload,
                     will_qos: cfg.will_qos,
                     will_retain: cfg.will_retain,
+                    ssl: cfg.ssl,
+                    ssl_verify: cfg.ssl_verify,
+                    ssl_ca: cfg.ssl_ca.clone(),
+                    ssl_cert: cfg.ssl_cert.clone(),
+                    ssl_key: cfg.ssl_key.clone(),
                 };
                 let ui_weak2 = ui.as_weak();
                 let conn_id = id.clone();
@@ -918,6 +933,11 @@ fn refresh_active_form(ui: &AppWindow, st: &AppState) {
     ui.set_will_payload(cfg.will_payload.clone().into());
     ui.set_will_qos(cfg.will_qos.min(2) as i32);
     ui.set_will_retain(cfg.will_retain);
+    ui.set_ssl(cfg.ssl);
+    ui.set_ssl_verify(cfg.ssl_verify);
+    ui.set_ssl_ca(cfg.ssl_ca.clone().into());
+    ui.set_ssl_cert(cfg.ssl_cert.clone().into());
+    ui.set_ssl_key(cfg.ssl_key.clone().into());
     ui.set_connection_summary(format!("{}:{}", cfg.host, cfg.port).into());
     ui.set_timed_interval(cfg.timed_interval.max(1).to_string().into());
     ui.set_timed_running(
@@ -1005,6 +1025,11 @@ fn sync_form(ui: &AppWindow, st: &mut AppState) {
     cfg.will_payload = ui.get_will_payload().to_string();
     cfg.will_qos = ui.get_will_qos().clamp(0, 2) as u8;
     cfg.will_retain = ui.get_will_retain();
+    cfg.ssl = ui.get_ssl();
+    cfg.ssl_verify = ui.get_ssl_verify();
+    cfg.ssl_ca = ui.get_ssl_ca().to_string();
+    cfg.ssl_cert = ui.get_ssl_cert().to_string();
+    cfg.ssl_key = ui.get_ssl_key().to_string();
     if let Ok(interval) = parse_timed_interval(&ui.get_timed_interval()) {
         cfg.timed_interval = interval;
     }

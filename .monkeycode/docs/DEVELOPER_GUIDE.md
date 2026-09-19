@@ -24,7 +24,7 @@ cargo run
 
 - `ui/app-window.slint`：MQTTX 式多页布局，含连接配置页、会话页、`Segmented` 与聊天气泡
 - `src/main.rs`：窗口创建与回调、多连接运行时状态、Payload 编解码、日志筛选、定时发布
-- `src/mqtt.rs`：单连接 MQTT 会话与事件，含 Keep Alive / Clean Session / 超时 / Last Will
+- `src/mqtt.rs`：单连接 MQTT 会话与事件，含 Keep Alive / Clean Session / 超时 / Last Will / TLS
 - `src/config.rs`：多连接配置 `mqttc.json` 的读写与旧格式迁移
 - `build.rs`：编译 `.slint` 文件
 

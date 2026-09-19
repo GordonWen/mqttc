@@ -29,7 +29,7 @@ mqttc 是一个跨平台桌面 MQTT 调试客户端，面向开发者和运维�
 
 ### 连接 Broker
 - **目的**: 与 MQTT Broker 建立 TCP 会话
-- **描述**: 用户填写主机、端口、Client ID，可选用户名和密码，一键连接或断开。高级参数可设置 Keep Alive、连接超时、Clean Session 与 Last Will；Client ID 留空则自动生成
+- **描述**: 用户填写主机、端口、Client ID，可选用户名和密码，一键连接或断开。高级参数可设置 Keep Alive、连接超时、Clean Session、SSL/TLS 与 Last Will；Client ID 留空则自动生成
 
 ### 订阅 Topic
 - **目的**: 接收指定主题的消息

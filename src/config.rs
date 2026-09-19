@@ -61,6 +61,16 @@ pub struct ConnectionConfig {
     pub will_qos: u8,
     #[serde(default)]
     pub will_retain: bool,
+    #[serde(default)]
+    pub ssl: bool,
+    #[serde(default = "default_true")]
+    pub ssl_verify: bool,
+    #[serde(default)]
+    pub ssl_ca: String,
+    #[serde(default)]
+    pub ssl_cert: String,
+    #[serde(default)]
+    pub ssl_key: String,
     #[serde(default = "default_timed_interval")]
     pub timed_interval: u32,
     #[serde(default)]
@@ -167,6 +177,11 @@ impl ConnectionConfig {
             will_payload: String::new(),
             will_qos: 0,
             will_retain: false,
+            ssl: false,
+            ssl_verify: true,
+            ssl_ca: String::new(),
+            ssl_cert: String::new(),
+            ssl_key: String::new(),
             timed_interval: default_timed_interval(),
             subscriptions: Vec::new(),
         }
@@ -325,6 +340,11 @@ mod tests {
         conn.will_payload = "offline".to_string();
         conn.will_qos = 1;
         conn.will_retain = true;
+        conn.ssl = true;
+        conn.ssl_verify = false;
+        conn.ssl_ca = "/tmp/ca.pem".to_string();
+        conn.ssl_cert = "/tmp/client.pem".to_string();
+        conn.ssl_key = "/tmp/client.key".to_string();
         conn.timed_interval = 12;
         conn.subscriptions.push(SubscriptionConfig {
             topic: "a/#".to_string(),
@@ -350,6 +370,11 @@ mod tests {
         assert_eq!(back.connections[0].will_payload, "offline");
         assert_eq!(back.connections[0].will_qos, 1);
         assert!(back.connections[0].will_retain);
+        assert!(back.connections[0].ssl);
+        assert!(!back.connections[0].ssl_verify);
+        assert_eq!(back.connections[0].ssl_ca, "/tmp/ca.pem");
+        assert_eq!(back.connections[0].ssl_cert, "/tmp/client.pem");
+        assert_eq!(back.connections[0].ssl_key, "/tmp/client.key");
         assert_eq!(back.connections[0].timed_interval, 12);
         assert_eq!(back.connections[0].subscriptions[0].qos, 2);
         assert_eq!(back.log_format, "base64");

@@ -235,6 +235,11 @@ export component AppWindow inherits Window {
     in-out property <string> will-payload: "";
     in-out property <int> will-qos: 0;
     in-out property <bool> will-retain: false;
+    in-out property <bool> ssl: false;
+    in-out property <bool> ssl-verify: true;
+    in-out property <string> ssl-ca: "";
+    in-out property <string> ssl-cert: "";
+    in-out property <string> ssl-key: "";
     in-out property <string> status: "未连接";
     in-out property <color> status-color: #9aa0a6;
     in-out property <bool> connected: false;
@@ -517,6 +522,70 @@ export component AppWindow inherits Window {
                             }
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                         }
+                        Text { text: "SSL / TLS"; color: #c5cad3; font-weight: 600; }
+                        HorizontalBox {
+                            spacing: 10px;
+                            CheckBox {
+                                text: "启用 SSL";
+                                checked <=> root.ssl;
+                                enabled: !root.connected && !root.connecting;
+                                toggled => {
+                                    if (root.ssl && root.port == "1883") {
+                                        root.port = "8883";
+                                    }
+                                    if (!root.ssl && root.port == "8883") {
+                                        root.port = "1883";
+                                    }
+                                }
+                            }
+                            CheckBox {
+                                text: "校验服务器证书";
+                                checked <=> root.ssl-verify;
+                                enabled: root.ssl && !root.connected && !root.connecting;
+                            }
+                            Rectangle { horizontal-stretch: 1; background: transparent; }
+                        }
+                        if root.ssl: VerticalBox {
+                            spacing: 10px;
+                            HorizontalBox {
+                                spacing: 10px;
+                                VerticalBox {
+                                    spacing: 4px;
+                                    FieldLabel { caption: "CA 证书路径"; }
+                                    LineEdit {
+                                        text <=> root.ssl-ca;
+                                        placeholder-text: "可选，空则使用系统 CA";
+                                        enabled: !root.connected && !root.connecting;
+                                    }
+                                }
+                            }
+                            HorizontalBox {
+                                spacing: 10px;
+                                VerticalBox {
+                                    spacing: 4px;
+                                    FieldLabel { caption: "客户端证书"; }
+                                    LineEdit {
+                                        text <=> root.ssl-cert;
+                                        placeholder-text: "可选，双向认证时填写";
+                                        enabled: !root.connected && !root.connecting;
+                                    }
+                                }
+                                VerticalBox {
+                                    spacing: 4px;
+                                    FieldLabel { caption: "客户端私钥"; }
+                                    LineEdit {
+                                        text <=> root.ssl-key;
+                                        placeholder-text: "可选，与证书成对";
+                                        enabled: !root.connected && !root.connecting;
+                                    }
+                                }
+                            }
+                            Text {
+                                text: "端口常用 8883。关闭校验仅用于自签证书调试。";
+                                color: #6d737c;
+                                font-size: 11px;
+                            }
+                        }
                         Text { text: "遗嘱消息 (Last Will)"; color: #c5cad3; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
@@ -735,7 +804,7 @@ export component AppWindow inherits Window {
                 }
 
                 VerticalBox {
-                    spacing: 12px;
+                    spacing: 8px;
                     horizontal-stretch: 1;
 
                     Rectangle {
@@ -743,8 +812,8 @@ export component AppWindow inherits Window {
                         background: #1e2229;
                         vertical-stretch: 1;
                         VerticalBox {
-                            padding: 12px;
-                            spacing: 8px;
+                            padding: 8px;
+                            spacing: 6px;
                             HorizontalBox {
                                 spacing: 8px;
                                 Text { text: "消息"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
@@ -793,20 +862,19 @@ export component AppWindow inherits Window {
                         border-radius: 10px;
                         background: #1e2229;
                         VerticalBox {
-                            padding: 12px;
-                            spacing: 8px;
+                            padding: 8px;
+                            spacing: 6px;
                             HorizontalBox {
-                                spacing: 8px;
+                                spacing: 6px;
                                 Text { text: "发布"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
                                     text <=> root.pub-topic;
-                                    placeholder-text: "topic";
+                                    placeholder-text: "Topic";
                                     enabled: root.connected;
                                 }
-                                Text { text: "QoS"; color: #8b919a; font-size: 11px; vertical-alignment: center; }
                                 Segmented {
                                     options: ["0", "1", "2"];
-                                    item-width: 36px;
+                                    item-width: 32px;
                                     current-index <=> root.pub-qos;
                                     interactive: root.connected;
                                 }
@@ -817,18 +885,30 @@ export component AppWindow inherits Window {
                                 }
                                 Segmented {
                                     options: ["文本", "JSON", "Base64", "Hex"];
-                                    item-width: 54px;
+                                    item-width: 48px;
                                     current-index <=> root.pub-format;
                                     interactive: root.connected;
                                 }
                                 Button {
-                                    width: 60px;
+                                    width: 48px;
                                     text: "美化";
                                     enabled: root.connected && root.pub-format == 1;
                                     clicked => { root.format-payload-requested(); }
                                 }
+                                LineEdit {
+                                    width: 44px;
+                                    text <=> root.timed-interval;
+                                    placeholder-text: "秒";
+                                    enabled: root.connected && !root.timed-running;
+                                }
                                 Button {
                                     width: 72px;
+                                    text: root.timed-running ? "停止" : "定时";
+                                    enabled: root.connected || root.timed-running;
+                                    clicked => { root.timed-toggle-requested(); }
+                                }
+                                Button {
+                                    width: 64px;
                                     text: "发布";
                                     enabled: root.connected;
                                     clicked => { root.publish-requested(); }
@@ -836,31 +916,14 @@ export component AppWindow inherits Window {
                             }
                             TextEdit {
                                 text <=> root.pub-payload;
-                                placeholder-text: "payload（支持多行）";
+                                placeholder-text: "Payload";
                                 enabled: root.connected;
                                 wrap: word-wrap;
                                 font-family: "Consolas";
-                                height: 84px;
+                                height: 56px;
                             }
-                            HorizontalBox {
-                                spacing: 8px;
-                                Text { text: "定时(秒)"; color: #8b919a; font-size: 11px; vertical-alignment: center; }
-                                LineEdit {
-                                    width: 72px;
-                                    text <=> root.timed-interval;
-                                    placeholder-text: "5";
-                                    enabled: root.connected && !root.timed-running;
-                                }
-                                Button {
-                                    width: 92px;
-                                    text: root.timed-running ? "停止" : "定时发布";
-                                    enabled: root.connected || root.timed-running;
-                                    clicked => { root.timed-toggle-requested(); }
-                                }
-                                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                             }
-                         }
-                     }
+                        }
+                    }
                  }
              }
          }

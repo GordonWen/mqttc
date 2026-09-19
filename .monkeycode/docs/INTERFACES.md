@@ -28,6 +28,9 @@
 | clean-session | bool | MQTT Clean Session |
 | will-topic / will-payload | string | Last Will Topic 与 Payload，Topic 为空则不发送遗嘱 |
 | will-qos / will-retain | int / bool | 遗嘱 QoS 与 Retain |
+| ssl | bool | 启用 MQTT over TLS（mqtts） |
+| ssl-verify | bool | 是否校验服务器证书 |
+| ssl-ca / ssl-cert / ssl-key | string | CA、客户端证书与私钥路径，证书可选 |
 | status / status-color | string / color | 当前连接状态文案与颜色 |
 | connected / connecting | bool | 控制按钮可用性 |
 | sub-topic / sub-qos | string / int | 待订阅 Topic 与 QoS（0/1/2） |
@@ -72,7 +75,7 @@
 
 | 命令 | 参数 |
 |------|------|
-| Connect | ConnectParams：host, port, client_id, username, password, keep_alive, clean_session, connect_timeout, Last Will |
+| Connect | ConnectParams：host, port, client_id, username, password, keep_alive, clean_session, connect_timeout, Last Will, SSL |
 | Disconnect | 无 |
 | Subscribe | topic, qos |
 | Unsubscribe | topic |
@@ -107,6 +110,11 @@
       "will_payload": "",
       "will_qos": 0,
       "will_retain": false,
+      "ssl": false,
+      "ssl_verify": true,
+      "ssl_ca": "",
+      "ssl_cert": "",
+      "ssl_key": "",
       "timed_interval": 5,
       "sub_topic": "mqttc/mvp/#",
       "sub_qos": 0,
