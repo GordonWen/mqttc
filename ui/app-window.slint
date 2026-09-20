@@ -69,128 +69,168 @@ component FieldLabel inherits Text {
 component MessageList inherits Rectangle {
     in-out property <[LogEntry]> logs: [];
     in-out property <bool> auto-scroll: true;
-    in-out property <length> log-scroll-y: 0px;
 
     background: #12141a;
     border-radius: 8px;
     clip: true;
 
-    log-view := ListView {
-        viewport-y <=> root.log-scroll-y;
-        for entry in root.logs: Rectangle {
-            min-height: 36px;
-            background: #12141a;
-            VerticalLayout {
-                padding-top: 5px;
-                padding-bottom: 5px;
-                padding-left: 10px;
-                padding-right: 10px;
-                if entry.kind == "RECV": HorizontalLayout {
-                    alignment: start;
-                    Rectangle {
-                        max-width: 520px;
-                        horizontal-stretch: 0;
-                        border-radius: 10px;
-                        background: #1b2f24;
-                        VerticalLayout {
-                            padding: 8px;
-                            spacing: 4px;
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: entry.topic;
-                                    color: #4ecf7a;
-                                    font-family: "Consolas";
-                                    font-size: 11px;
-                                    overflow: elide;
-                                    horizontal-stretch: 1;
+    function scroll-to-bottom() {
+        if (root.auto-scroll) {
+            log-view.viewport-y = min(0px, log-view.height - log-view.viewport-height);
+        }
+    }
+
+    changed auto-scroll => {
+        root.scroll-to-bottom();
+    }
+    changed logs => {
+        if (root.auto-scroll) {
+            stick-timer.running = false;
+            stick-timer.running = true;
+        }
+    }
+
+    stick-timer := Timer {
+        interval: 16ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.scroll-to-bottom();
+        }
+    }
+
+    log-view := Flickable {
+        width: 100%;
+        height: 100%;
+        viewport-width: self.width;
+
+        changed viewport-height => {
+            root.scroll-to-bottom();
+        }
+        changed height => {
+            root.scroll-to-bottom();
+        }
+
+        VerticalLayout {
+            width: 100%;
+            alignment: start;
+            spacing: 0px;
+            for entry in root.logs: Rectangle {
+                min-height: 36px;
+                width: 100%;
+                background: #12141a;
+                VerticalLayout {
+                    padding-top: 5px;
+                    padding-bottom: 5px;
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    if entry.kind == "RECV": HorizontalLayout {
+                        alignment: start;
+                        Rectangle {
+                            max-width: 520px;
+                            horizontal-stretch: 0;
+                            border-radius: 10px;
+                            background: #1b2f24;
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text {
+                                        text: entry.topic;
+                                        color: #4ecf7a;
+                                        font-family: "Consolas";
+                                        font-size: 11px;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                    Text {
+                                        text: entry.time;
+                                        color: #6d737c;
+                                        font-family: "Consolas";
+                                        font-size: 10px;
+                                    }
                                 }
                                 Text {
-                                    text: entry.time;
-                                    color: #6d737c;
-                                    font-family: "Consolas";
-                                    font-size: 10px;
-                                }
-                            }
-                            Text {
-                                text: entry.payload;
-                                color: #d7e8dc;
-                                wrap: word-wrap;
-                                font-family: "Consolas";
-                            }
-                        }
-                    }
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                }
-                if entry.kind == "SEND": HorizontalLayout {
-                    alignment: end;
-                    Rectangle { horizontal-stretch: 1; background: transparent; }
-                    Rectangle {
-                        max-width: 520px;
-                        horizontal-stretch: 0;
-                        border-radius: 10px;
-                        background: #1d2f4a;
-                        VerticalLayout {
-                            padding: 8px;
-                            spacing: 4px;
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Text {
-                                    text: entry.topic;
-                                    color: #5aa7ff;
-                                    font-family: "Consolas";
-                                    font-size: 11px;
-                                    overflow: elide;
-                                    horizontal-stretch: 1;
-                                }
-                                Text {
-                                    text: entry.time;
-                                    color: #6d737c;
-                                    font-family: "Consolas";
-                                    font-size: 10px;
-                                }
-                            }
-                            Text {
-                                text: entry.payload;
-                                color: #d5e4f7;
-                                wrap: word-wrap;
-                                font-family: "Consolas";
-                            }
-                        }
-                    }
-                }
-                if entry.kind != "RECV" && entry.kind != "SEND": HorizontalLayout {
-                    alignment: center;
-                    Rectangle {
-                        border-radius: 8px;
-                        background: entry.kind == "ERR" ? #3a2224 : #242830;
-                        VerticalLayout {
-                            padding: 6px;
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: center;
-                                Text {
-                                    text: entry.time;
-                                    color: #6d737c;
-                                    font-family: "Consolas";
-                                    font-size: 10px;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: entry.kind == "ERR" ? "错误" : "系统";
-                                    color: entry.kind == "ERR" ? #e85d5d : #9aa0a6;
-                                    font-size: 11px;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                }
-                                Text {
-                                    text: entry.topic == "" ? entry.payload : entry.topic + "  " + entry.payload;
-                                    color: entry.kind == "ERR" ? #f0c4c4 : #b8c0cc;
+                                    text: entry.payload;
+                                    color: #d7e8dc;
                                     wrap: word-wrap;
                                     font-family: "Consolas";
-                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    if entry.kind == "SEND": HorizontalLayout {
+                        alignment: end;
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                        Rectangle {
+                            max-width: 520px;
+                            horizontal-stretch: 0;
+                            border-radius: 10px;
+                            background: #1d2f4a;
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text {
+                                        text: entry.topic;
+                                        color: #5aa7ff;
+                                        font-family: "Consolas";
+                                        font-size: 11px;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+                                    Text {
+                                        text: entry.time;
+                                        color: #6d737c;
+                                        font-family: "Consolas";
+                                        font-size: 10px;
+                                    }
+                                }
+                                Text {
+                                    text: entry.payload;
+                                    color: #d5e4f7;
+                                    wrap: word-wrap;
+                                    font-family: "Consolas";
+                                }
+                            }
+                        }
+                    }
+                    if entry.kind != "RECV" && entry.kind != "SEND": HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            border-radius: 8px;
+                            background: entry.kind == "ERR" ? #3a2224 : #242830;
+                            VerticalLayout {
+                                padding: 6px;
+                                padding-left: 10px;
+                                padding-right: 10px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: center;
+                                    Text {
+                                        text: entry.time;
+                                        color: #6d737c;
+                                        font-family: "Consolas";
+                                        font-size: 10px;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: entry.kind == "ERR" ? "错误" : "系统";
+                                        color: entry.kind == "ERR" ? #e85d5d : #9aa0a6;
+                                        font-size: 11px;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                    Text {
+                                        text: entry.topic == "" ? entry.payload : entry.topic + "  " + entry.payload;
+                                        color: entry.kind == "ERR" ? #f0c4c4 : #b8c0cc;
+                                        wrap: word-wrap;
+                                        font-family: "Consolas";
+                                        vertical-alignment: center;
+                                    }
                                 }
                             }
                         }
@@ -199,12 +239,6 @@ component MessageList inherits Rectangle {
             }
         }
     }
-
-    states [
-        auto-scrolling when root.auto-scroll: {
-            log-scroll-y: min(0px, log-view.visible-height - log-view.viewport-height);
-        }
-    ]
 }
 
 export component AppWindow inherits Window {
@@ -263,7 +297,6 @@ export component AppWindow inherits Window {
     in-out property <bool> auto-scroll: true;
     in-out property <string> log-filter: "";
     in-out property <int> log-kind-filter: 0;
-    in-out property <length> log-scroll-y: 0px;
 
     callback new-connection-requested();
     callback select-connection-requested(string);
@@ -852,7 +885,6 @@ export component AppWindow inherits Window {
                             MessageList {
                                 logs <=> root.logs;
                                 auto-scroll <=> root.auto-scroll;
-                                log-scroll-y <=> root.log-scroll-y;
                                 vertical-stretch: 1;
                             }
                         }

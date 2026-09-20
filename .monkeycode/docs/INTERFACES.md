@@ -46,7 +46,6 @@
 | log-filter | string | 按 Topic / Payload / 类型关键字筛选 |
 | log-kind-filter | int | 0 全部、1 收、2 发、3 系统、4 错误 |
 | auto-scroll | bool | 日志自动滚动开关 |
-| log-scroll-y | length | 日志滚动偏移，与日志列表双向绑定 |
 
 ### 回调
 
