@@ -103,6 +103,7 @@ component MessageList inherits Rectangle {
         width: 100%;
         height: 100%;
         viewport-width: self.width;
+        viewport-height: max(self.height, content.preferred-height);
 
         changed viewport-height => {
             root.scroll-to-bottom();
@@ -111,13 +112,15 @@ component MessageList inherits Rectangle {
             root.scroll-to-bottom();
         }
 
-        VerticalLayout {
+        content := VerticalLayout {
             width: 100%;
+            height: self.preferred-height;
             alignment: start;
             spacing: 0px;
             for entry in root.logs: Rectangle {
-                min-height: 36px;
                 width: 100%;
+                vertical-stretch: 0;
+                height: self.preferred-height;
                 background: #12141a;
                 VerticalLayout {
                     padding-top: 5px;
