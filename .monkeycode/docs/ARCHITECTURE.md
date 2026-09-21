@@ -29,7 +29,7 @@ mqttc/
 
 - **UI 层** (`ui/app-window.slint`): MQTTX 式多页布局。左侧连接列表常驻；`page=0` 为连接配置页，`page=1` 为会话页（订阅栏 + 聊天气泡 + 底部发布）
 - **应用入口** (`src/main.rs`): 窗口创建、回调绑定、多连接运行时与状态刷新、Payload 编解码、日志筛选、定时发布
-- **配置层** (`src/config.rs`): 多连接配置与界面偏好的读写、旧配置迁移
+- **配置层** (`src/config.rs`): 多连接配置与界面偏好（含皮肤）的读写、旧配置迁移
 - **MQTT 会话** (`src/mqtt.rs`): 单连接生命周期、Keep Alive / Clean Session / 超时 / Last Will / TLS、订阅、取消订阅、发布、事件翻译
 
 ## 运行时状态

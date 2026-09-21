@@ -1,4 +1,4 @@
-import { Button, CheckBox, LineEdit, ListView, TextEdit, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
+import { Button, CheckBox, LineEdit, ListView, TextEdit, VerticalBox, HorizontalBox, ScrollView, Palette } from "std-widgets.slint";
 
 export struct ConnectionEntry {
     id: string,
@@ -21,6 +21,54 @@ export struct LogEntry {
     payload: string,
 }
 
+export global Theme {
+    in-out property <int> skin: 0;
+
+    pure function pick(black: color, white: color, blue: color, green: color, purple: color) -> color {
+        if (skin == 1) {
+            return white;
+        }
+        if (skin == 2) {
+            return blue;
+        }
+        if (skin == 3) {
+            return green;
+        }
+        if (skin == 4) {
+            return purple;
+        }
+        return black;
+    }
+
+    out property <color> window-bg: pick(#16181d, #e8edf3, #0f1724, #101812, #16141c);
+    out property <color> panel-bg: pick(#1e2229, #ffffff, #162033, #172019, #1e1b28);
+    out property <color> inset-bg: pick(#12141a, #f3f6fa, #0c1320, #0c120e, #120f18);
+    out property <color> hover-bg: pick(#3a3f49, #e4eaf2, #24344f, #24352a, #342e45);
+    out property <color> selected-bg: pick(#2b3240, #d7e6f8, #1d3358, #1e3a28, #3a2f52);
+    out property <color> badge-bg: pick(#242830, #e7ecf3, #1b283d, #1c2a20, #2a2536);
+    out property <color> text-primary: pick(#f2f4f8, #1c2430, #e8f0ff, #e8f5ea, #f0eaf8);
+    out property <color> text-title: pick(#c5cad3, #334155, #b8cce8, #b7d4bc, #cbbde0);
+    out property <color> text-muted: pick(#8b919a, #5b6573, #7d93b3, #7a9a80, #9789ad);
+    out property <color> text-faint: pick(#6d737c, #7a8491, #5d7394, #5e7a64, #756885);
+    out property <color> text-body: pick(#e4e8ef, #1c2430, #c5d6ee, #c5ddc9, #ddd2ee);
+    out property <color> accent: pick(#2f6fd0, #2f6fd0, #3d8bff, #2ea043, #8b5cf6);
+    out property <color> accent-fg: #ffffff;
+    out property <color> muted: pick(#9aa0a6, #6b7280, #8aa0bf, #8aaa90, #a394b8);
+    out property <color> recv-bg: pick(#1b2f24, #e4f6ea, #143028, #1a3324, #1b2f24);
+    out property <color> recv-topic: pick(#4ecf7a, #1f8a4c, #4ecf7a, #4ecf7a, #4ecf7a);
+    out property <color> recv-payload: pick(#d7e8dc, #1a3d28, #d7e8dc, #d7e8dc, #d7e8dc);
+    out property <color> send-bg: pick(#1d2f4a, #e4eefc, #1a3358, #1d2f4a, #2a2450);
+    out property <color> send-topic: pick(#5aa7ff, #1d5fbf, #7ab8ff, #5aa7ff, #b794f6);
+    out property <color> send-payload: pick(#d5e4f7, #1a2d4a, #d5e4f7, #d5e4f7, #e8defa);
+    out property <color> sys-bg: pick(#242830, #e7ecf3, #1b283d, #1c2a20, #2a2536);
+    out property <color> sys-text: pick(#b8c0cc, #3d4654, #b8c0cc, #c5ddc9, #ddd2ee);
+    out property <color> err-bg: pick(#3a2224, #fde8e8, #3a2224, #3a2224, #3a2224);
+    out property <color> err-label: pick(#e85d5d, #c62828, #e85d5d, #e85d5d, #e85d5d);
+    out property <color> err-text: pick(#f0c4c4, #7a1f1f, #f0c4c4, #f0c4c4, #f0c4c4);
+    out property <color> danger: pick(#e85d5d, #c62828, #e85d5d, #e85d5d, #e85d5d);
+    out property <color> sub-selected: pick(#243248, #d7e6f8, #1d3358, #1e3a28, #3a2f52);
+}
+
 component Segmented inherits Rectangle {
     in property <[string]> options: [];
     in-out property <int> current-index: 0;
@@ -31,18 +79,18 @@ component Segmented inherits Rectangle {
 
     height: 28px;
     border-radius: 6px;
-    background: #12141a;
+    background: Theme.inset-bg;
     width: options.length * item-width;
 
     HorizontalLayout {
         for opt[index] in options: Rectangle {
             width: item-width;
             border-radius: 5px;
-            background: index == current-index ? #2f6fd0 : transparent;
+            background: index == current-index ? Theme.accent : transparent;
             opacity: interactive ? 1 : 0.45;
             Text {
                 text: opt;
-                color: index == current-index ? #ffffff : #9aa0a6;
+                color: index == current-index ? Theme.accent-fg : Theme.muted;
                 horizontal-alignment: center;
                 vertical-alignment: center;
                 font-size: 12px;
@@ -62,7 +110,7 @@ component Segmented inherits Rectangle {
 component FieldLabel inherits Text {
     in property <string> caption;
     text: caption;
-    color: #8b919a;
+    color: Theme.text-muted;
     font-size: 11px;
 }
 
@@ -70,7 +118,7 @@ component MessageList inherits Rectangle {
     in-out property <[LogEntry]> logs: [];
     in-out property <bool> auto-scroll: true;
 
-    background: #12141a;
+    background: Theme.inset-bg;
     border-radius: 8px;
     clip: true;
 
@@ -121,7 +169,7 @@ component MessageList inherits Rectangle {
                 width: 100%;
                 vertical-stretch: 0;
                 height: self.preferred-height;
-                background: #12141a;
+                background: Theme.inset-bg;
                 VerticalLayout {
                     padding-top: 5px;
                     padding-bottom: 5px;
@@ -133,7 +181,7 @@ component MessageList inherits Rectangle {
                             max-width: 520px;
                             horizontal-stretch: 0;
                             border-radius: 10px;
-                            background: #1b2f24;
+                            background: Theme.recv-bg;
                             VerticalLayout {
                                 padding: 8px;
                                 spacing: 4px;
@@ -141,7 +189,7 @@ component MessageList inherits Rectangle {
                                     spacing: 8px;
                                     Text {
                                         text: entry.topic;
-                                        color: #4ecf7a;
+                                        color: Theme.recv-topic;
                                         font-family: "Consolas";
                                         font-size: 11px;
                                         overflow: elide;
@@ -149,14 +197,14 @@ component MessageList inherits Rectangle {
                                     }
                                     Text {
                                         text: entry.time;
-                                        color: #6d737c;
+                                        color: Theme.text-faint;
                                         font-family: "Consolas";
                                         font-size: 10px;
                                     }
                                 }
                                 Text {
                                     text: entry.payload;
-                                    color: #d7e8dc;
+                                    color: Theme.recv-payload;
                                     wrap: word-wrap;
                                     font-family: "Consolas";
                                 }
@@ -171,7 +219,7 @@ component MessageList inherits Rectangle {
                             max-width: 520px;
                             horizontal-stretch: 0;
                             border-radius: 10px;
-                            background: #1d2f4a;
+                            background: Theme.send-bg;
                             VerticalLayout {
                                 padding: 8px;
                                 spacing: 4px;
@@ -179,7 +227,7 @@ component MessageList inherits Rectangle {
                                     spacing: 8px;
                                     Text {
                                         text: entry.topic;
-                                        color: #5aa7ff;
+                                        color: Theme.send-topic;
                                         font-family: "Consolas";
                                         font-size: 11px;
                                         overflow: elide;
@@ -187,14 +235,14 @@ component MessageList inherits Rectangle {
                                     }
                                     Text {
                                         text: entry.time;
-                                        color: #6d737c;
+                                        color: Theme.text-faint;
                                         font-family: "Consolas";
                                         font-size: 10px;
                                     }
                                 }
                                 Text {
                                     text: entry.payload;
-                                    color: #d5e4f7;
+                                    color: Theme.send-payload;
                                     wrap: word-wrap;
                                     font-family: "Consolas";
                                 }
@@ -205,7 +253,7 @@ component MessageList inherits Rectangle {
                         alignment: center;
                         Rectangle {
                             border-radius: 8px;
-                            background: entry.kind == "ERR" ? #3a2224 : #242830;
+                            background: entry.kind == "ERR" ? Theme.err-bg : Theme.sys-bg;
                             VerticalLayout {
                                 padding: 6px;
                                 padding-left: 10px;
@@ -215,21 +263,21 @@ component MessageList inherits Rectangle {
                                     alignment: center;
                                     Text {
                                         text: entry.time;
-                                        color: #6d737c;
+                                        color: Theme.text-faint;
                                         font-family: "Consolas";
                                         font-size: 10px;
                                         vertical-alignment: center;
                                     }
                                     Text {
                                         text: entry.kind == "ERR" ? "错误" : "系统";
-                                        color: entry.kind == "ERR" ? #e85d5d : #9aa0a6;
+                                        color: entry.kind == "ERR" ? Theme.err-label : Theme.muted;
                                         font-size: 11px;
                                         font-weight: 600;
                                         vertical-alignment: center;
                                     }
                                     Text {
                                         text: entry.topic == "" ? entry.payload : entry.topic + "  " + entry.payload;
-                                        color: entry.kind == "ERR" ? #f0c4c4 : #b8c0cc;
+                                        color: entry.kind == "ERR" ? Theme.err-text : Theme.sys-text;
                                         wrap: word-wrap;
                                         font-family: "Consolas";
                                         vertical-alignment: center;
@@ -250,7 +298,7 @@ export component AppWindow inherits Window {
     min-height: 720px;
     preferred-width: 1600px;
     preferred-height: 860px;
-    background: #16181d;
+    background: Theme.window-bg;
     default-font-family: "Segoe UI";
     default-font-size: 13px;
 
@@ -300,6 +348,16 @@ export component AppWindow inherits Window {
     in-out property <bool> auto-scroll: true;
     in-out property <string> log-filter: "";
     in-out property <int> log-kind-filter: 0;
+    in-out property <int> skin <=> Theme.skin;
+
+    init => {
+        Palette.color-scheme = skin == 1 ? ColorScheme.light : ColorScheme.dark;
+    }
+
+    changed skin => {
+        Palette.color-scheme = skin == 1 ? ColorScheme.light : ColorScheme.dark;
+        root.skin-changed();
+    }
 
     callback new-connection-requested();
     callback select-connection-requested(string);
@@ -319,6 +377,7 @@ export component AppWindow inherits Window {
     callback log-filter-changed();
     callback save-logs-requested();
     callback clear-logs-requested();
+    callback skin-changed();
 
     HorizontalBox {
         padding: 12px;
@@ -327,13 +386,13 @@ export component AppWindow inherits Window {
         Rectangle {
             width: 248px;
             border-radius: 10px;
-            background: #1e2229;
+            background: Theme.panel-bg;
             VerticalBox {
                 padding: 10px;
                 spacing: 8px;
                 HorizontalBox {
                     spacing: 6px;
-                    Text { text: "连接"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
+                    Text { text: "连接"; color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
                     Button {
                         width: 40px;
@@ -342,14 +401,14 @@ export component AppWindow inherits Window {
                     }
                 }
                 Rectangle {
-                    background: #12141a;
+                    background: Theme.inset-bg;
                     border-radius: 8px;
                     vertical-stretch: 1;
                     clip: true;
                     ListView {
                         for conn in root.connections: Rectangle {
                             height: 54px;
-                            background: conn.id == root.active-connection-id ? #2b3240 : transparent;
+                            background: conn.id == root.active-connection-id ? Theme.selected-bg : transparent;
                             row-touch := TouchArea {
                                 width: 100%;
                                 height: 100%;
@@ -374,7 +433,7 @@ export component AppWindow inherits Window {
                                     spacing: 2px;
                                     Text {
                                         text: conn.name;
-                                        color: #e4e8ef;
+                                        color: Theme.text-body;
                                         overflow: elide;
                                         font-weight: 600;
                                         vertical-alignment: center;
@@ -392,11 +451,11 @@ export component AppWindow inherits Window {
                                     width: 22px;
                                     height: 22px;
                                     border-radius: 11px;
-                                    background: del-touch.has-hover ? #3a3f49 : transparent;
+                                    background: del-touch.has-hover ? Theme.hover-bg : transparent;
                                     y: (parent.height - self.height) / 2;
                                     Text {
                                         text: "×";
-                                        color: #e85d5d;
+                                        color: Theme.danger;
                                         font-size: 15px;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -409,12 +468,18 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                Text { text: "皮肤"; color: Theme.text-title; font-weight: 600; }
+                Segmented {
+                    options: ["黑", "白", "蓝", "绿", "紫"];
+                    item-width: 40px;
+                    current-index <=> root.skin;
+                }
             }
         }
 
         if root.page == 0: Rectangle {
             border-radius: 10px;
-            background: #1e2229;
+            background: Theme.panel-bg;
             horizontal-stretch: 1;
             VerticalBox {
                 padding: 16px;
@@ -423,14 +488,14 @@ export component AppWindow inherits Window {
                     spacing: 10px;
                     Text {
                         text: "连接配置";
-                        color: #f2f4f8;
+                        color: Theme.text-primary;
                         font-size: 16px;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
                     Text {
                         text: root.connection-name;
-                        color: #8b919a;
+                        color: Theme.text-muted;
                         vertical-alignment: center;
                         overflow: elide;
                     }
@@ -452,7 +517,7 @@ export component AppWindow inherits Window {
                     VerticalBox {
                         padding-right: 8px;
                         spacing: 14px;
-                        Text { text: "基础信息"; color: #c5cad3; font-weight: 600; }
+                        Text { text: "基础信息"; color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
                             VerticalBox {
@@ -524,7 +589,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        Text { text: "高级参数"; color: #c5cad3; font-weight: 600; }
+                        Text { text: "高级参数"; color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
                             VerticalBox {
@@ -558,7 +623,7 @@ export component AppWindow inherits Window {
                             }
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                         }
-                        Text { text: "SSL / TLS"; color: #c5cad3; font-weight: 600; }
+                        Text { text: "SSL / TLS"; color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
                             CheckBox {
@@ -618,11 +683,11 @@ export component AppWindow inherits Window {
                             }
                             Text {
                                 text: "端口常用 8883。关闭校验仅用于自签证书调试。";
-                                color: #6d737c;
+                                color: Theme.text-faint;
                                 font-size: 11px;
                             }
                         }
-                        Text { text: "遗嘱消息 (Last Will)"; color: #c5cad3; font-weight: 600; }
+                        Text { text: "遗嘱消息 (Last Will)"; color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
                             VerticalBox {
@@ -646,7 +711,7 @@ export component AppWindow inherits Window {
                         }
                         HorizontalBox {
                             spacing: 8px;
-                            Text { text: "遗嘱 QoS"; color: #8b919a; font-size: 11px; vertical-alignment: center; }
+                            Text { text: "遗嘱 QoS"; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; }
                             Segmented {
                                 options: ["0", "1", "2"];
                                 item-width: 42px;
@@ -671,7 +736,7 @@ export component AppWindow inherits Window {
 
             Rectangle {
                 border-radius: 10px;
-                background: #1e2229;
+                background: Theme.panel-bg;
                 VerticalBox {
                     padding: 12px;
                     spacing: 6px;
@@ -679,7 +744,7 @@ export component AppWindow inherits Window {
                         spacing: 10px;
                         Text {
                             text: root.connection-name;
-                            color: #f2f4f8;
+                            color: Theme.text-primary;
                             font-size: 16px;
                             font-weight: 700;
                             vertical-alignment: center;
@@ -687,14 +752,14 @@ export component AppWindow inherits Window {
                         }
                         Text {
                             text: root.connection-summary;
-                            color: #8b919a;
+                            color: Theme.text-muted;
                             vertical-alignment: center;
                             overflow: elide;
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                         Rectangle {
                             border-radius: 11px;
-                            background: #242830;
+                            background: Theme.badge-bg;
                             VerticalLayout {
                                 padding-left: 10px;
                                 padding-right: 10px;
@@ -748,11 +813,11 @@ export component AppWindow inherits Window {
                 Rectangle {
                     width: 260px;
                     border-radius: 10px;
-                    background: #1e2229;
+                    background: Theme.panel-bg;
                     VerticalBox {
                         padding: 12px;
                         spacing: 8px;
-                        Text { text: "订阅"; color: #c5cad3; font-weight: 600; }
+                        Text { text: "订阅"; color: Theme.text-title; font-weight: 600; }
                         LineEdit {
                             text <=> root.sub-topic;
                             placeholder-text: "topic/filter/#";
@@ -760,7 +825,7 @@ export component AppWindow inherits Window {
                         }
                         HorizontalBox {
                             spacing: 8px;
-                            Text { text: "QoS"; color: #8b919a; font-size: 11px; vertical-alignment: center; }
+                            Text { text: "QoS"; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; }
                             Segmented {
                                 options: ["0", "1", "2"];
                                 item-width: 42px;
@@ -777,19 +842,19 @@ export component AppWindow inherits Window {
                         }
                         Text {
                             text: root.active-sub-topic == "" ? "点击订阅可筛选消息" : "正在筛选: " + root.active-sub-topic;
-                            color: #6d737c;
+                            color: Theme.text-faint;
                             font-size: 11px;
                             overflow: elide;
                         }
                         Rectangle {
-                            background: #12141a;
+                            background: Theme.inset-bg;
                             border-radius: 6px;
                             vertical-stretch: 1;
                             clip: true;
                             ListView {
                                 for sub[index] in root.subscriptions: Rectangle {
                                     height: 44px;
-                                    background: sub.selected ? #243248 : transparent;
+                                    background: sub.selected ? Theme.sub-selected : transparent;
                                     sub-touch := TouchArea {
                                         clicked => { root.filter-subscription-requested(sub.topic); }
                                     }
@@ -802,14 +867,14 @@ export component AppWindow inherits Window {
                                             spacing: 2px;
                                             Text {
                                                 text: sub.topic;
-                                                color: sub.selected ? #5aa7ff : #d7dde6;
+                                                color: sub.selected ? Theme.send-topic : Theme.text-body;
                                                 overflow: elide;
                                                 font-family: "Consolas";
                                                 vertical-alignment: center;
                                             }
                                             Text {
                                                 text: "QoS " + sub.qos;
-                                                color: #8b919a;
+                                                color: Theme.text-muted;
                                                 font-size: 11px;
                                                 vertical-alignment: center;
                                             }
@@ -819,11 +884,11 @@ export component AppWindow inherits Window {
                                             width: 22px;
                                             height: 22px;
                                             border-radius: 11px;
-                                            background: cancel-touch.has-hover ? #3a3f49 : transparent;
+                                            background: cancel-touch.has-hover ? Theme.hover-bg : transparent;
                                             y: (parent.height - self.height) / 2;
                                             Text {
                                                 text: "×";
-                                                color: #e85d5d;
+                                                color: Theme.danger;
                                                 font-size: 15px;
                                                 horizontal-alignment: center;
                                                 vertical-alignment: center;
@@ -845,14 +910,14 @@ export component AppWindow inherits Window {
 
                     Rectangle {
                         border-radius: 10px;
-                        background: #1e2229;
+                        background: Theme.panel-bg;
                         vertical-stretch: 1;
                         VerticalBox {
                             padding: 8px;
                             spacing: 6px;
                             HorizontalBox {
                                 spacing: 8px;
-                                Text { text: "消息"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
+                                Text { text: "消息"; color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
                                     width: 160px;
                                     text <=> root.log-filter;
@@ -895,13 +960,13 @@ export component AppWindow inherits Window {
 
                     Rectangle {
                         border-radius: 10px;
-                        background: #1e2229;
+                        background: Theme.panel-bg;
                         VerticalBox {
                             padding: 8px;
                             spacing: 6px;
                             HorizontalBox {
                                 spacing: 6px;
-                                Text { text: "发布"; color: #c5cad3; font-weight: 600; vertical-alignment: center; }
+                                Text { text: "发布"; color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
                                     text <=> root.pub-topic;
                                     placeholder-text: "Topic";

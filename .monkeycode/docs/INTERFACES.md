@@ -46,6 +46,7 @@
 | log-filter | string | 按 Topic / Payload / 类型关键字筛选 |
 | log-kind-filter | int | 0 全部、1 收、2 发、3 系统、4 错误 |
 | auto-scroll | bool | 日志自动滚动开关 |
+| skin | int | 皮肤索引：0 黑、1 白、2 蓝、3 绿、4 紫 |
 
 ### 回调
 
@@ -67,6 +68,7 @@
 | log-format-changed | 切换接收显示格式 |
 | log-filter-changed | 日志搜索框或类型筛选变化 |
 | save-logs-requested / clear-logs-requested | 保存 / 清空日志 |
+| skin-changed | 切换皮肤 |
 
 ## MQTT 会话命令
 

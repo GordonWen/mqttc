@@ -33,6 +33,57 @@ enum PayloadFormat {
     Hex,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Skin {
+    Black,
+    White,
+    Blue,
+    Green,
+    Purple,
+}
+
+impl Skin {
+    fn from_index(index: i32) -> Self {
+        match index {
+            1 => Self::White,
+            2 => Self::Blue,
+            3 => Self::Green,
+            4 => Self::Purple,
+            _ => Self::Black,
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "white" => Self::White,
+            "blue" => Self::Blue,
+            "green" => Self::Green,
+            "purple" => Self::Purple,
+            _ => Self::Black,
+        }
+    }
+
+    fn to_index(self) -> i32 {
+        match self {
+            Self::Black => 0,
+            Self::White => 1,
+            Self::Blue => 2,
+            Self::Green => 3,
+            Self::Purple => 4,
+        }
+    }
+
+    fn to_key(self) -> &'static str {
+        match self {
+            Self::Black => "black",
+            Self::White => "white",
+            Self::Blue => "blue",
+            Self::Green => "green",
+            Self::Purple => "purple",
+        }
+    }
+}
+
 impl PayloadFormat {
     fn from_index(index: i32) -> Self {
         match index {
@@ -724,6 +775,17 @@ fn register_callbacks(ui: &AppWindow) {
         }
     });
 
+    ui.on_skin_changed({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_prefs(&ui, st);
+                persist(st);
+            });
+        }
+    });
+
     ui.on_save_logs_requested({
         let ui_weak = ui_weak.clone();
         move || {
@@ -883,6 +945,7 @@ fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_auto_scroll(st.config.auto_scroll);
     ui.set_log_filter(st.config.log_filter.clone().into());
     ui.set_log_kind_filter(st.config.log_kind_filter.clamp(0, 4));
+    ui.set_skin(Skin::from_key(&st.config.skin).to_index());
     show_page(ui, 1);
 }
 
@@ -1054,6 +1117,7 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     st.config.auto_scroll = ui.get_auto_scroll();
     st.config.log_filter = ui.get_log_filter().to_string();
     st.config.log_kind_filter = ui.get_log_kind_filter().clamp(0, 4);
+    st.config.skin = Skin::from_index(ui.get_skin()).to_key().to_string();
 }
 
 fn publish_from_form(ui: &AppWindow, st: &mut AppState, persist_on_ok: bool) -> Result<(), ()> {
@@ -1409,6 +1473,23 @@ mod tests {
             assert_eq!(PayloadFormat::from_index(format.to_index()), format);
             assert_eq!(PayloadFormat::from_key(format.to_key()), format);
         }
+    }
+
+    #[test]
+    fn skin_index_and_key_round_trip() {
+        let skins = [
+            Skin::Black,
+            Skin::White,
+            Skin::Blue,
+            Skin::Green,
+            Skin::Purple,
+        ];
+        for skin in skins {
+            assert_eq!(Skin::from_index(skin.to_index()), skin);
+            assert_eq!(Skin::from_key(skin.to_key()), skin);
+        }
+        assert_eq!(Skin::from_key("unknown"), Skin::Black);
+        assert_eq!(Skin::from_index(99), Skin::Black);
     }
 
     fn sample_log(kind: &str, topic: &str, payload: &str) -> LogData {

@@ -93,6 +93,8 @@ pub struct AppConfig {
     pub log_filter: String,
     #[serde(default)]
     pub log_kind_filter: i32,
+    #[serde(default = "default_skin")]
+    pub skin: String,
 }
 
 fn default_host() -> String {
@@ -139,6 +141,10 @@ fn default_timed_interval() -> u32 {
     5
 }
 
+fn default_skin() -> String {
+    "black".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -149,6 +155,7 @@ impl Default for AppConfig {
             show_advanced: false,
             log_filter: String::new(),
             log_kind_filter: 0,
+            skin: default_skin(),
         }
     }
 }
@@ -354,6 +361,7 @@ mod tests {
         config.connections.push(conn);
         config.log_format = "base64".to_string();
         config.auto_scroll = false;
+        config.skin = "green".to_string();
 
         let text = serde_json::to_string(&config).expect("serialize");
         let back: AppConfig = serde_json::from_str(&text).expect("deserialize");
@@ -379,5 +387,6 @@ mod tests {
         assert_eq!(back.connections[0].subscriptions[0].qos, 2);
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);
+        assert_eq!(back.skin, "green");
     }
 }
