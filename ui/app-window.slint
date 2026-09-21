@@ -67,6 +67,8 @@ export global Theme {
     out property <color> err-text: pick(#f0c4c4, #7a1f1f, #f0c4c4, #f0c4c4, #f0c4c4);
     out property <color> danger: pick(#e85d5d, #c62828, #e85d5d, #e85d5d, #e85d5d);
     out property <color> sub-selected: pick(#243248, #d7e6f8, #1d3358, #1e3a28, #3a2f52);
+    out property <string> ui-font: "Microsoft YaHei UI";
+    out property <string> mono-font: "Cascadia Mono";
 }
 
 component Segmented inherits Rectangle {
@@ -93,7 +95,9 @@ component Segmented inherits Rectangle {
                 color: index == current-index ? Theme.accent-fg : Theme.muted;
                 horizontal-alignment: center;
                 vertical-alignment: center;
-                font-size: 12px;
+                font-family: Theme.ui-font;
+                font-size: 13px;
+                font-weight: 500;
             }
             seg-touch := TouchArea {
                 clicked => {
@@ -111,7 +115,9 @@ component FieldLabel inherits Text {
     in property <string> caption;
     text: caption;
     color: Theme.text-muted;
-    font-size: 11px;
+    font-family: Theme.ui-font;
+    font-size: 12px;
+    font-weight: 500;
 }
 
 component MessageList inherits Rectangle {
@@ -190,23 +196,24 @@ component MessageList inherits Rectangle {
                                     Text {
                                         text: entry.topic;
                                         color: Theme.recv-topic;
-                                        font-family: "Consolas";
-                                        font-size: 11px;
+                                        font-family: Theme.mono-font;
+                                        font-size: 13px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
                                     Text {
                                         text: entry.time;
                                         color: Theme.text-faint;
-                                        font-family: "Consolas";
-                                        font-size: 10px;
+                                        font-family: Theme.mono-font;
+                                        font-size: 12px;
                                     }
                                 }
                                 Text {
                                     text: entry.payload;
                                     color: Theme.recv-payload;
                                     wrap: word-wrap;
-                                    font-family: "Consolas";
+                                    font-family: Theme.mono-font;
+                                    font-size: 13px;
                                 }
                             }
                         }
@@ -228,23 +235,24 @@ component MessageList inherits Rectangle {
                                     Text {
                                         text: entry.topic;
                                         color: Theme.send-topic;
-                                        font-family: "Consolas";
-                                        font-size: 11px;
+                                        font-family: Theme.mono-font;
+                                        font-size: 13px;
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
                                     Text {
                                         text: entry.time;
                                         color: Theme.text-faint;
-                                        font-family: "Consolas";
-                                        font-size: 10px;
+                                        font-family: Theme.mono-font;
+                                        font-size: 12px;
                                     }
                                 }
                                 Text {
                                     text: entry.payload;
                                     color: Theme.send-payload;
                                     wrap: word-wrap;
-                                    font-family: "Consolas";
+                                    font-family: Theme.mono-font;
+                                    font-size: 13px;
                                 }
                             }
                         }
@@ -264,14 +272,15 @@ component MessageList inherits Rectangle {
                                     Text {
                                         text: entry.time;
                                         color: Theme.text-faint;
-                                        font-family: "Consolas";
-                                        font-size: 10px;
+                                        font-family: Theme.mono-font;
+                                        font-size: 12px;
                                         vertical-alignment: center;
                                     }
                                     Text {
                                         text: entry.kind == "ERR" ? "错误" : "系统";
                                         color: entry.kind == "ERR" ? Theme.err-label : Theme.muted;
-                                        font-size: 11px;
+                                        font-family: Theme.ui-font;
+                                        font-size: 12px;
                                         font-weight: 600;
                                         vertical-alignment: center;
                                     }
@@ -279,7 +288,8 @@ component MessageList inherits Rectangle {
                                         text: entry.topic == "" ? entry.payload : entry.topic + "  " + entry.payload;
                                         color: entry.kind == "ERR" ? Theme.err-text : Theme.sys-text;
                                         wrap: word-wrap;
-                                        font-family: "Consolas";
+                                        font-family: Theme.mono-font;
+                                        font-size: 13px;
                                         vertical-alignment: center;
                                     }
                                 }
@@ -299,8 +309,9 @@ export component AppWindow inherits Window {
     preferred-width: 1600px;
     preferred-height: 860px;
     background: Theme.window-bg;
-    default-font-family: "Segoe UI";
-    default-font-size: 13px;
+    default-font-family: Theme.ui-font;
+    default-font-size: 14px;
+    default-font-weight: 500;
 
     in-out property <int> page: 0;
     in-out property <string> active-connection-id: "";
@@ -441,7 +452,7 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: conn.status;
                                         color: conn.status-color;
-                                        font-size: 11px;
+                                        font-size: 12px;
                                         overflow: elide;
                                         vertical-alignment: center;
                                     }
@@ -684,7 +695,7 @@ export component AppWindow inherits Window {
                             Text {
                                 text: "端口常用 8883。关闭校验仅用于自签证书调试。";
                                 color: Theme.text-faint;
-                                font-size: 11px;
+                                font-size: 12px;
                             }
                         }
                         Text { text: "遗嘱消息 (Last Will)"; color: Theme.text-title; font-weight: 600; }
@@ -711,7 +722,7 @@ export component AppWindow inherits Window {
                         }
                         HorizontalBox {
                             spacing: 8px;
-                            Text { text: "遗嘱 QoS"; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; }
+                            Text { text: "遗嘱 QoS"; color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
                             Segmented {
                                 options: ["0", "1", "2"];
                                 item-width: 42px;
@@ -825,7 +836,7 @@ export component AppWindow inherits Window {
                         }
                         HorizontalBox {
                             spacing: 8px;
-                            Text { text: "QoS"; color: Theme.text-muted; font-size: 11px; vertical-alignment: center; }
+                            Text { text: "QoS"; color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
                             Segmented {
                                 options: ["0", "1", "2"];
                                 item-width: 42px;
@@ -843,7 +854,7 @@ export component AppWindow inherits Window {
                         Text {
                             text: root.active-sub-topic == "" ? "点击订阅可筛选消息" : "正在筛选: " + root.active-sub-topic;
                             color: Theme.text-faint;
-                            font-size: 11px;
+                            font-size: 12px;
                             overflow: elide;
                         }
                         Rectangle {
@@ -869,13 +880,13 @@ export component AppWindow inherits Window {
                                                 text: sub.topic;
                                                 color: sub.selected ? Theme.send-topic : Theme.text-body;
                                                 overflow: elide;
-                                                font-family: "Consolas";
+                                                font-family: Theme.mono-font;
                                                 vertical-alignment: center;
                                             }
                                             Text {
                                                 text: "QoS " + sub.qos;
                                                 color: Theme.text-muted;
-                                                font-size: 11px;
+                                                font-size: 12px;
                                                 vertical-alignment: center;
                                             }
                                         }
@@ -1019,7 +1030,7 @@ export component AppWindow inherits Window {
                                 placeholder-text: "Payload";
                                 enabled: root.connected;
                                 wrap: word-wrap;
-                                font-family: "Consolas";
+                                font-family: Theme.mono-font;
                                 height: 56px;
                             }
                         }
