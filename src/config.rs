@@ -95,6 +95,8 @@ pub struct AppConfig {
     pub log_kind_filter: i32,
     #[serde(default = "default_skin")]
     pub skin: String,
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 fn default_host() -> String {
@@ -145,6 +147,10 @@ fn default_skin() -> String {
     "black".to_string()
 }
 
+fn default_language() -> String {
+    "zh".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -156,6 +162,7 @@ impl Default for AppConfig {
             log_filter: String::new(),
             log_kind_filter: 0,
             skin: default_skin(),
+            language: default_language(),
         }
     }
 }
@@ -227,11 +234,24 @@ pub fn load() -> Result<Option<AppConfig>, String> {
     if !path.exists() {
         return Ok(None);
     }
-    let text = fs::read_to_string(&path).map_err(|err| format!("读取配置失败: {err}"))?;
-    let value: serde_json::Value =
-        serde_json::from_str(&text).map_err(|err| format!("解析配置失败: {err}"))?;
-    let mut config: AppConfig =
-        serde_json::from_value(value.clone()).map_err(|err| format!("解析配置失败: {err}"))?;
+    let text = fs::read_to_string(&path).map_err(|err| {
+        crate::i18n::t(
+            &format!("读取配置失败: {err}"),
+            &format!("Failed to read config: {err}"),
+        )
+    })?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
+        crate::i18n::t(
+            &format!("解析配置失败: {err}"),
+            &format!("Failed to parse config: {err}"),
+        )
+    })?;
+    let mut config: AppConfig = serde_json::from_value(value.clone()).map_err(|err| {
+        crate::i18n::t(
+            &format!("解析配置失败: {err}"),
+            &format!("Failed to parse config: {err}"),
+        )
+    })?;
 
     if config.connections.is_empty() {
         if let Some(conn) = legacy_connection(&value) {
@@ -304,9 +324,18 @@ fn legacy_connection(value: &serde_json::Value) -> Option<ConnectionConfig> {
 
 pub fn save(config: &AppConfig) -> Result<(), String> {
     let path = config_path();
-    let text =
-        serde_json::to_string_pretty(config).map_err(|err| format!("序列化配置失败: {err}"))?;
-    fs::write(&path, text).map_err(|err| format!("写入配置失败: {err}"))
+    let text = serde_json::to_string_pretty(config).map_err(|err| {
+        crate::i18n::t(
+            &format!("序列化配置失败: {err}"),
+            &format!("Failed to serialize config: {err}"),
+        )
+    })?;
+    fs::write(&path, text).map_err(|err| {
+        crate::i18n::t(
+            &format!("写入配置失败: {err}"),
+            &format!("Failed to write config: {err}"),
+        )
+    })
 }
 
 #[cfg(test)]
@@ -362,6 +391,7 @@ mod tests {
         config.log_format = "base64".to_string();
         config.auto_scroll = false;
         config.skin = "green".to_string();
+        config.language = "en".to_string();
 
         let text = serde_json::to_string(&config).expect("serialize");
         let back: AppConfig = serde_json::from_str(&text).expect("deserialize");
@@ -388,5 +418,6 @@ mod tests {
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);
         assert_eq!(back.skin, "green");
+        assert_eq!(back.language, "en");
     }
 }

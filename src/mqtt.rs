@@ -49,14 +49,18 @@ struct Inner {
     client: Option<Client>,
 }
 
-fn connack_reason(code: ConnectReturnCode) -> &'static str {
+fn connack_reason(code: ConnectReturnCode) -> String {
     match code {
-        ConnectReturnCode::Success => "连接成功",
-        ConnectReturnCode::RefusedProtocolVersion => "协议版本不被接受",
-        ConnectReturnCode::BadClientId => "Client ID 不被接受",
-        ConnectReturnCode::ServiceUnavailable => "服务不可用",
-        ConnectReturnCode::BadUserNamePassword => "用户名或密码错误",
-        ConnectReturnCode::NotAuthorized => "未授权",
+        ConnectReturnCode::Success => crate::i18n::t("连接成功", "Connected"),
+        ConnectReturnCode::RefusedProtocolVersion => {
+            crate::i18n::t("协议版本不被接受", "Unacceptable protocol version")
+        }
+        ConnectReturnCode::BadClientId => crate::i18n::t("Client ID 不被接受", "Client ID rejected"),
+        ConnectReturnCode::ServiceUnavailable => crate::i18n::t("服务不可用", "Service unavailable"),
+        ConnectReturnCode::BadUserNamePassword => {
+            crate::i18n::t("用户名或密码错误", "Bad username or password")
+        }
+        ConnectReturnCode::NotAuthorized => crate::i18n::t("未授权", "Not authorized"),
     }
 }
 
@@ -133,7 +137,10 @@ impl MqttHandle {
                             on_event(UiEvent::Connected);
                         } else {
                             on_event(UiEvent::Error {
-                                message: format!("连接被拒绝: {}", connack_reason(ack.code)),
+                                message: crate::i18n::t(
+                                    &format!("连接被拒绝: {}", connack_reason(ack.code)),
+                                    &format!("Connection refused: {}", connack_reason(ack.code)),
+                                ),
                             });
                             on_event(UiEvent::Disconnected {
                                 reason: format!("{:?}", ack.code),
@@ -175,7 +182,10 @@ impl MqttHandle {
 
     pub fn subscribe(&self, topic: &str, qos: QoS) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
-        let client = inner.client.as_ref().ok_or_else(|| "未连接".to_string())?;
+        let client = inner
+            .client
+            .as_ref()
+            .ok_or_else(|| crate::i18n::t("未连接", "Not connected"))?;
         client
             .subscribe(topic, qos)
             .map_err(|err| err.to_string())
@@ -183,7 +193,10 @@ impl MqttHandle {
 
     pub fn unsubscribe(&self, topic: &str) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
-        let client = inner.client.as_ref().ok_or_else(|| "未连接".to_string())?;
+        let client = inner
+            .client
+            .as_ref()
+            .ok_or_else(|| crate::i18n::t("未连接", "Not connected"))?;
         client
             .unsubscribe(topic)
             .map_err(|err| err.to_string())
@@ -197,7 +210,10 @@ impl MqttHandle {
         payload: Vec<u8>,
     ) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
-        let client = inner.client.as_ref().ok_or_else(|| "未连接".to_string())?;
+        let client = inner
+            .client
+            .as_ref()
+            .ok_or_else(|| crate::i18n::t("未连接", "Not connected"))?;
         client
             .publish(topic, qos, retain, payload)
             .map_err(|err| err.to_string())
@@ -217,34 +233,60 @@ fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
     let ca_path = params.ssl_ca.trim();
     if !ca_path.is_empty() {
         let mut reader = BufReader::new(
-            File::open(ca_path).map_err(|err| format!("读取 CA 证书失败: {err}"))?,
+            File::open(ca_path).map_err(|err| {
+                crate::i18n::t(
+                    &format!("读取 CA 证书失败: {err}"),
+                    &format!("Failed to read CA certificate: {err}"),
+                )
+            })?,
         );
         let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|err| format!("解析 CA 证书失败: {err}"))?;
+            .map_err(|err| {
+                crate::i18n::t(
+                    &format!("解析 CA 证书失败: {err}"),
+                    &format!("Failed to parse CA certificate: {err}"),
+                )
+            })?;
         if certs.is_empty() {
-            return Err("CA 证书文件中没有有效证书".to_string());
+            return Err(crate::i18n::t(
+                "CA 证书文件中没有有效证书",
+                "No valid certificate in CA file",
+            ));
         }
         for cert in certs {
-            roots
-                .add(cert)
-                .map_err(|err| format!("加载 CA 证书失败: {err}"))?;
+            roots.add(cert).map_err(|err| {
+                crate::i18n::t(
+                    &format!("加载 CA 证书失败: {err}"),
+                    &format!("Failed to load CA certificate: {err}"),
+                )
+            })?;
         }
     } else if params.ssl_verify {
-        let native = rustls_native_certs::load_native_certs()
-            .map_err(|err| format!("加载系统 CA 失败: {err}"))?;
+        let native = rustls_native_certs::load_native_certs().map_err(|err| {
+            crate::i18n::t(
+                &format!("加载系统 CA 失败: {err}"),
+                &format!("Failed to load system CA: {err}"),
+            )
+        })?;
         for cert in native {
             let _ = roots.add(cert);
         }
         if roots.is_empty() {
-            return Err("系统 CA 证书为空，请指定 CA 文件".to_string());
+            return Err(crate::i18n::t(
+                "系统 CA 证书为空，请指定 CA 文件",
+                "System CA store is empty, specify a CA file",
+            ));
         }
     }
 
     let client_certs = load_client_certs(params.ssl_cert.trim())?;
     let client_key = load_client_key(params.ssl_key.trim())?;
     if client_certs.is_some() != client_key.is_some() {
-        return Err("客户端证书和私钥需要同时填写".to_string());
+        return Err(crate::i18n::t(
+            "客户端证书和私钥需要同时填写",
+            "Client certificate and private key are both required",
+        ));
     }
 
     let builder = ClientConfig::builder();
@@ -253,7 +295,12 @@ fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
             builder
                 .with_root_certificates(roots)
                 .with_client_auth_cert(certs, key)
-                .map_err(|err| format!("加载客户端证书失败: {err}"))?
+                .map_err(|err| {
+                    crate::i18n::t(
+                        &format!("加载客户端证书失败: {err}"),
+                        &format!("Failed to load client certificate: {err}"),
+                    )
+                })?
         } else {
             builder
                 .with_root_certificates(roots)
@@ -264,7 +311,12 @@ fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoServerVerification))
             .with_client_auth_cert(certs, key)
-            .map_err(|err| format!("加载客户端证书失败: {err}"))?
+            .map_err(|err| {
+                crate::i18n::t(
+                    &format!("加载客户端证书失败: {err}"),
+                    &format!("Failed to load client certificate: {err}"),
+                )
+            })?
     } else {
         ClientConfig::builder()
             .dangerous()
@@ -281,12 +333,25 @@ fn load_client_certs(path: &str) -> Result<Option<Vec<CertificateDer<'static>>>,
         return Ok(None);
     }
     let mut reader =
-        BufReader::new(File::open(path).map_err(|err| format!("读取客户端证书失败: {err}"))?);
+        BufReader::new(File::open(path).map_err(|err| {
+            crate::i18n::t(
+                &format!("读取客户端证书失败: {err}"),
+                &format!("Failed to read client certificate: {err}"),
+            )
+        })?);
     let certs: Vec<CertificateDer<'static>> = rustls_pemfile::certs(&mut reader)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| format!("解析客户端证书失败: {err}"))?;
+        .map_err(|err| {
+            crate::i18n::t(
+                &format!("解析客户端证书失败: {err}"),
+                &format!("Failed to parse client certificate: {err}"),
+            )
+        })?;
     if certs.is_empty() {
-        return Err("客户端证书文件中没有有效证书".to_string());
+        return Err(crate::i18n::t(
+            "客户端证书文件中没有有效证书",
+            "No valid certificate in client certificate file",
+        ));
     }
     Ok(Some(certs))
 }
@@ -296,10 +361,25 @@ fn load_client_key(path: &str) -> Result<Option<PrivateKeyDer<'static>>, String>
         return Ok(None);
     }
     let mut reader =
-        BufReader::new(File::open(path).map_err(|err| format!("读取客户端私钥失败: {err}"))?);
+        BufReader::new(File::open(path).map_err(|err| {
+            crate::i18n::t(
+                &format!("读取客户端私钥失败: {err}"),
+                &format!("Failed to read client private key: {err}"),
+            )
+        })?);
     rustls_pemfile::private_key(&mut reader)
-        .map_err(|err| format!("解析客户端私钥失败: {err}"))?
-        .ok_or_else(|| "客户端私钥文件中没有有效私钥".to_string())
+        .map_err(|err| {
+            crate::i18n::t(
+                &format!("解析客户端私钥失败: {err}"),
+                &format!("Failed to parse client private key: {err}"),
+            )
+        })?
+        .ok_or_else(|| {
+            crate::i18n::t(
+                "客户端私钥文件中没有有效私钥",
+                "No valid private key in client key file",
+            )
+        })
         .map(Some)
 }
 
@@ -389,7 +469,7 @@ mod tests {
         params.ssl_verify = true;
         params.ssl_ca = "/no/such/ca.pem".into();
         match build_tls_transport(&params) {
-            Err(err) => assert!(err.contains("读取 CA 证书失败")),
+            Err(err) => assert!(err.contains("CA")),
             Ok(_) => panic!("expected missing CA file to fail"),
         }
     }

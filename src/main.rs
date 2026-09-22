@@ -1,11 +1,13 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod config;
+mod i18n;
 mod mqtt;
 
 use base64::Engine;
 use chrono::Local;
 use config::{AppConfig, ConnectionConfig, SubscriptionConfig};
+use i18n::Lang;
 use mqtt::{qos_from_u8, ConnectParams, MqttHandle, UiEvent};
 use slint::{ComponentHandle, VecModel};
 use std::cell::RefCell;
@@ -130,11 +132,11 @@ enum ConnStatus {
 }
 
 impl ConnStatus {
-    fn text(self) -> &'static str {
+    fn text(self) -> String {
         match self {
-            Self::Disconnected => "未连接",
-            Self::Connecting => "连接中",
-            Self::Connected => "已连接",
+            Self::Disconnected => i18n::t("未连接", "Disconnected"),
+            Self::Connecting => i18n::t("连接中", "Connecting"),
+            Self::Connected => i18n::t("已连接", "Connected"),
         }
     }
 
@@ -253,8 +255,9 @@ fn main() -> Result<(), slint::PlatformError> {
             Ok(None) => {}
             Err(err) => guard.startup_error = Some(err),
         }
+        i18n::set_lang(Lang::from_key(&guard.config.language));
         if guard.config.connections.is_empty() {
-            let conn = ConnectionConfig::new("本地 Broker".to_string());
+            let conn = ConnectionConfig::new(i18n::local_broker_name());
             guard.config.active_id = conn.id.clone();
             guard.config.connections.push(conn);
         }
@@ -285,7 +288,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 &mut guard,
                 "SYS",
                 "",
-                format!("配置文件 {}", config::config_path().display()).into_bytes(),
+                i18n::t(
+                    &format!("配置文件 {}", config::config_path().display()),
+                    &format!("Config file {}", config::config_path().display()),
+                )
+                .into_bytes(),
             ),
         }
     }
@@ -309,7 +316,7 @@ fn register_callbacks(ui: &AppWindow) {
             let Some(ui) = ui_weak.upgrade() else { return };
             with_state(|st| {
                 sync_form(&ui, st);
-                let name = format!("连接 {}", st.config.connections.len() + 1);
+                let name = i18n::new_connection_name(st.config.connections.len() + 1);
                 let conn = ConnectionConfig::new(name);
                 st.config.active_id = conn.id.clone();
                 st.config.connections.push(conn);
@@ -360,7 +367,7 @@ fn register_callbacks(ui: &AppWindow) {
                         .unwrap_or_default();
                 }
                 if st.config.connections.is_empty() {
-                    let conn = ConnectionConfig::new("本地 Broker".to_string());
+                    let conn = ConnectionConfig::new(i18n::local_broker_name());
                     st.config.active_id = conn.id.clone();
                     st.config.connections.push(conn);
                 }
@@ -384,13 +391,26 @@ fn register_callbacks(ui: &AppWindow) {
 
                 let host = cfg.host.trim().to_string();
                 if host.is_empty() {
-                    push_log(&ui, st, "ERR", "", "主机不能为空".as_bytes().to_vec());
+                    push_log(
+                        &ui,
+                        st,
+                        "ERR",
+                        "",
+                        i18n::t("主机不能为空", "Host is required").into_bytes(),
+                    );
                     return;
                 }
                 let port = match cfg.port.trim().parse::<u16>() {
                     Ok(port) if port > 0 => port,
                     _ => {
-                        push_log(&ui, st, "ERR", "", "端口无效，范围为 1-65535".as_bytes().to_vec());
+                        push_log(
+                            &ui,
+                            st,
+                            "ERR",
+                            "",
+                            i18n::t("端口无效，范围为 1-65535", "Invalid port, range is 1-65535")
+                                .into_bytes(),
+                        );
                         return;
                     }
                 };
@@ -403,7 +423,9 @@ fn register_callbacks(ui: &AppWindow) {
                 st.config.connections[idx] = cfg.clone();
 
                 let auth_hint = if cfg.username.is_empty() {
-                    "匿名".to_string()
+                    i18n::t("匿名", "anonymous")
+                } else if i18n::is_en() {
+                    format!("user {}", cfg.username)
                 } else {
                     format!("用户 {}", cfg.username)
                 };
@@ -412,33 +434,48 @@ fn register_callbacks(ui: &AppWindow) {
                 st.runtime_mut(&id).status = ConnStatus::Connecting;
                 let will_hint = if cfg.will_topic.trim().is_empty() {
                     String::new()
+                } else if i18n::is_en() {
+                    format!(", will {}", cfg.will_topic.trim())
                 } else {
                     format!("，遗嘱 {}", cfg.will_topic.trim())
                 };
                 let ssl_hint = if cfg.ssl {
                     if cfg.ssl_verify {
-                        "，SSL 校验证书"
+                        i18n::t("，SSL 校验证书", ", SSL verify on")
                     } else {
-                        "，SSL 不校验证书"
+                        i18n::t("，SSL 不校验证书", ", SSL verify off")
                     }
                 } else {
-                    ""
+                    String::new()
                 };
                 push_log(
                     &ui,
                     st,
                     "SYS",
                     "",
-                    format!(
-                        "正在连接 {}:{} ({}, {}，Keep Alive {}s，超时 {}s{}{})",
-                        cfg.host,
-                        cfg.port,
-                        cfg.client_id,
-                        auth_hint,
-                        cfg.keep_alive,
-                        cfg.connect_timeout,
-                        ssl_hint,
-                        will_hint
+                    i18n::t(
+                        &format!(
+                            "正在连接 {}:{} ({}, {}，Keep Alive {}s，超时 {}s{}{})",
+                            cfg.host,
+                            cfg.port,
+                            cfg.client_id,
+                            auth_hint,
+                            cfg.keep_alive,
+                            cfg.connect_timeout,
+                            ssl_hint,
+                            will_hint
+                        ),
+                        &format!(
+                            "Connecting {}:{} ({}, {}, Keep Alive {}s, timeout {}s{}{})",
+                            cfg.host,
+                            cfg.port,
+                            cfg.client_id,
+                            auth_hint,
+                            cfg.keep_alive,
+                            cfg.connect_timeout,
+                            ssl_hint,
+                            will_hint
+                        ),
                     )
                     .into_bytes(),
                 );
@@ -519,7 +556,13 @@ fn register_callbacks(ui: &AppWindow) {
                 st.runtime_mut(&id).mqtt.disconnect();
                 st.runtime_mut(&id).status = ConnStatus::Disconnected;
                 ui.set_timed_running(false);
-                push_log(&ui, st, "SYS", "", "已断开连接".as_bytes().to_vec());
+                push_log(
+                    &ui,
+                    st,
+                    "SYS",
+                    "",
+                    i18n::t("已断开连接", "Disconnected").into_bytes(),
+                );
                 refresh_status(&ui, st);
                 refresh_connections(&ui, st);
                 persist(st);
@@ -535,12 +578,24 @@ fn register_callbacks(ui: &AppWindow) {
                 sync_form(&ui, st);
                 let Some(id) = st.active_id() else { return };
                 if !st.is_connected(&id) {
-                    push_log(&ui, st, "ERR", "", "请先连接 Broker".as_bytes().to_vec());
+                    push_log(
+                        &ui,
+                        st,
+                        "ERR",
+                        "",
+                        i18n::t("请先连接 Broker", "Connect to a broker first").into_bytes(),
+                    );
                     return;
                 }
                 let topic = ui.get_sub_topic().trim().to_string();
                 if topic.is_empty() {
-                    push_log(&ui, st, "ERR", "", "Topic 为空".as_bytes().to_vec());
+                    push_log(
+                        &ui,
+                        st,
+                        "ERR",
+                        "",
+                        i18n::t("Topic 为空", "Topic is empty").into_bytes(),
+                    );
                     return;
                 }
                 let qos = ui.get_sub_qos().clamp(0, 2) as u8;
@@ -553,7 +608,13 @@ fn register_callbacks(ui: &AppWindow) {
                             .iter()
                             .any(|sub| sub.topic == topic);
                         if exists {
-                            push_log(&ui, st, "SYS", &topic, "已在订阅列表中".as_bytes().to_vec());
+                            push_log(
+                                &ui,
+                                st,
+                                "SYS",
+                                &topic,
+                                i18n::t("已在订阅列表中", "Already in subscription list").into_bytes(),
+                            );
                         } else {
                             st.config.connections[idx].subscriptions.push(SubscriptionConfig {
                                 topic: topic.clone(),
@@ -564,7 +625,11 @@ fn register_callbacks(ui: &AppWindow) {
                                 st,
                                 "SYS",
                                 &topic,
-                                format!("已订阅 QoS {qos}").into_bytes(),
+                                i18n::t(
+                                    &format!("已订阅 QoS {qos}"),
+                                    &format!("Subscribed QoS {qos}"),
+                                )
+                                .into_bytes(),
                             );
                             refresh_subscriptions(&ui, st);
                         }
@@ -592,7 +657,13 @@ fn register_callbacks(ui: &AppWindow) {
                 if let Err(err) = mqtt.unsubscribe(&sub.topic) {
                     push_log(&ui, st, "ERR", &sub.topic, err.into_bytes());
                 } else {
-                    push_log(&ui, st, "SYS", &sub.topic, "已取消订阅".as_bytes().to_vec());
+                    push_log(
+                        &ui,
+                        st,
+                        "SYS",
+                        &sub.topic,
+                        i18n::t("已取消订阅", "Unsubscribed").into_bytes(),
+                    );
                 }
                 if let Some(idx) = st.active_index() {
                     if pos < st.config.connections[idx].subscriptions.len() {
@@ -664,12 +735,24 @@ fn register_callbacks(ui: &AppWindow) {
                 if st.runtime_mut(&id).timed_running {
                     st.stop_timed(&id);
                     ui.set_timed_running(false);
-                    push_log(&ui, st, "SYS", "", "已停止定时发布".as_bytes().to_vec());
+                    push_log(
+                        &ui,
+                        st,
+                        "SYS",
+                        "",
+                        i18n::t("已停止定时发布", "Timed publish stopped").into_bytes(),
+                    );
                     persist(st);
                     return;
                 }
                 if !st.is_connected(&id) {
-                    push_log(&ui, st, "ERR", "", "请先连接 Broker".as_bytes().to_vec());
+                    push_log(
+                        &ui,
+                        st,
+                        "ERR",
+                        "",
+                        i18n::t("请先连接 Broker", "Connect to a broker first").into_bytes(),
+                    );
                     return;
                 }
                 let interval = match parse_timed_interval(&ui.get_timed_interval()) {
@@ -698,7 +781,11 @@ fn register_callbacks(ui: &AppWindow) {
                     st,
                     "SYS",
                     "",
-                    format!("已启动定时发布，每 {interval} 秒").into_bytes(),
+                    i18n::t(
+                        &format!("已启动定时发布，每 {interval} 秒"),
+                        &format!("Timed publish started every {interval}s"),
+                    )
+                    .into_bytes(),
                 );
                 persist(st);
 
@@ -786,6 +873,31 @@ fn register_callbacks(ui: &AppWindow) {
         }
     });
 
+    ui.on_language_changed({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_prefs(&ui, st);
+                refresh_connections(&ui, st);
+                refresh_status(&ui, st);
+                persist(st);
+            });
+        }
+    });
+
+    ui.on_settings_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                persist(st);
+                show_page(&ui, 2);
+            });
+        }
+    });
+
     ui.on_save_logs_requested({
         let ui_weak = ui_weak.clone();
         move || {
@@ -795,7 +907,13 @@ fn register_callbacks(ui: &AppWindow) {
                 let format = PayloadFormat::from_index(ui.get_log_format());
                 let logs = st.runtime_mut(&id).logs.clone();
                 if logs.is_empty() {
-                    push_log(&ui, st, "ERR", "", "当前没有可保存的日志".as_bytes().to_vec());
+                    push_log(
+                        &ui,
+                        st,
+                        "ERR",
+                        "",
+                        i18n::t("当前没有可保存的日志", "No logs to save").into_bytes(),
+                    );
                     return;
                 }
                 match save_logs_to_file(&logs, format) {
@@ -804,7 +922,11 @@ fn register_callbacks(ui: &AppWindow) {
                         st,
                         "SYS",
                         "",
-                        format!("日志已保存到 {}", path.display()).into_bytes(),
+                        i18n::t(
+                            &format!("日志已保存到 {}", path.display()),
+                            &format!("Logs saved to {}", path.display()),
+                        )
+                        .into_bytes(),
                     ),
                     Err(err) => push_log(&ui, st, "ERR", "", err.into_bytes()),
                 }
@@ -829,7 +951,14 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
     match event {
         UiEvent::Connected => {
             st.runtime_mut(conn_id).status = ConnStatus::Connected;
-            push_log_for(ui, st, conn_id, "SYS", "", "连接成功".as_bytes().to_vec());
+            push_log_for(
+                ui,
+                st,
+                conn_id,
+                "SYS",
+                "",
+                i18n::t("连接成功", "Connected").into_bytes(),
+            );
             resubscribe_all(ui, st, conn_id);
             if st.config.active_id == conn_id {
                 show_page(ui, 1);
@@ -854,7 +983,11 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
                     conn_id,
                     "SYS",
                     "",
-                    format!("连接结束: {reason}").into_bytes(),
+                    i18n::t(
+                        &format!("连接结束: {reason}"),
+                        &format!("Connection ended: {reason}"),
+                    )
+                    .into_bytes(),
                 );
             }
             if was_timed {
@@ -864,7 +997,11 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
                     conn_id,
                     "SYS",
                     "",
-                    "连接断开，已停止定时发布".as_bytes().to_vec(),
+                    i18n::t(
+                        "连接断开，已停止定时发布",
+                        "Disconnected, timed publish stopped",
+                    )
+                    .into_bytes(),
                 );
             }
         }
@@ -899,7 +1036,7 @@ fn resubscribe_all(ui: &AppWindow, st: &mut AppState, conn_id: &str) {
                 conn_id,
                 "SYS",
                 &sub.topic,
-                "已重新订阅".as_bytes().to_vec(),
+                i18n::t("已重新订阅", "Resubscribed").into_bytes(),
             ),
             Err(err) => push_log_for(ui, st, conn_id, "ERR", &sub.topic, err.into_bytes()),
         }
@@ -946,6 +1083,7 @@ fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_log_filter(st.config.log_filter.clone().into());
     ui.set_log_kind_filter(st.config.log_kind_filter.clamp(0, 4));
     ui.set_skin(Skin::from_key(&st.config.skin).to_index());
+    ui.set_language(Lang::from_key(&st.config.language).to_index());
     show_page(ui, 1);
 }
 
@@ -1118,6 +1256,8 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     st.config.log_filter = ui.get_log_filter().to_string();
     st.config.log_kind_filter = ui.get_log_kind_filter().clamp(0, 4);
     st.config.skin = Skin::from_index(ui.get_skin()).to_key().to_string();
+    st.config.language = Lang::from_index(ui.get_language()).to_key().to_string();
+    i18n::set_lang(Lang::from_index(ui.get_language()));
 }
 
 fn publish_from_form(ui: &AppWindow, st: &mut AppState, persist_on_ok: bool) -> Result<(), ()> {
@@ -1139,7 +1279,14 @@ fn publish_from_connection_inner(
     from_form: bool,
 ) -> Result<(), ()> {
     if !st.is_connected(conn_id) {
-        push_log_for(ui, st, conn_id, "ERR", "", "请先连接 Broker".as_bytes().to_vec());
+        push_log_for(
+            ui,
+            st,
+            conn_id,
+            "ERR",
+            "",
+            i18n::t("请先连接 Broker", "Connect to a broker first").into_bytes(),
+        );
         return Err(());
     }
     let Some(idx) = st
@@ -1157,7 +1304,14 @@ fn publish_from_connection_inner(
         cfg.pub_topic.trim().to_string()
     };
     if topic.is_empty() {
-        push_log_for(ui, st, conn_id, "ERR", "", "Topic 为空".as_bytes().to_vec());
+        push_log_for(
+            ui,
+            st,
+            conn_id,
+            "ERR",
+            "",
+            i18n::t("Topic 为空", "Topic is empty").into_bytes(),
+        );
         return Err(());
     }
     let format = if from_form {
@@ -1272,17 +1426,31 @@ fn parse_timed_interval(text: &str) -> Result<u32, String> {
     let value = text
         .trim()
         .parse::<u32>()
-        .map_err(|_| "定时间隔无效，范围为 1-3600 秒".to_string())?;
+        .map_err(|_| {
+            i18n::t(
+                "定时间隔无效，范围为 1-3600 秒",
+                "Invalid interval, range is 1-3600 seconds",
+            )
+        })?;
     if (1..=3600).contains(&value) {
         Ok(value)
     } else {
-        Err("定时间隔无效，范围为 1-3600 秒".to_string())
+        Err(i18n::t(
+            "定时间隔无效，范围为 1-3600 秒",
+            "Invalid interval, range is 1-3600 seconds",
+        ))
     }
 }
 
 fn persist(st: &AppState) {
     if let Err(err) = config::save(&st.config) {
-        eprintln!("保存配置失败: {err}");
+        eprintln!(
+            "{}",
+            i18n::t(
+                &format!("保存配置失败: {err}"),
+                &format!("Failed to save config: {err}")
+            )
+        );
     }
 }
 
@@ -1325,15 +1493,24 @@ fn encode_payload(text: &str, format: PayloadFormat) -> Result<Vec<u8>, String> 
             if trimmed.is_empty() {
                 return Ok(Vec::new());
             }
-            serde_json::from_str::<serde_json::Value>(trimmed)
-                .map_err(|err| format!("JSON 格式无效: {err}"))?;
+            serde_json::from_str::<serde_json::Value>(trimmed).map_err(|err| {
+                i18n::t(
+                    &format!("JSON 格式无效: {err}"),
+                    &format!("Invalid JSON: {err}"),
+                )
+            })?;
             Ok(text.as_bytes().to_vec())
         }
         PayloadFormat::Base64 => {
             let cleaned: String = text.chars().filter(|c| !c.is_whitespace()).collect();
             base64::engine::general_purpose::STANDARD
                 .decode(cleaned)
-                .map_err(|err| format!("Base64 解码失败: {err}"))
+                .map_err(|err| {
+                    i18n::t(
+                        &format!("Base64 解码失败: {err}"),
+                        &format!("Base64 decode failed: {err}"),
+                    )
+                })
         }
         PayloadFormat::Hex => decode_hex(text),
     }
@@ -1341,8 +1518,18 @@ fn encode_payload(text: &str, format: PayloadFormat) -> Result<Vec<u8>, String> 
 
 fn beautify_json(text: &str) -> Result<String, String> {
     let value: serde_json::Value =
-        serde_json::from_str(text.trim()).map_err(|err| format!("JSON 格式无效: {err}"))?;
-    serde_json::to_string_pretty(&value).map_err(|err| format!("JSON 格式化失败: {err}"))
+        serde_json::from_str(text.trim()).map_err(|err| {
+            i18n::t(
+                &format!("JSON 格式无效: {err}"),
+                &format!("Invalid JSON: {err}"),
+            )
+        })?;
+    serde_json::to_string_pretty(&value).map_err(|err| {
+        i18n::t(
+            &format!("JSON 格式化失败: {err}"),
+            &format!("JSON format failed: {err}"),
+        )
+    })
 }
 
 fn encode_hex(bytes: &[u8]) -> String {
@@ -1363,12 +1550,17 @@ fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
     }
     let chars: Vec<char> = cleaned.chars().collect();
     if chars.len() % 2 != 0 {
-        return Err("Hex 长度必须为偶数".to_string());
+        return Err(i18n::t("Hex 长度必须为偶数", "Hex length must be even"));
     }
     let mut out = Vec::with_capacity(chars.len() / 2);
     for pair in chars.chunks(2) {
         let token: String = pair.iter().collect();
-        let byte = u8::from_str_radix(&token, 16).map_err(|_| format!("Hex 字符无效: {token}"))?;
+        let byte = u8::from_str_radix(&token, 16).map_err(|_| {
+            i18n::t(
+                &format!("Hex 字符无效: {token}"),
+                &format!("Invalid hex character: {token}"),
+            )
+        })?;
         out.push(byte);
     }
     Ok(out)
@@ -1376,7 +1568,12 @@ fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
 
 fn save_logs_to_file(logs: &[LogData], format: PayloadFormat) -> Result<PathBuf, String> {
     let dir = config::log_dir();
-    std::fs::create_dir_all(&dir).map_err(|err| format!("创建日志目录失败: {err}"))?;
+    std::fs::create_dir_all(&dir).map_err(|err| {
+        i18n::t(
+            &format!("创建日志目录失败: {err}"),
+            &format!("Failed to create log directory: {err}"),
+        )
+    })?;
     let path = dir.join(format!("mqttc-{}.log", Local::now().format("%Y%m%d-%H%M%S")));
 
     let mut content = String::new();
@@ -1392,7 +1589,12 @@ fn save_logs_to_file(logs: &[LogData], format: PayloadFormat) -> Result<PathBuf,
         }
     }
 
-    std::fs::write(&path, content).map_err(|err| format!("写入日志文件失败: {err}"))?;
+    std::fs::write(&path, content).map_err(|err| {
+        i18n::t(
+            &format!("写入日志文件失败: {err}"),
+            &format!("Failed to write log file: {err}"),
+        )
+    })?;
     Ok(path)
 }
 
@@ -1490,6 +1692,16 @@ mod tests {
         }
         assert_eq!(Skin::from_key("unknown"), Skin::Black);
         assert_eq!(Skin::from_index(99), Skin::Black);
+    }
+
+    #[test]
+    fn language_index_and_key_round_trip() {
+        assert_eq!(Lang::from_index(Lang::Zh.to_index()), Lang::Zh);
+        assert_eq!(Lang::from_index(Lang::En.to_index()), Lang::En);
+        assert_eq!(Lang::from_key(Lang::Zh.to_key()), Lang::Zh);
+        assert_eq!(Lang::from_key(Lang::En.to_key()), Lang::En);
+        assert_eq!(Lang::from_key("unknown"), Lang::Zh);
+        assert_eq!(Lang::from_index(99), Lang::Zh);
     }
 
     fn sample_log(kind: &str, topic: &str, payload: &str) -> LogData {

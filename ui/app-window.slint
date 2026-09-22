@@ -71,39 +71,91 @@ export global Theme {
     out property <string> mono-font: "Cascadia Mono";
 }
 
-component Segmented inherits Rectangle {
+export global I18n {
+    in-out property <int> language: 0;
+
+    public pure function t(zh: string, en: string) -> string {
+        if (language == 1) {
+            return en;
+        }
+        return zh;
+    }
+}
+
+component Select inherits Rectangle {
     in property <[string]> options: [];
     in-out property <int> current-index: 0;
     in property <bool> interactive: true;
-    in property <length> item-width: 54px;
-
     callback activated(int);
 
     height: 28px;
+    width: 72px;
     border-radius: 6px;
     background: Theme.inset-bg;
-    width: options.length * item-width;
+    opacity: interactive ? 1 : 0.45;
 
     HorizontalLayout {
-        for opt[index] in options: Rectangle {
-            width: item-width;
-            border-radius: 5px;
-            background: index == current-index ? Theme.accent : transparent;
-            opacity: interactive ? 1 : 0.45;
-            Text {
-                text: opt;
-                color: index == current-index ? Theme.accent-fg : Theme.muted;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-                font-family: Theme.ui-font;
-                font-size: 13px;
-                font-weight: 500;
+        padding-left: 8px;
+        padding-right: 6px;
+        spacing: 2px;
+        Text {
+            text: current-index >= 0 && current-index < options.length ? options[current-index] : "";
+            color: Theme.text-body;
+            font-family: Theme.ui-font;
+            font-size: 13px;
+            font-weight: 500;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: "v";
+            color: Theme.text-muted;
+            font-family: Theme.ui-font;
+            font-size: 11px;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            if (interactive) {
+                menu.show();
             }
-            seg-touch := TouchArea {
-                clicked => {
-                    if (interactive) {
-                        current-index = index;
-                        activated(index);
+        }
+    }
+
+    menu := PopupWindow {
+        x: 0;
+        y: root.height + 2px;
+        width: max(root.width, 88px);
+        Rectangle {
+            background: Theme.panel-bg;
+            border-radius: 6px;
+            VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+                for opt[index] in root.options: Rectangle {
+                    height: 26px;
+                    border-radius: 4px;
+                    background: item-touch.has-hover ? Theme.hover-bg : (index == root.current-index ? Theme.selected-bg : transparent);
+                    Text {
+                        text: opt;
+                        color: Theme.text-body;
+                        font-family: Theme.ui-font;
+                        font-size: 13px;
+                        vertical-alignment: center;
+                        horizontal-alignment: left;
+                        x: 8px;
+                        width: parent.width - 16px;
+                        overflow: elide;
+                    }
+                    item-touch := TouchArea {
+                        clicked => {
+                            root.current-index = index;
+                            root.activated(index);
+                            menu.close();
+                        }
                     }
                 }
             }
@@ -277,7 +329,7 @@ component MessageList inherits Rectangle {
                                         vertical-alignment: center;
                                     }
                                     Text {
-                                        text: entry.kind == "ERR" ? "错误" : "系统";
+                                        text: entry.kind == "ERR" ? I18n.t("错误", "Error") : I18n.t("系统", "System");
                                         color: entry.kind == "ERR" ? Theme.err-label : Theme.muted;
                                         font-family: Theme.ui-font;
                                         font-size: 12px;
@@ -304,9 +356,9 @@ component MessageList inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "mqttc";
-    min-width: 1480px;
+    min-width: 1180px;
     min-height: 720px;
-    preferred-width: 1600px;
+    preferred-width: 1360px;
     preferred-height: 860px;
     background: Theme.window-bg;
     default-font-family: Theme.ui-font;
@@ -336,7 +388,7 @@ export component AppWindow inherits Window {
     in-out property <string> ssl-ca: "";
     in-out property <string> ssl-cert: "";
     in-out property <string> ssl-key: "";
-    in-out property <string> status: "未连接";
+    in-out property <string> status: "Disconnected";
     in-out property <color> status-color: #9aa0a6;
     in-out property <bool> connected: false;
     in-out property <bool> connecting: false;
@@ -360,6 +412,7 @@ export component AppWindow inherits Window {
     in-out property <string> log-filter: "";
     in-out property <int> log-kind-filter: 0;
     in-out property <int> skin <=> Theme.skin;
+    in-out property <int> language <=> I18n.language;
 
     init => {
         Palette.color-scheme = skin == 1 ? ColorScheme.light : ColorScheme.dark;
@@ -368,6 +421,10 @@ export component AppWindow inherits Window {
     changed skin => {
         Palette.color-scheme = skin == 1 ? ColorScheme.light : ColorScheme.dark;
         root.skin-changed();
+    }
+
+    changed language => {
+        root.language-changed();
     }
 
     callback new-connection-requested();
@@ -389,24 +446,26 @@ export component AppWindow inherits Window {
     callback save-logs-requested();
     callback clear-logs-requested();
     callback skin-changed();
+    callback language-changed();
+    callback settings-requested();
 
     HorizontalBox {
         padding: 12px;
         spacing: 12px;
 
         Rectangle {
-            width: 248px;
+            width: 188px;
             border-radius: 10px;
             background: Theme.panel-bg;
             VerticalBox {
-                padding: 10px;
+                padding: 8px;
                 spacing: 8px;
                 HorizontalBox {
                     spacing: 6px;
-                    Text { text: "连接"; color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
+                    Text { text: I18n.t("连接", "Conns"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
                     Button {
-                        width: 40px;
+                        width: 32px;
                         text: "+";
                         clicked => { root.new-connection-requested(); }
                     }
@@ -430,8 +489,8 @@ export component AppWindow inherits Window {
                                 y: 0;
                                 width: parent.width;
                                 height: parent.height;
-                                padding: 8px;
-                                spacing: 8px;
+                                padding: 6px;
+                                spacing: 6px;
                                 Rectangle {
                                     width: 8px;
                                     height: 8px;
@@ -479,11 +538,72 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                Text { text: "皮肤"; color: Theme.text-title; font-weight: 600; }
-                Segmented {
-                    options: ["黑", "白", "蓝", "绿", "紫"];
-                    item-width: 40px;
-                    current-index <=> root.skin;
+                Button {
+                    text: I18n.t("设置", "Settings");
+                    clicked => { root.settings-requested(); }
+                }
+            }
+        }
+
+        if root.page == 2: Rectangle {
+            border-radius: 10px;
+            background: Theme.panel-bg;
+            horizontal-stretch: 1;
+            VerticalBox {
+                padding: 16px;
+                spacing: 16px;
+                HorizontalBox {
+                    spacing: 10px;
+                    Text {
+                        text: I18n.t("设置", "Settings");
+                        color: Theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        width: 88px;
+                        text: I18n.t("返回会话", "Back");
+                        clicked => { root.back-to-session-requested(); }
+                    }
+                }
+                VerticalBox {
+                    spacing: 18px;
+                    Text { text: I18n.t("外观", "Appearance"); color: Theme.text-title; font-weight: 600; }
+                    HorizontalBox {
+                        spacing: 12px;
+                        FieldLabel { caption: I18n.t("皮肤", "Skin"); }
+                        Select {
+                            width: 120px;
+                            options: [
+                                I18n.t("黑", "Black"),
+                                I18n.t("白", "White"),
+                                I18n.t("蓝", "Blue"),
+                                I18n.t("绿", "Green"),
+                                I18n.t("紫", "Purple"),
+                            ];
+                            current-index <=> root.skin;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    Text { text: I18n.t("语言", "Language"); color: Theme.text-title; font-weight: 600; }
+                    HorizontalBox {
+                        spacing: 12px;
+                        FieldLabel { caption: I18n.t("界面语言", "UI language"); }
+                        Select {
+                            width: 140px;
+                            options: ["中文", "English"];
+                            current-index <=> root.language;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    Text {
+                        text: I18n.t("语言切换立即生效，并写入 mqttc.json。", "Language applies immediately and is saved to mqttc.json.");
+                        color: Theme.text-faint;
+                        font-size: 12px;
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
         }
@@ -498,7 +618,7 @@ export component AppWindow inherits Window {
                 HorizontalBox {
                     spacing: 10px;
                     Text {
-                        text: "连接配置";
+                        text: I18n.t("连接配置", "Connection");
                         color: Theme.text-primary;
                         font-size: 16px;
                         font-weight: 700;
@@ -513,12 +633,12 @@ export component AppWindow inherits Window {
                     Rectangle { horizontal-stretch: 1; background: transparent; }
                     Button {
                         width: 88px;
-                        text: "返回会话";
+                        text: I18n.t("返回会话", "Back");
                         clicked => { root.back-to-session-requested(); }
                     }
                     Button {
                         width: 88px;
-                        text: "连接";
+                        text: I18n.t("连接", "Connect");
                         enabled: !root.connected && !root.connecting;
                         clicked => { root.connect-requested(); }
                     }
@@ -528,21 +648,21 @@ export component AppWindow inherits Window {
                     VerticalBox {
                         padding-right: 8px;
                         spacing: 14px;
-                        Text { text: "基础信息"; color: Theme.text-title; font-weight: 600; }
+                        Text { text: I18n.t("基础信息", "General"); color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
                             VerticalBox {
                                 spacing: 4px;
-                                FieldLabel { caption: "名称"; }
+                                FieldLabel { caption: I18n.t("名称", "Name"); }
                                 LineEdit {
                                     text <=> root.connection-name;
-                                    placeholder-text: "连接名称";
+                                    placeholder-text: I18n.t("连接名称", "Connection name");
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
                                 spacing: 4px;
-                                FieldLabel { caption: "主机"; }
+                                FieldLabel { caption: I18n.t("主机", "Host"); }
                                 LineEdit {
                                     text <=> root.host;
                                     placeholder-text: "127.0.0.1";
@@ -552,7 +672,7 @@ export component AppWindow inherits Window {
                             VerticalBox {
                                 spacing: 4px;
                                 width: 100px;
-                                FieldLabel { caption: "端口"; }
+                                FieldLabel { caption: I18n.t("端口", "Port"); }
                                 LineEdit {
                                     text <=> root.port;
                                     placeholder-text: "1883";
@@ -569,12 +689,12 @@ export component AppWindow inherits Window {
                                     spacing: 6px;
                                     LineEdit {
                                         text <=> root.client-id;
-                                        placeholder-text: "空则自动生成";
+                                        placeholder-text: I18n.t("空则自动生成", "Empty = auto");
                                         enabled: !root.connected && !root.connecting;
                                     }
                                     Button {
                                         width: 52px;
-                                        text: "生成";
+                                        text: I18n.t("生成", "Gen");
                                         enabled: !root.connected && !root.connecting;
                                         clicked => { root.generate-client-id-requested(); }
                                     }
@@ -582,31 +702,31 @@ export component AppWindow inherits Window {
                             }
                             VerticalBox {
                                 spacing: 4px;
-                                FieldLabel { caption: "用户名"; }
+                                FieldLabel { caption: I18n.t("用户名", "Username"); }
                                 LineEdit {
                                     text <=> root.username;
-                                    placeholder-text: "可选，空则匿名";
+                                    placeholder-text: I18n.t("可选，空则匿名", "Optional, empty = anonymous");
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
                                 spacing: 4px;
-                                FieldLabel { caption: "密码"; }
+                                FieldLabel { caption: I18n.t("密码", "Password"); }
                                 LineEdit {
                                     text <=> root.password;
-                                    placeholder-text: "可选";
+                                    placeholder-text: I18n.t("可选", "Optional");
                                     input-type: InputType.password;
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                         }
-                        Text { text: "高级参数"; color: Theme.text-title; font-weight: 600; }
+                        Text { text: I18n.t("高级参数", "Advanced"); color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
                             VerticalBox {
                                 spacing: 4px;
                                 width: 140px;
-                                FieldLabel { caption: "Keep Alive (秒)"; }
+                                FieldLabel { caption: I18n.t("Keep Alive (秒)", "Keep Alive (s)"); }
                                 LineEdit {
                                     text <=> root.keep-alive;
                                     placeholder-text: "60";
@@ -616,7 +736,7 @@ export component AppWindow inherits Window {
                             VerticalBox {
                                 spacing: 4px;
                                 width: 140px;
-                                FieldLabel { caption: "连接超时 (秒)"; }
+                                FieldLabel { caption: I18n.t("连接超时 (秒)", "Timeout (s)"); }
                                 LineEdit {
                                     text <=> root.connect-timeout;
                                     placeholder-text: "10";
@@ -638,7 +758,7 @@ export component AppWindow inherits Window {
                         HorizontalBox {
                             spacing: 10px;
                             CheckBox {
-                                text: "启用 SSL";
+                                text: I18n.t("启用 SSL", "Enable SSL");
                                 checked <=> root.ssl;
                                 enabled: !root.connected && !root.connecting;
                                 toggled => {
@@ -651,7 +771,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             CheckBox {
-                                text: "校验服务器证书";
+                                text: I18n.t("校验服务器证书", "Verify certificate");
                                 checked <=> root.ssl-verify;
                                 enabled: root.ssl && !root.connected && !root.connecting;
                             }
@@ -663,10 +783,10 @@ export component AppWindow inherits Window {
                                 spacing: 10px;
                                 VerticalBox {
                                     spacing: 4px;
-                                    FieldLabel { caption: "CA 证书路径"; }
+                                    FieldLabel { caption: I18n.t("CA 证书路径", "CA certificate"); }
                                     LineEdit {
                                         text <=> root.ssl-ca;
-                                        placeholder-text: "可选，空则使用系统 CA";
+                                        placeholder-text: I18n.t("可选，空则使用系统 CA", "Optional, empty = system CA");
                                         enabled: !root.connected && !root.connecting;
                                     }
                                 }
@@ -675,57 +795,57 @@ export component AppWindow inherits Window {
                                 spacing: 10px;
                                 VerticalBox {
                                     spacing: 4px;
-                                    FieldLabel { caption: "客户端证书"; }
+                                    FieldLabel { caption: I18n.t("客户端证书", "Client cert"); }
                                     LineEdit {
                                         text <=> root.ssl-cert;
-                                        placeholder-text: "可选，双向认证时填写";
+                                        placeholder-text: I18n.t("可选，双向认证时填写", "Optional, for mutual TLS");
                                         enabled: !root.connected && !root.connecting;
                                     }
                                 }
                                 VerticalBox {
                                     spacing: 4px;
-                                    FieldLabel { caption: "客户端私钥"; }
+                                    FieldLabel { caption: I18n.t("客户端私钥", "Client key"); }
                                     LineEdit {
                                         text <=> root.ssl-key;
-                                        placeholder-text: "可选，与证书成对";
+                                        placeholder-text: I18n.t("可选，与证书成对", "Optional, pair with cert");
                                         enabled: !root.connected && !root.connecting;
                                     }
                                 }
                             }
                             Text {
-                                text: "端口常用 8883。关闭校验仅用于自签证书调试。";
+                                text: I18n.t("端口常用 8883。关闭校验仅用于自签证书调试。", "Port 8883 is common. Turn off verify only for self-signed certs.");
                                 color: Theme.text-faint;
                                 font-size: 12px;
                             }
                         }
-                        Text { text: "遗嘱消息 (Last Will)"; color: Theme.text-title; font-weight: 600; }
+                        Text { text: I18n.t("遗嘱消息 (Last Will)", "Last Will"); color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
                             spacing: 10px;
                             VerticalBox {
                                 spacing: 4px;
-                                FieldLabel { caption: "遗嘱 Topic"; }
+                                FieldLabel { caption: I18n.t("遗嘱 Topic", "Will topic"); }
                                 LineEdit {
                                     text <=> root.will-topic;
-                                    placeholder-text: "留空则不发送遗嘱";
+                                    placeholder-text: I18n.t("留空则不发送遗嘱", "Empty = no will");
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
                                 spacing: 4px;
-                                FieldLabel { caption: "遗嘱 Payload"; }
+                                FieldLabel { caption: I18n.t("遗嘱 Payload", "Will payload"); }
                                 LineEdit {
                                     text <=> root.will-payload;
-                                    placeholder-text: "异常断开时由 Broker 代发";
+                                    placeholder-text: I18n.t("异常断开时由 Broker 代发", "Sent by broker on unexpected disconnect");
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                         }
                         HorizontalBox {
                             spacing: 8px;
-                            Text { text: "遗嘱 QoS"; color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
-                            Segmented {
+                            Text { text: I18n.t("遗嘱 QoS", "Will QoS"); color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
+                            Select {
+                                width: 56px;
                                 options: ["0", "1", "2"];
-                                item-width: 42px;
                                 current-index <=> root.will-qos;
                                 interactive: !root.connected && !root.connecting;
                             }
@@ -797,19 +917,19 @@ export component AppWindow inherits Window {
                         }
                         Button {
                             width: 72px;
-                            text: "编辑";
+                            text: I18n.t("编辑", "Edit");
                             enabled: !root.connecting;
                             clicked => { root.edit-connection-requested(); }
                         }
                         Button {
                             width: 72px;
-                            text: "连接";
+                            text: I18n.t("连接", "Connect");
                             enabled: !root.connected && !root.connecting;
                             clicked => { root.connect-requested(); }
                         }
                         Button {
                             width: 72px;
-                            text: "断开";
+                            text: I18n.t("断开", "Disconnect");
                             enabled: root.connected || root.connecting;
                             clicked => { root.disconnect-requested(); }
                         }
@@ -828,7 +948,7 @@ export component AppWindow inherits Window {
                     VerticalBox {
                         padding: 12px;
                         spacing: 8px;
-                        Text { text: "订阅"; color: Theme.text-title; font-weight: 600; }
+                        Text { text: I18n.t("订阅", "Subscribe"); color: Theme.text-title; font-weight: 600; }
                         LineEdit {
                             text <=> root.sub-topic;
                             placeholder-text: "topic/filter/#";
@@ -837,22 +957,22 @@ export component AppWindow inherits Window {
                         HorizontalBox {
                             spacing: 8px;
                             Text { text: "QoS"; color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
-                            Segmented {
+                            Select {
+                                width: 56px;
                                 options: ["0", "1", "2"];
-                                item-width: 42px;
                                 current-index <=> root.sub-qos;
                                 interactive: root.connected;
                             }
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                             Button {
                                 width: 72px;
-                                text: "订阅";
+                                text: I18n.t("订阅", "Sub");
                                 enabled: root.connected;
                                 clicked => { root.subscribe-requested(); }
                             }
                         }
                         Text {
-                            text: root.active-sub-topic == "" ? "点击订阅可筛选消息" : "正在筛选: " + root.active-sub-topic;
+                            text: root.active-sub-topic == "" ? I18n.t("点击订阅可筛选消息", "Click a subscription to filter") : I18n.t("正在筛选: ", "Filtering: ") + root.active-sub-topic;
                             color: Theme.text-faint;
                             font-size: 12px;
                             overflow: elide;
@@ -928,36 +1048,47 @@ export component AppWindow inherits Window {
                             spacing: 6px;
                             HorizontalBox {
                                 spacing: 8px;
-                                Text { text: "消息"; color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
+                                Text { text: I18n.t("消息", "Messages"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
-                                    width: 160px;
+                                    width: 148px;
                                     text <=> root.log-filter;
-                                    placeholder-text: "搜索 Topic / Payload";
+                                    placeholder-text: I18n.t("搜索 Topic / Payload", "Search topic / payload");
                                     edited => { root.log-filter-changed(); }
                                 }
-                                Segmented {
-                                    options: ["全部", "收", "发", "系统", "错误"];
-                                    item-width: 42px;
+                                Select {
+                                    width: 72px;
+                                    options: [
+                                        I18n.t("全部", "All"),
+                                        I18n.t("收", "In"),
+                                        I18n.t("发", "Out"),
+                                        I18n.t("系统", "Sys"),
+                                        I18n.t("错误", "Err"),
+                                    ];
                                     current-index <=> root.log-kind-filter;
                                     activated(idx) => { root.log-filter-changed(); }
                                 }
                                 Rectangle { horizontal-stretch: 1; background: transparent; }
-                                Segmented {
-                                    options: ["文本", "JSON", "Base64", "Hex"];
-                                    item-width: 54px;
+                                Select {
+                                    width: 78px;
+                                    options: [
+                                        I18n.t("文本", "Text"),
+                                        "JSON",
+                                        "Base64",
+                                        "Hex",
+                                    ];
                                     current-index <=> root.log-format;
                                     activated(idx) => { root.log-format-changed(); }
                                 }
                                 CheckBox {
-                                    text: "自动滚动";
+                                    text: I18n.t("自动滚动", "Auto-scroll");
                                     checked <=> root.auto-scroll;
                                 }
                                 Button {
-                                    text: "保存";
+                                    text: I18n.t("保存", "Save");
                                     clicked => { root.save-logs-requested(); }
                                 }
                                 Button {
-                                    text: "清空";
+                                    text: I18n.t("清空", "Clear");
                                     clicked => { root.clear-logs-requested(); }
                                 }
                             }
@@ -977,15 +1108,15 @@ export component AppWindow inherits Window {
                             spacing: 6px;
                             HorizontalBox {
                                 spacing: 6px;
-                                Text { text: "发布"; color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
+                                Text { text: I18n.t("发布", "Publish"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
                                     text <=> root.pub-topic;
                                     placeholder-text: "Topic";
                                     enabled: root.connected;
                                 }
-                                Segmented {
+                                Select {
+                                    width: 52px;
                                     options: ["0", "1", "2"];
-                                    item-width: 32px;
                                     current-index <=> root.pub-qos;
                                     interactive: root.connected;
                                 }
@@ -994,33 +1125,38 @@ export component AppWindow inherits Window {
                                     checked <=> root.pub-retain;
                                     enabled: root.connected;
                                 }
-                                Segmented {
-                                    options: ["文本", "JSON", "Base64", "Hex"];
-                                    item-width: 48px;
+                                Select {
+                                    width: 78px;
+                                    options: [
+                                        I18n.t("文本", "Text"),
+                                        "JSON",
+                                        "Base64",
+                                        "Hex",
+                                    ];
                                     current-index <=> root.pub-format;
                                     interactive: root.connected;
                                 }
                                 Button {
-                                    width: 48px;
-                                    text: "美化";
+                                    width: 52px;
+                                    text: I18n.t("美化", "Pretty");
                                     enabled: root.connected && root.pub-format == 1;
                                     clicked => { root.format-payload-requested(); }
                                 }
                                 LineEdit {
                                     width: 44px;
                                     text <=> root.timed-interval;
-                                    placeholder-text: "秒";
+                                    placeholder-text: I18n.t("秒", "sec");
                                     enabled: root.connected && !root.timed-running;
                                 }
                                 Button {
                                     width: 72px;
-                                    text: root.timed-running ? "停止" : "定时";
+                                    text: root.timed-running ? I18n.t("停止", "Stop") : I18n.t("定时", "Timed");
                                     enabled: root.connected || root.timed-running;
                                     clicked => { root.timed-toggle-requested(); }
                                 }
                                 Button {
                                     width: 64px;
-                                    text: "发布";
+                                    text: I18n.t("发布", "Pub");
                                     enabled: root.connected;
                                     clicked => { root.publish-requested(); }
                                 }
