@@ -71,6 +71,8 @@ pub struct ConnectionConfig {
     pub ssl_cert: String,
     #[serde(default)]
     pub ssl_key: String,
+    #[serde(default = "default_protocol")]
+    pub protocol: String,
     #[serde(default = "default_timed_interval")]
     pub timed_interval: u32,
     #[serde(default)]
@@ -151,6 +153,10 @@ fn default_language() -> String {
     "zh".to_string()
 }
 
+fn default_protocol() -> String {
+    "3.1.1".to_string()
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -196,6 +202,7 @@ impl ConnectionConfig {
             ssl_ca: String::new(),
             ssl_cert: String::new(),
             ssl_key: String::new(),
+            protocol: default_protocol(),
             timed_interval: default_timed_interval(),
             subscriptions: Vec::new(),
         }
@@ -381,6 +388,7 @@ mod tests {
         conn.ssl_ca = "/tmp/ca.pem".to_string();
         conn.ssl_cert = "/tmp/client.pem".to_string();
         conn.ssl_key = "/tmp/client.key".to_string();
+        conn.protocol = "5.0".to_string();
         conn.timed_interval = 12;
         conn.subscriptions.push(SubscriptionConfig {
             topic: "a/#".to_string(),
@@ -413,6 +421,7 @@ mod tests {
         assert_eq!(back.connections[0].ssl_ca, "/tmp/ca.pem");
         assert_eq!(back.connections[0].ssl_cert, "/tmp/client.pem");
         assert_eq!(back.connections[0].ssl_key, "/tmp/client.key");
+        assert_eq!(back.connections[0].protocol, "5.0");
         assert_eq!(back.connections[0].timed_interval, 12);
         assert_eq!(back.connections[0].subscriptions[0].qos, 2);
         assert_eq!(back.log_format, "base64");

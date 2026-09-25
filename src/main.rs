@@ -8,7 +8,7 @@ use base64::Engine;
 use chrono::Local;
 use config::{AppConfig, ConnectionConfig, SubscriptionConfig};
 use i18n::Lang;
-use mqtt::{qos_from_u8, ConnectParams, MqttHandle, UiEvent};
+use mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, UiEvent};
 use slint::{ComponentHandle, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -475,6 +475,7 @@ fn register_callbacks(ui: &AppWindow) {
                 } else {
                     String::new()
                 };
+                let protocol = ProtocolVersion::from_key(&cfg.protocol);
                 push_log(
                     &ui,
                     st,
@@ -482,9 +483,10 @@ fn register_callbacks(ui: &AppWindow) {
                     "",
                     i18n::t(
                         &format!(
-                            "正在连接 {}:{} ({}, {}，Keep Alive {}s，超时 {}s{}{})",
+                            "正在连接 {}:{} (MQTT {}，{}，{}，Keep Alive {}s，超时 {}s{}{})",
                             cfg.host,
                             cfg.port,
+                            protocol.label(),
                             cfg.client_id,
                             auth_hint,
                             cfg.keep_alive,
@@ -493,9 +495,10 @@ fn register_callbacks(ui: &AppWindow) {
                             will_hint
                         ),
                         &format!(
-                            "Connecting {}:{} ({}, {}, Keep Alive {}s, timeout {}s{}{})",
+                            "Connecting {}:{} (MQTT {}, {}, {}, Keep Alive {}s, timeout {}s{}{})",
                             cfg.host,
                             cfg.port,
+                            protocol.label(),
                             cfg.client_id,
                             auth_hint,
                             cfg.keep_alive,
@@ -526,6 +529,7 @@ fn register_callbacks(ui: &AppWindow) {
                     ssl_ca: cfg.ssl_ca.clone(),
                     ssl_cert: cfg.ssl_cert.clone(),
                     ssl_key: cfg.ssl_key.clone(),
+                    protocol,
                 };
                 let ui_weak2 = ui.as_weak();
                 let conn_id = id.clone();
@@ -1239,6 +1243,7 @@ fn refresh_active_form(ui: &AppWindow, st: &AppState) {
     ui.set_client_id(cfg.client_id.clone().into());
     ui.set_username(cfg.username.clone().into());
     ui.set_password(cfg.password.clone().into());
+    ui.set_mqtt_protocol(ProtocolVersion::from_key(&cfg.protocol).to_index());
     ui.set_keep_alive(cfg.keep_alive.to_string().into());
     ui.set_clean_session(cfg.clean_session);
     ui.set_connect_timeout(cfg.connect_timeout.to_string().into());
@@ -1331,6 +1336,9 @@ fn sync_form(ui: &AppWindow, st: &mut AppState) {
     cfg.client_id = ui.get_client_id().to_string();
     cfg.username = ui.get_username().to_string();
     cfg.password = ui.get_password().to_string();
+    cfg.protocol = ProtocolVersion::from_index(ui.get_mqtt_protocol())
+        .to_key()
+        .to_string();
     cfg.keep_alive = parse_u16_clamped(&ui.get_keep_alive(), 1, 65535, 60);
     cfg.clean_session = ui.get_clean_session();
     cfg.connect_timeout = parse_u16_clamped(&ui.get_connect_timeout(), 1, 300, 10);
@@ -1815,6 +1823,19 @@ mod tests {
         assert_eq!(Skin::Black.caption_text_rgb(), (0xf2, 0xf4, 0xf8));
         assert_eq!(rgb_to_colorref((0x16, 0x18, 0x1d)), 0x001d1816);
         assert_eq!(rgb_to_colorref((0xe8, 0xed, 0xf3)), 0x00f3ede8);
+    }
+
+    #[test]
+    fn protocol_index_and_key_round_trip() {
+        assert_eq!(ProtocolVersion::from_index(0), ProtocolVersion::V311);
+        assert_eq!(ProtocolVersion::from_index(1), ProtocolVersion::V5);
+        assert_eq!(ProtocolVersion::from_key("3.1.1"), ProtocolVersion::V311);
+        assert_eq!(ProtocolVersion::from_key("5.0"), ProtocolVersion::V5);
+        assert_eq!(ProtocolVersion::from_key("mqtt5"), ProtocolVersion::V5);
+        assert_eq!(ProtocolVersion::from_key("unknown"), ProtocolVersion::V311);
+        assert_eq!(ProtocolVersion::V311.to_key(), "3.1.1");
+        assert_eq!(ProtocolVersion::V5.to_key(), "5.0");
+        assert_eq!(ProtocolVersion::V5.to_index(), 1);
     }
 
     #[test]

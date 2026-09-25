@@ -377,6 +377,7 @@ export component AppWindow inherits Window {
     in-out property <string> client-id: "";
     in-out property <string> username: "";
     in-out property <string> password: "";
+    in-out property <int> mqtt-protocol: 0;
     in-out property <string> keep-alive: "60";
     in-out property <bool> clean-session: true;
     in-out property <string> connect-timeout: "10";
@@ -678,6 +679,17 @@ export component AppWindow inherits Window {
                                     text <=> root.port;
                                     placeholder-text: "1883";
                                     enabled: !root.connected && !root.connecting;
+                                }
+                            }
+                            VerticalBox {
+                                spacing: 4px;
+                                width: 110px;
+                                FieldLabel { caption: I18n.t("MQTT 协议", "MQTT protocol"); }
+                                Select {
+                                    width: 110px;
+                                    options: ["3.1.1", "5.0"];
+                                    current-index <=> root.mqtt-protocol;
+                                    interactive: !root.connected && !root.connecting;
                                 }
                             }
                         }
