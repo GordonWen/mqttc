@@ -655,6 +655,7 @@ export component AppWindow inherits Window {
                             spacing: 10px;
                             VerticalBox {
                                 spacing: 4px;
+                                width: 220px;
                                 FieldLabel { caption: I18n.t("名称", "Name"); }
                                 LineEdit {
                                     text <=> root.connection-name;
@@ -664,6 +665,7 @@ export component AppWindow inherits Window {
                             }
                             VerticalBox {
                                 spacing: 4px;
+                                width: 220px;
                                 FieldLabel { caption: I18n.t("主机", "Host"); }
                                 LineEdit {
                                     text <=> root.host;
@@ -683,10 +685,11 @@ export component AppWindow inherits Window {
                             }
                             VerticalBox {
                                 spacing: 4px;
-                                width: 110px;
+                                width: 100px;
                                 FieldLabel { caption: I18n.t("MQTT 协议", "MQTT protocol"); }
                                 Select {
-                                    width: 110px;
+                                    width: 100px;
+                                    height: 32px;
                                     options: ["3.1.1", "5.0"];
                                     current-index <=> root.mqtt-protocol;
                                     interactive: !root.connected && !root.connecting;
