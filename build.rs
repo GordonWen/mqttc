@@ -34,6 +34,7 @@ fn embed_windows_icon() {
 
     println!("cargo:rustc-link-arg={}", res_path.display());
     println!("cargo:rustc-link-lib=dwmapi");
+    println!("cargo:rustc-link-lib=user32");
 }
 
 fn windows_windres() -> String {

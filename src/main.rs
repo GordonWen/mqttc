@@ -95,9 +95,9 @@ impl Skin {
         match self {
             Self::Black => (0x16, 0x18, 0x1d),
             Self::White => (0xe8, 0xed, 0xf3),
-            Self::Blue => (0x0f, 0x17, 0x24),
+            Self::Blue => (0x07, 0x20, 0x48),
             Self::Green => (0x10, 0x18, 0x12),
-            Self::Purple => (0x16, 0x14, 0x1c),
+            Self::Purple => (0x2a, 0x12, 0x48),
         }
     }
 
@@ -322,6 +322,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     }
 
+    ui.show()?;
     schedule_window_chrome(&ui);
 
     let result = ui.run();
@@ -1121,12 +1122,14 @@ fn apply_prefs(ui: &AppWindow, st: &AppState) {
 
 fn schedule_window_chrome(ui: &AppWindow) {
     apply_window_chrome(ui);
-    let ui_weak = ui.as_weak();
-    slint::Timer::single_shot(Duration::from_millis(0), move || {
-        if let Some(ui) = ui_weak.upgrade() {
-            apply_window_chrome(&ui);
-        }
-    });
+    for delay_ms in [0_u64, 16, 50, 150, 400, 1000] {
+        let ui_weak = ui.as_weak();
+        slint::Timer::single_shot(Duration::from_millis(delay_ms), move || {
+            if let Some(ui) = ui_weak.upgrade() {
+                apply_window_chrome(&ui);
+            }
+        });
+    }
 }
 
 fn apply_window_chrome(ui: &AppWindow) {
@@ -1139,9 +1142,14 @@ fn apply_native_titlebar(ui: &AppWindow, skin: Skin) {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use std::ffi::c_void;
 
+    const DWMWA_USE_IMMERSIVE_DARK_MODE_OLD: u32 = 19;
     const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
     const DWMWA_CAPTION_COLOR: u32 = 35;
     const DWMWA_TEXT_COLOR: u32 = 36;
+    const SWP_NOSIZE: u32 = 0x0001;
+    const SWP_NOMOVE: u32 = 0x0002;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_FRAMECHANGED: u32 = 0x0020;
 
     let window_handle = ui.window().window_handle();
     let Ok(handle) = window_handle.window_handle() else {
@@ -1155,6 +1163,12 @@ fn apply_native_titlebar(ui: &AppWindow, skin: Skin) {
     let caption = rgb_to_colorref(skin.window_bg_rgb());
     let text = rgb_to_colorref(skin.caption_text_rgb());
     unsafe {
+        dwm_set_window_attribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE_OLD,
+            &dark as *const i32 as *const c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
         dwm_set_window_attribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -1172,6 +1186,15 @@ fn apply_native_titlebar(ui: &AppWindow, skin: Skin) {
             DWMWA_TEXT_COLOR,
             &text as *const u32 as *const c_void,
             std::mem::size_of::<u32>() as u32,
+        );
+        set_window_pos(
+            hwnd,
+            std::ptr::null_mut(),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED,
         );
     }
 }
@@ -1201,6 +1224,31 @@ unsafe fn dwm_set_window_attribute(
         ) -> i32;
     }
     let _ = DwmSetWindowAttribute(hwnd, attribute, value, size);
+}
+
+#[cfg(windows)]
+unsafe fn set_window_pos(
+    hwnd: *mut std::ffi::c_void,
+    hwnd_insert_after: *mut std::ffi::c_void,
+    x: i32,
+    y: i32,
+    cx: i32,
+    cy: i32,
+    flags: u32,
+) {
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetWindowPos(
+            hwnd: *mut std::ffi::c_void,
+            hWndInsertAfter: *mut std::ffi::c_void,
+            X: i32,
+            Y: i32,
+            cx: i32,
+            cy: i32,
+            uFlags: u32,
+        ) -> i32;
+    }
+    let _ = SetWindowPos(hwnd, hwnd_insert_after, x, y, cx, cy, flags);
 }
 
 fn show_page(ui: &AppWindow, page: i32) {
@@ -1816,9 +1864,9 @@ mod tests {
         assert!(!Skin::Black.is_light());
         assert_eq!(Skin::Black.window_bg_rgb(), (0x16, 0x18, 0x1d));
         assert_eq!(Skin::White.window_bg_rgb(), (0xe8, 0xed, 0xf3));
-        assert_eq!(Skin::Blue.window_bg_rgb(), (0x0f, 0x17, 0x24));
+        assert_eq!(Skin::Blue.window_bg_rgb(), (0x07, 0x20, 0x48));
         assert_eq!(Skin::Green.window_bg_rgb(), (0x10, 0x18, 0x12));
-        assert_eq!(Skin::Purple.window_bg_rgb(), (0x16, 0x14, 0x1c));
+        assert_eq!(Skin::Purple.window_bg_rgb(), (0x2a, 0x12, 0x48));
         assert_eq!(Skin::White.caption_text_rgb(), (0x1c, 0x24, 0x30));
         assert_eq!(Skin::Black.caption_text_rgb(), (0xf2, 0xf4, 0xf8));
         assert_eq!(rgb_to_colorref((0x16, 0x18, 0x1d)), 0x001d1816);
