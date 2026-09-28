@@ -96,7 +96,7 @@ impl Skin {
             Self::Black => (0x16, 0x18, 0x1d),
             Self::White => (0xe8, 0xed, 0xf3),
             Self::Blue => (0x07, 0x20, 0x48),
-            Self::Green => (0x10, 0x18, 0x12),
+            Self::Green => (0x06, 0x28, 0x20),
             Self::Purple => (0x2a, 0x12, 0x48),
         }
     }
@@ -1865,7 +1865,7 @@ mod tests {
         assert_eq!(Skin::Black.window_bg_rgb(), (0x16, 0x18, 0x1d));
         assert_eq!(Skin::White.window_bg_rgb(), (0xe8, 0xed, 0xf3));
         assert_eq!(Skin::Blue.window_bg_rgb(), (0x07, 0x20, 0x48));
-        assert_eq!(Skin::Green.window_bg_rgb(), (0x10, 0x18, 0x12));
+        assert_eq!(Skin::Green.window_bg_rgb(), (0x06, 0x28, 0x20));
         assert_eq!(Skin::Purple.window_bg_rgb(), (0x2a, 0x12, 0x48));
         assert_eq!(Skin::White.caption_text_rgb(), (0x1c, 0x24, 0x30));
         assert_eq!(Skin::Black.caption_text_rgb(), (0xf2, 0xf4, 0xf8));
