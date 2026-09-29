@@ -877,7 +877,8 @@ export component AppWindow inherits Window {
             }
         }
 
-        if root.page == 1: VerticalBox {
+        if root.page == 1: VerticalLayout {
+            padding: 0;
             spacing: 12px;
             horizontal-stretch: 1;
             vertical-stretch: 1;
@@ -889,6 +890,7 @@ export component AppWindow inherits Window {
                     padding: 12px;
                     spacing: 8px;
                     HorizontalBox {
+                        padding: 0;
                         spacing: 10px;
                         Text {
                             text: root.connection-name;
@@ -954,7 +956,8 @@ export component AppWindow inherits Window {
                 }
             }
 
-            HorizontalBox {
+            HorizontalLayout {
+                padding: 0;
                 spacing: 12px;
                 vertical-stretch: 1;
 
@@ -972,6 +975,7 @@ export component AppWindow inherits Window {
                             enabled: root.connected;
                         }
                         HorizontalBox {
+                            padding: 0;
                             spacing: 8px;
                             Text { text: "QoS"; color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
                             Select {
@@ -1052,7 +1056,8 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                VerticalBox {
+                VerticalLayout {
+                    padding: 0;
                     spacing: 12px;
                     horizontal-stretch: 1;
 
@@ -1064,6 +1069,7 @@ export component AppWindow inherits Window {
                             padding: 12px;
                             spacing: 8px;
                             HorizontalBox {
+                                padding: 0;
                                 spacing: 8px;
                                 Text { text: I18n.t("消息", "Messages"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
@@ -1124,6 +1130,7 @@ export component AppWindow inherits Window {
                             padding: 12px;
                             spacing: 8px;
                             HorizontalBox {
+                                padding: 0;
                                 spacing: 8px;
                                 Text { text: I18n.t("发布", "Publish"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
