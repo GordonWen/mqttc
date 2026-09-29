@@ -1,6 +1,6 @@
 # mqttc
 
-跨平台桌面 MQTT 调试客户端，功能与界面参考 [MQTTX](https://github.com/emqx/MQTTX)。当前交付 Windows 与 Linux 版本：多连接管理、订阅、发布、消息日志。协议支持 MQTT 3.1.1 与 MQTT 5.0。
+跨平台桌面 MQTT 调试客户端，功能与界面参考 [MQTTX](https://github.com/emqx/MQTTX)。当前交付 Windows 与 Linux 版本；macOS 需在本机编译。功能包括多连接管理、订阅、发布、消息日志。协议支持 MQTT 3.1.1 与 MQTT 5.0。
 
 ## 环境
 
@@ -24,6 +24,10 @@ cargo build --release --target x86_64-pc-windows-gnu
 
 # 本机 Linux AMD64
 cargo build --release
+
+# 本机 macOS（Apple Silicon 或 Intel，需在 Mac 上执行）
+cargo build --release
+bash scripts/package-macos.sh
 ```
 
 产物：
@@ -31,11 +35,13 @@ cargo build --release
 - Windows 本机编译：`target/release/mqttc.exe`
 - Windows 交叉编译：`target/x86_64-pc-windows-gnu/release/mqttc.exe`
 - Linux AMD64：`target/release/mqttc`
+- macOS 本机：`target/release/mqttc`，打包后为 `dist/mqttc.app`
 
 已构建好的文件放在 当前工作区 `/dist/`：
 
 - `/dist/mqttc.exe`（约 38MB，拷到 Windows 后双击即可运行）
 - `/dist/mqttc-linux-amd64`（约 26MB）
+- macOS `.app` 需在 Mac 上运行 `scripts/package-macos.sh` 生成
 
 ## 测试
 
@@ -62,6 +68,34 @@ chmod +x mqttc-linux-amd64
 ```bash
 sudo apt-get install -y libfontconfig1 libfreetype6 libexpat1 zlib1g libpng16-16 libbrotli1 libx11-6 libxkbcommon-x11-0
 ```
+
+## macOS 说明
+
+当前 Linux 构建环境无法交叉编译 Darwin 二进制，macOS 包需要在 Mac 上完成本机编译。
+
+```bash
+# 安装 Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+
+# 拉取源码后
+cargo test
+bash scripts/package-macos.sh
+open dist/mqttc.app
+```
+
+系统要求：
+
+- macOS 11.0 及以上
+- Apple Silicon（`aarch64-apple-darwin`）或 Intel（`x86_64-apple-darwin`）均可，按本机架构编译
+- Xcode Command Line Tools：`xcode-select --install`
+- 首次打开若提示未验证开发者，可在「系统设置 → 隐私与安全性」中允许，或执行：
+
+```bash
+xattr -dr com.apple.quarantine dist/mqttc.app
+```
+
+窗口图标使用 `assets/icon.png`；`.app` 的 Dock / Finder 图标由脚本用同一张图生成 `mqttc.icns`。界面字体在 macOS 上使用 PingFang SC 与 Menlo。
 
 ## 最小用法
 

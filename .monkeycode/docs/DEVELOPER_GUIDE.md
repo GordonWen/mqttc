@@ -5,6 +5,7 @@
 - Rust stable（rustup）
 - 系统库（Linux 编译）：`build-essential`、`pkg-config`、`libfontconfig1-dev`、`libxcb*`、`libxkbcommon-dev`
 - Windows：MSVC Build Tools 或与 Rust GNU 工具链匹配的环境
+- macOS：Xcode Command Line Tools，在本机执行 `cargo build --release`（无法从 Linux 交叉编译 Darwin）
 - 一台可访问的 MQTT Broker（本地 Mosquitto 或 `test.mosquitto.org:1883`）
 
 ## 快速开始
@@ -26,7 +27,8 @@ cargo run
 - `src/main.rs`：窗口创建与回调、多连接运行时状态、Payload 编解码、日志筛选、定时发布
 - `src/mqtt.rs`：单连接 MQTT 会话与事件，含 Keep Alive / Clean Session / 超时 / Last Will / TLS
 - `src/config.rs`：多连接配置 `mqttc.json` 的读写与旧格式迁移
-- `build.rs`：编译 `.slint` 文件
+- `build.rs`：编译 `.slint` 文件；Windows 额外嵌入图标并链接 dwmapi/user32
+- `scripts/package-macos.sh`：在 Mac 上打包 `dist/mqttc.app`
 
 ## 开发规范
 
@@ -64,6 +66,10 @@ cargo build --release
 # 需要：rustup target add x86_64-pc-windows-gnu
 # 以及 gcc-mingw-w64-x86-64
 cargo build --release --target x86_64-pc-windows-gnu
+
+# macOS 本机发布（必须在 Mac 上执行）
+cargo build --release
+bash scripts/package-macos.sh
 ```
 
 Windows 发布产物：
@@ -71,4 +77,4 @@ Windows 发布产物：
 - 本机：`target/release/mqttc.exe`
 - 交叉编译：`target/x86_64-pc-windows-gnu/release/mqttc.exe`
 
-产物为单文件 exe，依赖 Windows 系统 DLL（gdi32、user32、opengl32 等），无需额外安装 MinGW 运行库。macOS / Linux 本机产物名为 `mqttc`。
+产物为单文件 exe，依赖 Windows 系统 DLL（gdi32、user32、opengl32 等），无需额外安装 MinGW 运行库。Linux 本机产物名为 `mqttc`。macOS 本机产物同样名为 `mqttc`，打包后为 `dist/mqttc.app`。

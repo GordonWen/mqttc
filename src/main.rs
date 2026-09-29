@@ -270,6 +270,7 @@ fn with_state<R>(f: impl FnOnce(&mut AppState) -> R) -> R {
 
 fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
+    apply_platform_fonts(&ui);
     let state = Rc::new(RefCell::new(AppState::new()));
     STATE.with(|slot| *slot.borrow_mut() = Some(state.clone()));
 
@@ -1110,6 +1111,20 @@ fn push_log_for(
     }
 }
 
+fn apply_platform_fonts(ui: &AppWindow) {
+    let (ui_font, mono_font) = platform_fonts();
+    ui.set_ui_font(ui_font.into());
+    ui.set_mono_font(mono_font.into());
+}
+
+fn platform_fonts() -> (&'static str, &'static str) {
+    if cfg!(target_os = "macos") {
+        ("PingFang SC", "Menlo")
+    } else {
+        ("Microsoft YaHei UI", "Cascadia Mono")
+    }
+}
+
 fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_log_format(PayloadFormat::from_key(&st.config.log_format).to_index());
     ui.set_auto_scroll(st.config.auto_scroll);
@@ -1884,6 +1899,18 @@ mod tests {
         assert_eq!(ProtocolVersion::V311.to_key(), "3.1.1");
         assert_eq!(ProtocolVersion::V5.to_key(), "5.0");
         assert_eq!(ProtocolVersion::V5.to_index(), 1);
+    }
+
+    #[test]
+    fn platform_fonts_match_host_os() {
+        let (ui, mono) = platform_fonts();
+        if cfg!(target_os = "macos") {
+            assert_eq!(ui, "PingFang SC");
+            assert_eq!(mono, "Menlo");
+        } else {
+            assert_eq!(ui, "Microsoft YaHei UI");
+            assert_eq!(mono, "Cascadia Mono");
+        }
     }
 
     #[test]

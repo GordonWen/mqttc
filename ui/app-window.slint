@@ -67,8 +67,8 @@ export global Theme {
     out property <color> err-text: pick(#f0c4c4, #7a1f1f, #f0c4c4, #f0c4c4, #f0c4c4);
     out property <color> danger: pick(#e85d5d, #c62828, #e85d5d, #e85d5d, #e85d5d);
     out property <color> sub-selected: pick(#243248, #d7e6f8, #18508c, #186058, #6438a0);
-    out property <string> ui-font: "Microsoft YaHei UI";
-    out property <string> mono-font: "Cascadia Mono";
+    in-out property <string> ui-font: "Microsoft YaHei UI";
+    in-out property <string> mono-font: "Cascadia Mono";
 }
 
 export global I18n {
@@ -415,6 +415,8 @@ export component AppWindow inherits Window {
     in-out property <int> log-kind-filter: 0;
     in-out property <int> skin <=> Theme.skin;
     in-out property <int> language <=> I18n.language;
+    in-out property <string> ui-font <=> Theme.ui-font;
+    in-out property <string> mono-font <=> Theme.mono-font;
 
     init => {
         Palette.color-scheme = skin == 1 ? ColorScheme.light : ColorScheme.dark;
