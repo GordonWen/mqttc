@@ -880,13 +880,14 @@ export component AppWindow inherits Window {
         if root.page == 1: VerticalBox {
             spacing: 12px;
             horizontal-stretch: 1;
+            vertical-stretch: 1;
 
             Rectangle {
                 border-radius: 10px;
                 background: Theme.panel-bg;
                 VerticalBox {
                     padding: 12px;
-                    spacing: 6px;
+                    spacing: 8px;
                     HorizontalBox {
                         spacing: 10px;
                         Text {
@@ -958,7 +959,7 @@ export component AppWindow inherits Window {
                 vertical-stretch: 1;
 
                 Rectangle {
-                    width: 260px;
+                    width: 220px;
                     border-radius: 10px;
                     background: Theme.panel-bg;
                     VerticalBox {
@@ -995,7 +996,7 @@ export component AppWindow inherits Window {
                         }
                         Rectangle {
                             background: Theme.inset-bg;
-                            border-radius: 6px;
+                            border-radius: 8px;
                             vertical-stretch: 1;
                             clip: true;
                             ListView {
@@ -1052,7 +1053,7 @@ export component AppWindow inherits Window {
                 }
 
                 VerticalBox {
-                    spacing: 8px;
+                    spacing: 12px;
                     horizontal-stretch: 1;
 
                     Rectangle {
@@ -1060,8 +1061,8 @@ export component AppWindow inherits Window {
                         background: Theme.panel-bg;
                         vertical-stretch: 1;
                         VerticalBox {
-                            padding: 8px;
-                            spacing: 6px;
+                            padding: 12px;
+                            spacing: 8px;
                             HorizontalBox {
                                 spacing: 8px;
                                 Text { text: I18n.t("消息", "Messages"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
@@ -1120,10 +1121,10 @@ export component AppWindow inherits Window {
                         border-radius: 10px;
                         background: Theme.panel-bg;
                         VerticalBox {
-                            padding: 8px;
-                            spacing: 6px;
+                            padding: 12px;
+                            spacing: 8px;
                             HorizontalBox {
-                                spacing: 6px;
+                                spacing: 8px;
                                 Text { text: I18n.t("发布", "Publish"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
                                 LineEdit {
                                     text <=> root.pub-topic;
