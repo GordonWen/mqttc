@@ -414,6 +414,7 @@ export component AppWindow inherits Window {
     in-out property <string> log-filter: "";
     in-out property <int> log-kind-filter: 0;
     in-out property <int> skin <=> Theme.skin;
+    in-out property <int> skin-choice: 0;
     in-out property <int> language <=> I18n.language;
     in-out property <string> ui-font <=> Theme.ui-font;
     in-out property <string> mono-font <=> Theme.mono-font;
@@ -424,6 +425,9 @@ export component AppWindow inherits Window {
 
     changed skin => {
         Palette.color-scheme = skin == 1 ? ColorScheme.light : ColorScheme.dark;
+    }
+
+    changed skin-choice => {
         root.skin-changed();
     }
 
@@ -579,15 +583,16 @@ export component AppWindow inherits Window {
                         spacing: 12px;
                         FieldLabel { caption: I18n.t("皮肤", "Skin"); }
                         Select {
-                            width: 120px;
+                            width: 148px;
                             options: [
+                                I18n.t("跟随系统", "System"),
                                 I18n.t("黑", "Black"),
                                 I18n.t("白", "White"),
                                 I18n.t("蓝", "Blue"),
                                 I18n.t("绿", "Green"),
                                 I18n.t("紫", "Purple"),
                             ];
-                            current-index <=> root.skin;
+                            current-index <=> root.skin-choice;
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }

@@ -37,6 +37,7 @@ enum PayloadFormat {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Skin {
+    System,
     Black,
     White,
     Blue,
@@ -46,6 +47,18 @@ enum Skin {
 
 impl Skin {
     fn from_index(index: i32) -> Self {
+        match index {
+            0 => Self::System,
+            1 => Self::Black,
+            2 => Self::White,
+            3 => Self::Blue,
+            4 => Self::Green,
+            5 => Self::Purple,
+            _ => Self::Black,
+        }
+    }
+
+    fn from_visual_index(index: i32) -> Self {
         match index {
             1 => Self::White,
             2 => Self::Blue,
@@ -57,6 +70,7 @@ impl Skin {
 
     fn from_key(key: &str) -> Self {
         match key {
+            "system" | "auto" | "follow" => Self::System,
             "white" => Self::White,
             "blue" => Self::Blue,
             "green" => Self::Green,
@@ -67,16 +81,28 @@ impl Skin {
 
     fn to_index(self) -> i32 {
         match self {
-            Self::Black => 0,
+            Self::System => 0,
+            Self::Black => 1,
+            Self::White => 2,
+            Self::Blue => 3,
+            Self::Green => 4,
+            Self::Purple => 5,
+        }
+    }
+
+    fn to_visual_index(self) -> i32 {
+        match self.resolve() {
             Self::White => 1,
             Self::Blue => 2,
             Self::Green => 3,
             Self::Purple => 4,
+            _ => 0,
         }
     }
 
     fn to_key(self) -> &'static str {
         match self {
+            Self::System => "system",
             Self::Black => "black",
             Self::White => "white",
             Self::Blue => "blue",
@@ -85,19 +111,32 @@ impl Skin {
         }
     }
 
+    fn resolve(self) -> Self {
+        match self {
+            Self::System => {
+                if system_prefers_dark() {
+                    Self::Black
+                } else {
+                    Self::White
+                }
+            }
+            other => other,
+        }
+    }
+
     #[allow(dead_code)]
     fn is_light(self) -> bool {
-        matches!(self, Self::White)
+        matches!(self.resolve(), Self::White)
     }
 
     #[allow(dead_code)]
     fn window_bg_rgb(self) -> (u8, u8, u8) {
-        match self {
-            Self::Black => (0x16, 0x18, 0x1d),
+        match self.resolve() {
             Self::White => (0xe8, 0xed, 0xf3),
             Self::Blue => (0x07, 0x20, 0x48),
             Self::Green => (0x06, 0x28, 0x20),
             Self::Purple => (0x2a, 0x12, 0x48),
+            _ => (0x16, 0x18, 0x1d),
         }
     }
 
@@ -325,6 +364,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
     ui.show()?;
     schedule_window_chrome(&ui);
+    start_system_skin_watch(ui.as_weak());
 
     let result = ui.run();
     {
@@ -899,6 +939,7 @@ fn register_callbacks(ui: &AppWindow) {
         let ui_weak = ui_weak.clone();
         move || {
             let Some(ui) = ui_weak.upgrade() else { return };
+            apply_resolved_skin(&ui);
             with_state(|st| {
                 sync_prefs(&ui, st);
                 persist(st);
@@ -1130,7 +1171,9 @@ fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_auto_scroll(st.config.auto_scroll);
     ui.set_log_filter(st.config.log_filter.clone().into());
     ui.set_log_kind_filter(st.config.log_kind_filter.clamp(0, 4));
-    ui.set_skin(Skin::from_key(&st.config.skin).to_index());
+    let skin = Skin::from_key(&st.config.skin);
+    ui.set_skin_choice(skin.to_index());
+    ui.set_skin(skin.to_visual_index());
     ui.set_language(Lang::from_key(&st.config.language).to_index());
     show_page(ui, 1);
 }
@@ -1147,8 +1190,179 @@ fn schedule_window_chrome(ui: &AppWindow) {
     }
 }
 
+fn apply_resolved_skin(ui: &AppWindow) {
+    let visual = Skin::from_index(ui.get_skin_choice()).to_visual_index();
+    if ui.get_skin() != visual {
+        ui.set_skin(visual);
+    }
+}
+
+fn start_system_skin_watch(ui_weak: slint::Weak<AppWindow>) {
+    thread::spawn(move || {
+        let mut last_dark: Option<bool> = None;
+        loop {
+            let dark = system_prefers_dark();
+            if last_dark != Some(dark) {
+                last_dark = Some(dark);
+                let ui_weak = ui_weak.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = ui_weak.upgrade() else {
+                        return;
+                    };
+                    if Skin::from_index(ui.get_skin_choice()) != Skin::System {
+                        return;
+                    }
+                    apply_resolved_skin(&ui);
+                    apply_window_chrome(&ui);
+                });
+            }
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+}
+
+fn system_prefers_dark() -> bool {
+    #[cfg(windows)]
+    {
+        windows_apps_use_dark().unwrap_or(true)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_interface_dark()
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        linux_prefers_dark()
+    }
+}
+
+#[cfg(windows)]
+fn windows_apps_use_dark() -> Option<bool> {
+    use std::ffi::c_void;
+
+    type Hkey = *mut c_void;
+    const HKEY_CURRENT_USER: Hkey = 0x8000_0001u32 as usize as Hkey;
+    const KEY_READ: u32 = 0x20019;
+    const ERROR_SUCCESS: i32 = 0;
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn RegOpenKeyExW(
+            hKey: Hkey,
+            lpSubKey: *const u16,
+            ulOptions: u32,
+            samDesired: u32,
+            phkResult: *mut Hkey,
+        ) -> i32;
+        fn RegQueryValueExW(
+            hKey: Hkey,
+            lpValueName: *const u16,
+            lpReserved: *mut u32,
+            lpType: *mut u32,
+            lpData: *mut u8,
+            lpcbData: *mut u32,
+        ) -> i32;
+        fn RegCloseKey(hKey: Hkey) -> i32;
+    }
+
+    let subkey: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\0"
+        .encode_utf16()
+        .collect();
+    let value_name: Vec<u16> = "AppsUseLightTheme\0".encode_utf16().collect();
+    let mut hkey = std::ptr::null_mut();
+    let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut hkey) };
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+    let mut data: u32 = 1;
+    let mut data_size = 4u32;
+    let mut value_type = 0u32;
+    let status = unsafe {
+        RegQueryValueExW(
+            hkey,
+            value_name.as_ptr(),
+            std::ptr::null_mut(),
+            &mut value_type,
+            &mut data as *mut u32 as *mut u8,
+            &mut data_size,
+        )
+    };
+    unsafe {
+        let _ = RegCloseKey(hkey);
+    }
+    if status != ERROR_SUCCESS {
+        return None;
+    }
+    Some(data == 0)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_interface_dark() -> bool {
+    std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleInterfaceStyle"])
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .to_ascii_lowercase()
+                .contains("dark")
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn linux_prefers_dark() -> bool {
+    if let Ok(out) = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "color-scheme"])
+        .output()
+    {
+        let value = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
+        if value.contains("prefer-dark") {
+            return true;
+        }
+        if value.contains("prefer-light") {
+            return false;
+        }
+    }
+    if let Ok(out) = std::process::Command::new("gsettings")
+        .args(["get", "org.gnome.desktop.interface", "gtk-theme"])
+        .output()
+    {
+        if String::from_utf8_lossy(&out.stdout)
+            .to_ascii_lowercase()
+            .contains("dark")
+        {
+            return true;
+        }
+    }
+    for command in [
+        ["kreadconfig6", "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme"],
+        ["kreadconfig5", "--file", "kdeglobals", "--group", "General", "--key", "ColorScheme"],
+    ] {
+        if let Ok(out) = std::process::Command::new(command[0])
+            .args(&command[1..])
+            .output()
+        {
+            if String::from_utf8_lossy(&out.stdout)
+                .to_ascii_lowercase()
+                .contains("dark")
+            {
+                return true;
+            }
+        }
+    }
+    if std::env::var("GTK_THEME")
+        .map(|theme| theme.to_ascii_lowercase().contains("dark"))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    true
+}
+
 fn apply_window_chrome(ui: &AppWindow) {
-    let skin = Skin::from_index(ui.get_skin());
+    let skin = Skin::from_visual_index(ui.get_skin());
     apply_native_titlebar(ui, skin);
 }
 
@@ -1438,7 +1652,7 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     st.config.auto_scroll = ui.get_auto_scroll();
     st.config.log_filter = ui.get_log_filter().to_string();
     st.config.log_kind_filter = ui.get_log_kind_filter().clamp(0, 4);
-    st.config.skin = Skin::from_index(ui.get_skin()).to_key().to_string();
+    st.config.skin = Skin::from_index(ui.get_skin_choice()).to_key().to_string();
     st.config.language = Lang::from_index(ui.get_language()).to_key().to_string();
     i18n::set_lang(Lang::from_index(ui.get_language()));
 }
@@ -1863,6 +2077,7 @@ mod tests {
     #[test]
     fn skin_index_and_key_round_trip() {
         let skins = [
+            Skin::System,
             Skin::Black,
             Skin::White,
             Skin::Blue,
@@ -1874,9 +2089,14 @@ mod tests {
             assert_eq!(Skin::from_key(skin.to_key()), skin);
         }
         assert_eq!(Skin::from_key("unknown"), Skin::Black);
+        assert_eq!(Skin::from_key("auto"), Skin::System);
         assert_eq!(Skin::from_index(99), Skin::Black);
+        assert_eq!(Skin::from_index(0), Skin::System);
+        assert_eq!(Skin::Black.to_visual_index(), 0);
+        assert_eq!(Skin::White.to_visual_index(), 1);
         assert!(Skin::White.is_light());
         assert!(!Skin::Black.is_light());
+        assert!(matches!(Skin::System.resolve(), Skin::Black | Skin::White));
         assert_eq!(Skin::Black.window_bg_rgb(), (0x16, 0x18, 0x1d));
         assert_eq!(Skin::White.window_bg_rgb(), (0xe8, 0xed, 0xf3));
         assert_eq!(Skin::Blue.window_bg_rgb(), (0x07, 0x20, 0x48));
