@@ -21,7 +21,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 slint::include_modules!();
 
-const MAX_LOGS: usize = 500;
+const MAX_LOGS: usize = 200;
 
 thread_local! {
     static STATE: RefCell<Option<Rc<RefCell<AppState>>>> = RefCell::new(None);
@@ -308,6 +308,9 @@ fn with_state<R>(f: impl FnOnce(&mut AppState) -> R) -> R {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    slint::BackendSelector::new()
+        .backend_name("winit-software".into())
+        .select()?;
     let ui = AppWindow::new()?;
     apply_platform_fonts(&ui);
     let state = Rc::new(RefCell::new(AppState::new()));
@@ -1595,12 +1598,15 @@ fn refresh_logs(ui: &AppWindow, st: &AppState) {
     let entries: Vec<LogEntry> = st
         .active_id()
         .and_then(|id| st.runtimes.get(&id))
-        .map(|runtime| runtime.logs.clone())
-        .unwrap_or_default()
-        .iter()
-        .filter(|log| log_matches(log, format, &filter, kind_filter, &active_topic))
-        .map(|log| render_log(log, format))
-        .collect();
+        .map(|runtime| {
+            runtime
+                .logs
+                .iter()
+                .filter(|log| log_matches(log, format, &filter, kind_filter, &active_topic))
+                .map(|log| render_log(log, format))
+                .collect()
+        })
+        .unwrap_or_default();
     ui.set_logs(Rc::new(VecModel::from(entries)).into());
 }
 

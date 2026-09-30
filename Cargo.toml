@@ -7,17 +7,29 @@ license = "MIT"
 
 [dependencies]
 base64 = "0.22"
-chrono = "0.4"
-rumqttc = { version = "0.24", features = ["use-rustls"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rumqttc = { version = "0.24", default-features = false, features = ["use-rustls"] }
 rustls = "0.22"
 rustls-native-certs = "0.7"
 rustls-pemfile = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-slint = { version = "1.11", features = ["raw-window-handle-06"] }
+slint = { version = "1.11", default-features = false, features = [
+    "std",
+    "backend-winit",
+    "renderer-software",
+    "compat-1-2",
+    "raw-window-handle-06",
+] }
 
 [target.'cfg(windows)'.dependencies]
 raw-window-handle = "0.6"
 
 [build-dependencies]
 slint-build = "1.11"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
