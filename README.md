@@ -39,7 +39,7 @@ bash scripts/package-macos.sh
 
 已构建好的文件放在 当前工作区 `/dist/`：
 
-- `/dist/mqttc.exe`（约 15MB，拷到 Windows 后双击即可运行）
+- `/dist/mqttc.exe`（约 16MB，拷到 Windows 后双击即可运行）
 - `/dist/mqttc-linux-amd64`（约 20MB）
 - macOS `.app` 需在 Mac 上运行 `scripts/package-macos.sh` 生成
 
