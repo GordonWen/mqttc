@@ -21,6 +21,15 @@ export struct LogEntry {
     payload: string,
 }
 
+export struct PublishPresetRow {
+    name: string,
+    topic: string,
+    payload: string,
+    qos: int,
+    retain: bool,
+    format: int,
+}
+
 export global Theme {
     in-out property <int> skin: 0;
 
@@ -407,6 +416,11 @@ export component AppWindow inherits Window {
     in-out property <int> pub-format: 0;
     in-out property <string> timed-interval: "5";
     in-out property <bool> timed-running: false;
+    in-out property <[PublishPresetRow]> publish-presets: [
+        { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
+        { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
+        { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
+    ];
 
     in-out property <[LogEntry]> logs: [];
     in-out property <int> log-format: 0;
@@ -446,6 +460,7 @@ export component AppWindow inherits Window {
     callback unsubscribe-requested(int);
     callback filter-subscription-requested(string);
     callback publish-requested();
+    callback preset-publish-requested(int);
     callback format-payload-requested();
     callback generate-client-id-requested();
     callback timed-toggle-requested();
@@ -1199,6 +1214,60 @@ export component AppWindow inherits Window {
                                 wrap: word-wrap;
                                 font-family: Theme.mono-font;
                                 height: 56px;
+                            }
+                            Text {
+                                text: I18n.t("发布预设", "Publish presets");
+                                color: Theme.text-title;
+                                font-weight: 600;
+                            }
+                            for preset[index] in root.publish-presets: VerticalLayout {
+                                spacing: 6px;
+                                HorizontalBox {
+                                    padding: 0;
+                                    spacing: 8px;
+                                    LineEdit {
+                                        width: 88px;
+                                        text <=> preset.name;
+                                        placeholder-text: index == 0 ? I18n.t("预设 1", "Preset 1") : (index == 1 ? I18n.t("预设 2", "Preset 2") : I18n.t("预设 3", "Preset 3"));
+                                    }
+                                    LineEdit {
+                                        text <=> preset.topic;
+                                        placeholder-text: "Topic";
+                                        horizontal-stretch: 1;
+                                    }
+                                    Select {
+                                        width: 52px;
+                                        options: ["0", "1", "2"];
+                                        current-index <=> preset.qos;
+                                    }
+                                    CheckBox {
+                                        text: "Retain";
+                                        checked <=> preset.retain;
+                                    }
+                                    Select {
+                                        width: 78px;
+                                        options: [
+                                            I18n.t("文本", "Text"),
+                                            "JSON",
+                                            "Base64",
+                                            "Hex",
+                                        ];
+                                        current-index <=> preset.format;
+                                    }
+                                    Button {
+                                        width: 64px;
+                                        text: I18n.t("发送", "Send");
+                                        enabled: root.connected;
+                                        clicked => { root.preset-publish-requested(index); }
+                                    }
+                                }
+                                TextEdit {
+                                    text <=> preset.payload;
+                                    placeholder-text: "Payload";
+                                    wrap: word-wrap;
+                                    font-family: Theme.mono-font;
+                                    height: 40px;
+                                }
                             }
                         }
                     }

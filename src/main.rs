@@ -6,10 +6,13 @@ mod mqtt;
 
 use base64::Engine;
 use chrono::Local;
-use config::{AppConfig, ConnectionConfig, SubscriptionConfig};
+use config::{
+    ensure_publish_presets, AppConfig, ConnectionConfig, PublishPreset, SubscriptionConfig,
+    PUBLISH_PRESET_COUNT,
+};
 use i18n::Lang;
 use mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, UiEvent};
-use slint::{ComponentHandle, VecModel};
+use slint::{ComponentHandle, Model, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -763,6 +766,17 @@ fn register_callbacks(ui: &AppWindow) {
             with_state(|st| {
                 sync_form(&ui, st);
                 let _ = publish_from_form(&ui, st, true);
+            });
+        }
+    });
+
+    ui.on_preset_publish_requested({
+        let ui_weak = ui_weak.clone();
+        move |index| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                let _ = publish_from_preset(&ui, st, index);
             });
         }
     });
@@ -1551,6 +1565,7 @@ fn refresh_active_form(ui: &AppWindow, st: &AppState) {
     ui.set_pub_qos(cfg.pub_qos.min(2) as i32);
     ui.set_pub_retain(cfg.pub_retain);
     ui.set_pub_format(PayloadFormat::from_key(&cfg.pub_format).to_index());
+    refresh_publish_presets(ui, cfg);
 }
 
 fn refresh_status(ui: &AppWindow, st: &AppState) {
@@ -1646,6 +1661,7 @@ fn sync_form(ui: &AppWindow, st: &mut AppState) {
     cfg.pub_format = PayloadFormat::from_index(ui.get_pub_format())
         .to_key()
         .to_string();
+    sync_publish_presets(ui, cfg);
     if cfg.name.trim().is_empty() {
         cfg.name = format!("{}:{}", cfg.host.trim(), cfg.port.trim());
     }
@@ -1663,11 +1679,122 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     i18n::set_lang(Lang::from_index(ui.get_language()));
 }
 
+fn refresh_publish_presets(ui: &AppWindow, cfg: &ConnectionConfig) {
+    let rows: Vec<PublishPresetRow> = (0..PUBLISH_PRESET_COUNT)
+        .map(|i| {
+            let preset = cfg.publish_presets.get(i).cloned().unwrap_or_default();
+            PublishPresetRow {
+                name: preset.name.into(),
+                topic: preset.topic.into(),
+                payload: preset.payload.into(),
+                qos: preset.qos.min(2) as i32,
+                retain: preset.retain,
+                format: PayloadFormat::from_key(&preset.format).to_index(),
+            }
+        })
+        .collect();
+    ui.set_publish_presets(Rc::new(VecModel::from(rows)).into());
+}
+
+fn sync_publish_presets(ui: &AppWindow, cfg: &mut ConnectionConfig) {
+    let model = ui.get_publish_presets();
+    let mut presets = Vec::with_capacity(PUBLISH_PRESET_COUNT);
+    for i in 0..PUBLISH_PRESET_COUNT {
+        let row = model.row_data(i).unwrap_or(PublishPresetRow {
+            name: Default::default(),
+            topic: Default::default(),
+            payload: Default::default(),
+            qos: 0,
+            retain: false,
+            format: 0,
+        });
+        presets.push(PublishPreset {
+            name: row.name.to_string(),
+            topic: row.topic.to_string(),
+            payload: row.payload.to_string(),
+            qos: row.qos.clamp(0, 2) as u8,
+            retain: row.retain,
+            format: PayloadFormat::from_index(row.format).to_key().to_string(),
+        });
+    }
+    cfg.publish_presets = presets;
+    ensure_publish_presets(&mut cfg.publish_presets);
+}
+
 fn publish_from_form(ui: &AppWindow, st: &mut AppState, persist_on_ok: bool) -> Result<(), ()> {
     let Some(id) = st.active_id() else {
         return Err(());
     };
     publish_from_connection_inner(ui, st, &id, persist_on_ok, true)
+}
+
+fn publish_from_preset(ui: &AppWindow, st: &mut AppState, index: i32) -> Result<(), ()> {
+    let Some(id) = st.active_id() else {
+        return Err(());
+    };
+    if !st.is_connected(&id) {
+        push_log_for(
+            ui,
+            st,
+            &id,
+            "ERR",
+            "",
+            i18n::t("请先连接 Broker", "Connect to a broker first").into_bytes(),
+        );
+        return Err(());
+    }
+    let Some(conn_idx) = st
+        .config
+        .connections
+        .iter()
+        .position(|conn| conn.id == id)
+    else {
+        return Err(());
+    };
+    let Some(preset) = st.config.connections[conn_idx]
+        .publish_presets
+        .get(index as usize)
+        .cloned()
+    else {
+        return Err(());
+    };
+    let topic = preset.topic.trim().to_string();
+    if topic.is_empty() {
+        push_log_for(
+            ui,
+            st,
+            &id,
+            "ERR",
+            "",
+            i18n::t("Topic 为空", "Topic is empty").into_bytes(),
+        );
+        return Err(());
+    }
+    let format = PayloadFormat::from_key(&preset.format);
+    let payload = match encode_payload(&preset.payload, format) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            push_log_for(ui, st, &id, "ERR", &topic, err.into_bytes());
+            return Err(());
+        }
+    };
+    let mqtt = st.runtime_mut(&id).mqtt.clone();
+    match mqtt.publish(
+        &topic,
+        qos_from_u8(preset.qos.min(2)),
+        preset.retain,
+        payload.clone(),
+    ) {
+        Ok(()) => {
+            push_log_for(ui, st, &id, "SEND", &topic, payload);
+            persist(st);
+            Ok(())
+        }
+        Err(err) => {
+            push_log_for(ui, st, &id, "ERR", &topic, err.into_bytes());
+            Err(())
+        }
+    }
 }
 
 fn publish_from_connection(ui: &AppWindow, st: &mut AppState, conn_id: &str) -> Result<(), ()> {

@@ -17,6 +17,37 @@ pub struct SubscriptionConfig {
     pub qos: u8,
 }
 
+pub const PUBLISH_PRESET_COUNT: usize = 3;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PublishPreset {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub topic: String,
+    #[serde(default)]
+    pub payload: String,
+    #[serde(default)]
+    pub qos: u8,
+    #[serde(default)]
+    pub retain: bool,
+    #[serde(default = "default_payload_format")]
+    pub format: String,
+}
+
+impl Default for PublishPreset {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            topic: String::new(),
+            payload: String::new(),
+            qos: 0,
+            retain: false,
+            format: default_payload_format(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     #[serde(default)]
@@ -77,6 +108,8 @@ pub struct ConnectionConfig {
     pub timed_interval: u32,
     #[serde(default)]
     pub subscriptions: Vec<SubscriptionConfig>,
+    #[serde(default = "default_publish_presets")]
+    pub publish_presets: Vec<PublishPreset>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -157,6 +190,25 @@ fn default_protocol() -> String {
     "3.1.1".to_string()
 }
 
+fn default_publish_presets() -> Vec<PublishPreset> {
+    vec![PublishPreset::default(); PUBLISH_PRESET_COUNT]
+}
+
+pub fn ensure_publish_presets(presets: &mut Vec<PublishPreset>) {
+    presets.truncate(PUBLISH_PRESET_COUNT);
+    while presets.len() < PUBLISH_PRESET_COUNT {
+        presets.push(PublishPreset::default());
+    }
+    for preset in presets.iter_mut() {
+        if preset.format.is_empty() {
+            preset.format = default_payload_format();
+        }
+        if preset.qos > 2 {
+            preset.qos = 2;
+        }
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -205,6 +257,7 @@ impl ConnectionConfig {
             protocol: default_protocol(),
             timed_interval: default_timed_interval(),
             subscriptions: Vec::new(),
+            publish_presets: default_publish_presets(),
         }
     }
 }
@@ -273,6 +326,7 @@ pub fn load() -> Result<Option<AppConfig>, String> {
         if conn.name.is_empty() {
             conn.name = format!("{}:{}", conn.host, conn.port);
         }
+        ensure_publish_presets(&mut conn.publish_presets);
     }
 
     if !config
@@ -325,9 +379,10 @@ fn legacy_connection(value: &serde_json::Value) -> Option<ConnectionConfig> {
             }
         }
     }
-    conn.name = format!("{}:{}", conn.host, conn.port);
-    Some(conn)
-}
+        conn.name = format!("{}:{}", conn.host, conn.port);
+        ensure_publish_presets(&mut conn.publish_presets);
+        Some(conn)
+    }
 
 pub fn save(config: &AppConfig) -> Result<(), String> {
     let path = config_path();
@@ -367,6 +422,7 @@ mod tests {
         assert_eq!(conn.pub_topic, "a/b");
         assert_eq!(conn.subscriptions.len(), 2);
         assert_eq!(conn.subscriptions[1].topic, "y/+");
+        assert_eq!(conn.publish_presets.len(), PUBLISH_PRESET_COUNT);
     }
 
     #[test]
@@ -394,6 +450,14 @@ mod tests {
             topic: "a/#".to_string(),
             qos: 2,
         });
+        conn.publish_presets[0] = PublishPreset {
+            name: "heartbeat".to_string(),
+            topic: "dev/hb".to_string(),
+            payload: "ping".to_string(),
+            qos: 1,
+            retain: true,
+            format: "hex".to_string(),
+        };
         config.active_id = conn.id.clone();
         config.connections.push(conn);
         config.log_format = "base64".to_string();
@@ -424,9 +488,68 @@ mod tests {
         assert_eq!(back.connections[0].protocol, "5.0");
         assert_eq!(back.connections[0].timed_interval, 12);
         assert_eq!(back.connections[0].subscriptions[0].qos, 2);
+        assert_eq!(back.connections[0].publish_presets.len(), PUBLISH_PRESET_COUNT);
+        assert_eq!(back.connections[0].publish_presets[0].name, "heartbeat");
+        assert_eq!(back.connections[0].publish_presets[0].topic, "dev/hb");
+        assert_eq!(back.connections[0].publish_presets[0].payload, "ping");
+        assert_eq!(back.connections[0].publish_presets[0].qos, 1);
+        assert!(back.connections[0].publish_presets[0].retain);
+        assert_eq!(back.connections[0].publish_presets[0].format, "hex");
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);
         assert_eq!(back.skin, "green");
         assert_eq!(back.language, "en");
+    }
+
+    #[test]
+    fn ensure_publish_presets_pads_and_truncates() {
+        let mut empty = Vec::new();
+        ensure_publish_presets(&mut empty);
+        assert_eq!(empty.len(), PUBLISH_PRESET_COUNT);
+        assert!(empty.iter().all(|p| p.topic.is_empty() && p.format == "text"));
+
+        let mut extra = vec![
+            PublishPreset {
+                name: "a".into(),
+                topic: "t1".into(),
+                payload: "p1".into(),
+                qos: 1,
+                retain: false,
+                format: "json".into(),
+            },
+            PublishPreset {
+                name: "b".into(),
+                topic: "t2".into(),
+                ..PublishPreset::default()
+            },
+            PublishPreset::default(),
+            PublishPreset {
+                name: "drop".into(),
+                topic: "gone".into(),
+                ..PublishPreset::default()
+            },
+        ];
+        ensure_publish_presets(&mut extra);
+        assert_eq!(extra.len(), PUBLISH_PRESET_COUNT);
+        assert_eq!(extra[0].name, "a");
+        assert_eq!(extra[1].topic, "t2");
+        assert_eq!(extra[2].name, "");
+    }
+
+    #[test]
+    fn missing_publish_presets_load_as_three_empty() {
+        let text = r#"{
+            "active_id": "c1",
+            "connections": [{
+                "id": "c1",
+                "name": "broker",
+                "host": "127.0.0.1",
+                "port": "1883"
+            }]
+        }"#;
+        let mut config: AppConfig = serde_json::from_str(text).expect("deserialize");
+        ensure_publish_presets(&mut config.connections[0].publish_presets);
+        assert_eq!(config.connections[0].publish_presets.len(), PUBLISH_PRESET_COUNT);
+        assert!(config.connections[0].publish_presets[0].topic.is_empty());
     }
 }
