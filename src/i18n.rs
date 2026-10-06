@@ -1,3 +1,6 @@
+//! Process-wide zh/en switch. MQTT worker threads call [`t`] for ConnAck errors,
+//! so the current language is an `AtomicU8` instead of UI state.
+
 use std::sync::atomic::{AtomicU8, Ordering};
 
 static LANG: AtomicU8 = AtomicU8::new(0);
@@ -52,6 +55,7 @@ pub fn is_en() -> bool {
     current() == Lang::En
 }
 
+/// Pick zh or en. Callers pass both literals so MQTT worker threads need no UI handle.
 pub fn t(zh: &str, en: &str) -> String {
     if is_en() {
         en.to_string()

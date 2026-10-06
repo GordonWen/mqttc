@@ -1,3 +1,9 @@
+//! rumqttc wrapper: MQTT 3.1.1 and 5.0 behind one [`MqttHandle`], plus rustls.
+//!
+//! `connect` bumps `Inner.generation` and spawns a blocking eventloop thread.
+//! Stale threads see a mismatched generation and exit, so reconnect/disconnect
+//! never deliver events from a previous client.
+
 use rumqttc::{Client, ConnectReturnCode, Event, Incoming, LastWill, MqttOptions, NetworkOptions, QoS, Transport};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, RootCertStore, SignatureScheme};
@@ -78,12 +84,14 @@ pub enum UiEvent {
     Error { message: String },
 }
 
+/// Cloneable handle shared by the UI thread and the rumqttc eventloop thread.
 #[derive(Clone)]
 pub struct MqttHandle {
     inner: Arc<Mutex<Inner>>,
 }
 
 struct Inner {
+    /// Incremented on every connect/disconnect. Eventloop threads exit when this no longer matches.
     generation: u64,
     client: Option<LiveClient>,
 }
@@ -195,6 +203,7 @@ impl MqttHandle {
         if let Some(client) = inner.client.take() {
             client.disconnect();
         }
+        // Invalidate the previous eventloop before spawning a new one.
         inner.generation += 1;
         let generation = inner.generation;
 
@@ -265,6 +274,7 @@ impl MqttHandle {
     }
 }
 
+/// Blocking rumqttc 3.1.1 eventloop. `generation` is captured so a later connect/disconnect stops this thread.
 fn start_v311<F>(
     mut inner: std::sync::MutexGuard<'_, Inner>,
     handle: Arc<Mutex<Inner>>,
@@ -276,6 +286,7 @@ fn start_v311<F>(
     F: Fn(UiEvent) + Send + 'static,
 {
     let mut opts = MqttOptions::new(&params.client_id, &params.host, params.port);
+    // rumqttc v3.1.1 accepts 1s; v5 below floors at 5s (broker / crate minimum).
     opts.set_keep_alive(Duration::from_secs(params.keep_alive.max(1) as u64));
     opts.set_clean_session(params.clean_session);
     if !params.username.is_empty() {
@@ -367,6 +378,7 @@ fn qos_v5(qos: QoS) -> rumqttc::v5::mqttbytes::QoS {
     }
 }
 
+/// Same shape as [`start_v311`], using rumqttc's MQTT 5 client (`clean_start` instead of `clean_session`).
 fn start_v5<F>(
     mut inner: std::sync::MutexGuard<'_, Inner>,
     handle: Arc<Mutex<Inner>>,
@@ -378,6 +390,7 @@ fn start_v5<F>(
     F: Fn(UiEvent) + Send + 'static,
 {
     let mut opts = rumqttc::v5::MqttOptions::new(&params.client_id, &params.host, params.port);
+    // rumqttc v5 rejects keep-alive below 5 seconds.
     opts.set_keep_alive(Duration::from_secs(params.keep_alive.max(5) as u64));
     opts.set_clean_start(params.clean_session);
     opts.set_connection_timeout(params.connect_timeout.max(1) as u64);
@@ -459,6 +472,8 @@ fn start_v5<F>(
     });
 }
 
+/// Custom CA and/or client cert when set; otherwise the native store.
+/// `ssl_verify = false` installs [`NoServerVerification`] (lab brokers with self-signed certs).
 fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
     let mut roots = RootCertStore::empty();
     let ca_path = params.ssl_ca.trim();
@@ -610,6 +625,7 @@ fn load_client_key(path: &str) -> Result<Option<PrivateKeyDer<'static>>, String>
         .map(Some)
 }
 
+/// Accepts any server certificate. Only used when the user turns SSL verify off.
 #[derive(Debug)]
 struct NoServerVerification;
 

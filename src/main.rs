@@ -1,5 +1,11 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+//! Desktop MQTT debug client (Slint UI + rumqttc).
+//!
+//! Pages: 0 = connection settings, 1 = live session, 2 = app settings.
+//! Slint callbacks stay on the UI thread; each connection's rumqttc eventloop
+//! runs on its own worker and posts [`UiEvent`]s back with `invoke_from_event_loop`.
+
 mod config;
 mod i18n;
 mod mqtt;
@@ -24,12 +30,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 slint::include_modules!();
 
+/// Cap per-connection in-memory logs. Software rendering keeps every row in the scene tree.
 const MAX_LOGS: usize = 200;
 
 thread_local! {
+    /// UI-thread-only. Callbacks are `FnMut`, not `Send`, so workers never lock this.
     static STATE: RefCell<Option<Rc<RefCell<AppState>>>> = RefCell::new(None);
 }
 
+/// Payload encoding for publish and log display. Combo index 0..=3 matches this order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum PayloadFormat {
     Text,
@@ -38,6 +47,8 @@ enum PayloadFormat {
     Hex,
 }
 
+/// Stored preference. `System` follows the OS; Slint `Theme.skin` uses the visual index only
+/// (`from_visual_index`: 0=Black … 4=Purple) because the palette has no "auto" slot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Skin {
     System,
@@ -50,6 +61,7 @@ enum Skin {
 
 impl Skin {
     fn from_index(index: i32) -> Self {
+        // Settings combo: 0=System, 1=Black, … 5=Purple.
         match index {
             0 => Self::System,
             1 => Self::Black,
@@ -62,6 +74,7 @@ impl Skin {
     }
 
     fn from_visual_index(index: i32) -> Self {
+        // Theme.skin has no System slot; 0 is always the resolved dark (Black) palette.
         match index {
             1 => Self::White,
             2 => Self::Blue,
@@ -117,6 +130,7 @@ impl Skin {
     fn resolve(self) -> Self {
         match self {
             Self::System => {
+                // Only Black / White follow the OS. Colored skins stay as picked.
                 if system_prefers_dark() {
                     Self::Black
                 } else {
@@ -220,17 +234,21 @@ impl ConnStatus {
 struct LogData {
     time: String,
     timestamp: String,
+    /// `RECV` / `SEND` / `SYS` / `ERR`. Payload encoding applies only to RECV/SEND.
     kind: String,
     topic: String,
     payload: Vec<u8>,
 }
 
+/// Live MQTT client, logs, and timed-publish worker for one saved connection.
 struct ConnRuntime {
     mqtt: MqttHandle,
     logs: Vec<LogData>,
     status: ConnStatus,
+    /// Bumped on stop/reconnect so the previous timed-publish thread exits.
     timed_generation: Arc<AtomicU64>,
     timed_running: bool,
+    /// Empty = show every topic; otherwise filter RECV/SEND by MQTT wildcard.
     active_sub_topic: String,
 }
 
@@ -299,6 +317,7 @@ impl AppState {
     }
 }
 
+/// Run `f` on the UI-thread AppState. Callbacks and `invoke_from_event_loop` both go through here.
 fn with_state<R>(f: impl FnOnce(&mut AppState) -> R) -> R {
     STATE.with(|slot| {
         let state = slot
@@ -311,6 +330,7 @@ fn with_state<R>(f: impl FnOnce(&mut AppState) -> R) -> R {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    // FemtoVG/OpenGL was dropping ~100 MB at startup; software renderer is enough for this UI.
     slint::BackendSelector::new()
         .backend_name("winit-software".into())
         .select()?;
@@ -382,6 +402,7 @@ fn main() -> Result<(), slint::PlatformError> {
     result
 }
 
+/// Wire Slint callbacks. Each closure upgrades `ui_weak` then `with_state`.
 fn register_callbacks(ui: &AppWindow) {
     let ui_weak = ui.as_weak();
 
@@ -775,6 +796,7 @@ fn register_callbacks(ui: &AppWindow) {
         move |index| {
             let Some(ui) = ui_weak.upgrade() else { return };
             with_state(|st| {
+                // Persist preset edits first. Success must not overwrite the bottom form.
                 sync_form(&ui, st);
                 let _ = publish_from_preset(&ui, st, index);
             });
@@ -855,6 +877,7 @@ fn register_callbacks(ui: &AppWindow) {
                 if let Some(idx) = st.active_index() {
                     st.config.connections[idx].timed_interval = interval;
                 }
+                // First tick uses the bottom form, not a preset.
                 if publish_from_connection(&ui, st, &id).is_err() {
                     return;
                 }
@@ -1039,6 +1062,7 @@ fn register_callbacks(ui: &AppWindow) {
     });
 }
 
+/// MQTT worker events arrive here on the UI thread, keyed by connection id.
 fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent) {
     match event {
         UiEvent::Connected => {
@@ -1108,6 +1132,7 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
     refresh_connections(ui, st);
 }
 
+/// rumqttc does not restore subscriptions after a new CONNECT; replay the saved list.
 fn resubscribe_all(ui: &AppWindow, st: &mut AppState, conn_id: &str) {
     let subs = st
         .config
@@ -1197,6 +1222,7 @@ fn apply_prefs(ui: &AppWindow, st: &AppState) {
 
 fn schedule_window_chrome(ui: &AppWindow) {
     apply_window_chrome(ui);
+    // Win32 HWND is not always ready on first show(); retry until DWM attributes stick.
     for delay_ms in [0_u64, 16, 50, 150, 400, 1000] {
         let ui_weak = ui.as_weak();
         slint::Timer::single_shot(Duration::from_millis(delay_ms), move || {
@@ -1214,6 +1240,7 @@ fn apply_resolved_skin(ui: &AppWindow) {
     }
 }
 
+/// Poll OS light/dark once a second. Only applies when the saved skin is System.
 fn start_system_skin_watch(ui_weak: slint::Weak<AppWindow>) {
     thread::spawn(move || {
         let mut last_dark: Option<bool> = None;
@@ -1497,6 +1524,7 @@ unsafe fn set_window_pos(
     let _ = SetWindowPos(hwnd, hwnd_insert_after, x, y, cx, cy, flags);
 }
 
+/// 0 = connection editor, 1 = session, 2 = settings.
 fn show_page(ui: &AppWindow, page: i32) {
     ui.set_page(page);
 }
@@ -1625,6 +1653,7 @@ fn refresh_logs(ui: &AppWindow, st: &AppState) {
     ui.set_logs(Rc::new(VecModel::from(entries)).into());
 }
 
+/// Copy the visible form (including preset rows) into the active connection before connect / switch / persist.
 fn sync_form(ui: &AppWindow, st: &mut AppState) {
     let Some(idx) = st.active_index() else { return };
     let cfg = &mut st.config.connections[idx];
@@ -1679,6 +1708,7 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     i18n::set_lang(Lang::from_index(ui.get_language()));
 }
 
+/// Always push exactly three rows so the Slint `for` loop stays in sync with config.
 fn refresh_publish_presets(ui: &AppWindow, cfg: &ConnectionConfig) {
     let rows: Vec<PublishPresetRow> = (0..PUBLISH_PRESET_COUNT)
         .map(|i| {
@@ -1721,6 +1751,7 @@ fn sync_publish_presets(ui: &AppWindow, cfg: &mut ConnectionConfig) {
     ensure_publish_presets(&mut cfg.publish_presets);
 }
 
+/// Bottom "Publish" button: read topic/payload/qos/retain/format from the form.
 fn publish_from_form(ui: &AppWindow, st: &mut AppState, persist_on_ok: bool) -> Result<(), ()> {
     let Some(id) = st.active_id() else {
         return Err(());
@@ -1728,6 +1759,7 @@ fn publish_from_form(ui: &AppWindow, st: &mut AppState, persist_on_ok: bool) -> 
     publish_from_connection_inner(ui, st, &id, persist_on_ok, true)
 }
 
+/// Preset "Send": uses that row only. Does not copy into `pub_topic` / `pub_payload`.
 fn publish_from_preset(ui: &AppWindow, st: &mut AppState, index: i32) -> Result<(), ()> {
     let Some(id) = st.active_id() else {
         return Err(());
@@ -1797,6 +1829,7 @@ fn publish_from_preset(ui: &AppWindow, st: &mut AppState, index: i32) -> Result<
     }
 }
 
+/// Timed publish: read the saved connection fields, even if another connection is on screen.
 fn publish_from_connection(ui: &AppWindow, st: &mut AppState, conn_id: &str) -> Result<(), ()> {
     publish_from_connection_inner(ui, st, conn_id, false, false)
 }
@@ -1912,6 +1945,7 @@ fn log_matches(
         || log.kind.to_lowercase().contains(filter)
 }
 
+/// MQTT-style `+` / `#` match used when a subscription row is selected as the log filter.
 fn topic_matches_filter(topic: &str, filter: &str) -> bool {
     if filter.is_empty() || topic == filter {
         return true;
@@ -2015,6 +2049,7 @@ fn render_payload(bytes: &[u8], format: PayloadFormat) -> String {
     }
 }
 
+/// JSON is validated then sent as the original bytes (pretty-print is a separate button).
 fn encode_payload(text: &str, format: PayloadFormat) -> Result<Vec<u8>, String> {
     match format {
         PayloadFormat::Text => Ok(text.as_bytes().to_vec()),
@@ -2071,6 +2106,7 @@ fn encode_hex(bytes: &[u8]) -> String {
 }
 
 fn decode_hex(text: &str) -> Result<Vec<u8>, String> {
+    // Accept `00 1A FF`, `00:1A:FF`, and `00-1A-FF` as the same payload.
     let cleaned: String = text
         .chars()
         .filter(|c| !c.is_whitespace() && *c != ',' && *c != ':' && *c != '-')

@@ -1,3 +1,8 @@
+//! Persistent app state: `mqttc.json` next to the executable (portable, no home-dir lookup).
+//!
+//! Old single-connection files (flat `host` / `port` …) are upgraded on load.
+//! Every connection is padded to exactly [`PUBLISH_PRESET_COUNT`] publish presets.
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -17,6 +22,7 @@ pub struct SubscriptionConfig {
     pub qos: u8,
 }
 
+/// Session page always shows this many preset rows. Extra entries in old files are dropped.
 pub const PUBLISH_PRESET_COUNT: usize = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -194,6 +200,7 @@ fn default_publish_presets() -> Vec<PublishPreset> {
     vec![PublishPreset::default(); PUBLISH_PRESET_COUNT]
 }
 
+/// Pad / truncate to [`PUBLISH_PRESET_COUNT`] and fill missing format / clamp QoS.
 pub fn ensure_publish_presets(presets: &mut Vec<PublishPreset>) {
     presets.truncate(PUBLISH_PRESET_COUNT);
     while presets.len() < PUBLISH_PRESET_COUNT {
@@ -271,6 +278,7 @@ pub fn new_id() -> String {
     format!("c{millis:x}{seq:x}")
 }
 
+/// Same directory as the binary so the app stays portable (USB / unzip-and-run).
 pub fn config_path() -> PathBuf {
     let dir = std::env::current_exe()
         .ok()
@@ -344,6 +352,7 @@ pub fn load() -> Result<Option<AppConfig>, String> {
     Ok(Some(config))
 }
 
+/// Pre-multi-connection `mqttc.json`: a single flat object with `host` at the root.
 fn legacy_connection(value: &serde_json::Value) -> Option<ConnectionConfig> {
     let host = value.get("host")?.as_str()?.to_string();
     let mut conn = ConnectionConfig::new(format!("{host}"));

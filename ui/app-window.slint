@@ -30,6 +30,8 @@ export struct PublishPresetRow {
     format: int,
 }
 
+// Visual palette only: 0=Black, 1=White, 2=Blue, 3=Green, 4=Purple.
+// The settings combo's System (index 0) is resolved in Rust before writing `skin`.
 export global Theme {
     in-out property <int> skin: 0;
 
@@ -363,6 +365,7 @@ component MessageList inherits Rectangle {
     }
 }
 
+// page: 0 = connection editor, 1 = live session, 2 = settings.
 export component AppWindow inherits Window {
     title: "mqttc";
     icon: @image-url("../assets/icon.png");
@@ -386,6 +389,7 @@ export component AppWindow inherits Window {
     in-out property <string> client-id: "";
     in-out property <string> username: "";
     in-out property <string> password: "";
+    // 0 = MQTT 3.1.1, 1 = MQTT 5.0
     in-out property <int> mqtt-protocol: 0;
     in-out property <string> keep-alive: "60";
     in-out property <bool> clean-session: true;
@@ -416,6 +420,7 @@ export component AppWindow inherits Window {
     in-out property <int> pub-format: 0;
     in-out property <string> timed-interval: "5";
     in-out property <bool> timed-running: false;
+    // Three per-connection shortcuts. Sending a row does not copy into pub-topic / pub-payload.
     in-out property <[PublishPresetRow]> publish-presets: [
         { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
         { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
@@ -428,6 +433,7 @@ export component AppWindow inherits Window {
     in-out property <string> log-filter: "";
     in-out property <int> log-kind-filter: 0;
     in-out property <int> skin <=> Theme.skin;
+    // Stored preference including System. Theme.skin is the resolved visual index.
     in-out property <int> skin-choice: 0;
     in-out property <int> language <=> I18n.language;
     in-out property <string> ui-font <=> Theme.ui-font;
@@ -1216,6 +1222,7 @@ export component AppWindow inherits Window {
                                 font-family: Theme.mono-font;
                                 height: 56px;
                             }
+                            // vertical-stretch: 0 keeps the three rows from inheriting leftover panel height.
                             VerticalLayout {
                                 spacing: 4px;
                                 vertical-stretch: 0;

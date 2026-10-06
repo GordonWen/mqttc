@@ -1,3 +1,6 @@
+//! Compile the Slint UI and, on Windows targets, embed `assets/icon.ico` plus DWM/user32.
+//! Darwin binaries must be built on a Mac; this script does not cross-compile for macOS.
+
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
