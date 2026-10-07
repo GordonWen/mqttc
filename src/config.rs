@@ -116,6 +116,46 @@ pub struct ConnectionConfig {
     pub subscriptions: Vec<SubscriptionConfig>,
     #[serde(default = "default_publish_presets")]
     pub publish_presets: Vec<PublishPreset>,
+    #[serde(default)]
+    pub auto_reply_rules: Vec<AutoReplyRule>,
+    #[serde(default = "default_auto_reply_echo")]
+    pub auto_reply_echo: String,
+}
+
+/// One self-contained auto-reply rule. Unchecked rules are skipped during matching.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AutoReplyRule {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub match_topic: String,
+    #[serde(default)]
+    pub payload_contains: String,
+    #[serde(default)]
+    pub reply_topic: String,
+    #[serde(default)]
+    pub reply_payload: String,
+    #[serde(default)]
+    pub qos: u8,
+    #[serde(default)]
+    pub retain: bool,
+    #[serde(default = "default_payload_format")]
+    pub format: String,
+}
+
+impl Default for AutoReplyRule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            match_topic: String::new(),
+            payload_contains: String::new(),
+            reply_topic: String::new(),
+            reply_payload: String::new(),
+            qos: 0,
+            retain: false,
+            format: default_payload_format(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -200,6 +240,29 @@ fn default_publish_presets() -> Vec<PublishPreset> {
     vec![PublishPreset::default(); PUBLISH_PRESET_COUNT]
 }
 
+fn default_auto_reply_echo() -> String {
+    "skip".to_string()
+}
+
+pub fn normalize_auto_reply_echo(value: &str) -> &'static str {
+    if value.trim().eq_ignore_ascii_case("rematch") {
+        "rematch"
+    } else {
+        "skip"
+    }
+}
+
+pub fn ensure_auto_reply_rules(rules: &mut Vec<AutoReplyRule>) {
+    for rule in rules.iter_mut() {
+        if rule.format.is_empty() {
+            rule.format = default_payload_format();
+        }
+        if rule.qos > 2 {
+            rule.qos = 2;
+        }
+    }
+}
+
 /// Pad / truncate to [`PUBLISH_PRESET_COUNT`] and fill missing format / clamp QoS.
 pub fn ensure_publish_presets(presets: &mut Vec<PublishPreset>) {
     presets.truncate(PUBLISH_PRESET_COUNT);
@@ -265,6 +328,8 @@ impl ConnectionConfig {
             timed_interval: default_timed_interval(),
             subscriptions: Vec::new(),
             publish_presets: default_publish_presets(),
+            auto_reply_rules: Vec::new(),
+            auto_reply_echo: default_auto_reply_echo(),
         }
     }
 }
@@ -335,6 +400,8 @@ pub fn load() -> Result<Option<AppConfig>, String> {
             conn.name = format!("{}:{}", conn.host, conn.port);
         }
         ensure_publish_presets(&mut conn.publish_presets);
+        ensure_auto_reply_rules(&mut conn.auto_reply_rules);
+        conn.auto_reply_echo = normalize_auto_reply_echo(&conn.auto_reply_echo).to_string();
     }
 
     if !config
@@ -467,6 +534,17 @@ mod tests {
             retain: true,
             format: "hex".to_string(),
         };
+        conn.auto_reply_echo = "rematch".to_string();
+        conn.auto_reply_rules.push(AutoReplyRule {
+            enabled: true,
+            match_topic: "dev/in".to_string(),
+            payload_contains: "ping".to_string(),
+            reply_topic: "dev/out".to_string(),
+            reply_payload: "pong".to_string(),
+            qos: 1,
+            retain: false,
+            format: "text".to_string(),
+        });
         config.active_id = conn.id.clone();
         config.connections.push(conn);
         config.log_format = "base64".to_string();
@@ -504,6 +582,13 @@ mod tests {
         assert_eq!(back.connections[0].publish_presets[0].qos, 1);
         assert!(back.connections[0].publish_presets[0].retain);
         assert_eq!(back.connections[0].publish_presets[0].format, "hex");
+        assert_eq!(back.connections[0].auto_reply_echo, "rematch");
+        assert_eq!(back.connections[0].auto_reply_rules.len(), 1);
+        assert!(back.connections[0].auto_reply_rules[0].enabled);
+        assert_eq!(back.connections[0].auto_reply_rules[0].match_topic, "dev/in");
+        assert_eq!(back.connections[0].auto_reply_rules[0].payload_contains, "ping");
+        assert_eq!(back.connections[0].auto_reply_rules[0].reply_topic, "dev/out");
+        assert_eq!(back.connections[0].auto_reply_rules[0].reply_payload, "pong");
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);
         assert_eq!(back.skin, "green");
@@ -560,5 +645,48 @@ mod tests {
         ensure_publish_presets(&mut config.connections[0].publish_presets);
         assert_eq!(config.connections[0].publish_presets.len(), PUBLISH_PRESET_COUNT);
         assert!(config.connections[0].publish_presets[0].topic.is_empty());
+    }
+
+    #[test]
+    fn missing_auto_reply_fields_load_as_empty_skip() {
+        let text = r#"{
+            "active_id": "c1",
+            "connections": [{
+                "id": "c1",
+                "name": "broker",
+                "host": "127.0.0.1",
+                "port": "1883"
+            }]
+        }"#;
+        let mut config: AppConfig = serde_json::from_str(text).expect("deserialize");
+        ensure_auto_reply_rules(&mut config.connections[0].auto_reply_rules);
+        config.connections[0].auto_reply_echo =
+            normalize_auto_reply_echo(&config.connections[0].auto_reply_echo).to_string();
+        assert!(config.connections[0].auto_reply_rules.is_empty());
+        assert_eq!(config.connections[0].auto_reply_echo, "skip");
+    }
+
+    #[test]
+    fn normalize_auto_reply_echo_unknown_is_skip() {
+        assert_eq!(normalize_auto_reply_echo("skip"), "skip");
+        assert_eq!(normalize_auto_reply_echo("rematch"), "rematch");
+        assert_eq!(normalize_auto_reply_echo("ReMatch"), "rematch");
+        assert_eq!(normalize_auto_reply_echo("unknown"), "skip");
+        assert_eq!(normalize_auto_reply_echo(""), "skip");
+    }
+
+    #[test]
+    fn ensure_auto_reply_rules_clamps_qos_and_format() {
+        let mut rules = vec![AutoReplyRule {
+            enabled: true,
+            match_topic: "a".into(),
+            qos: 9,
+            format: String::new(),
+            ..AutoReplyRule::default()
+        }];
+        ensure_auto_reply_rules(&mut rules);
+        assert_eq!(rules[0].qos, 2);
+        assert_eq!(rules[0].format, "text");
+        assert!(rules[0].enabled);
     }
 }

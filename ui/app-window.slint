@@ -30,6 +30,17 @@ export struct PublishPresetRow {
     format: int,
 }
 
+export struct AutoReplyRuleRow {
+    enabled: bool,
+    match-topic: string,
+    payload-contains: string,
+    reply-topic: string,
+    reply-payload: string,
+    qos: int,
+    retain: bool,
+    format: int,
+}
+
 // Visual palette only: 0=Black, 1=White, 2=Blue, 3=Green, 4=Purple.
 // The settings combo's System (index 0) is resolved in Rust before writing `skin`.
 export global Theme {
@@ -365,7 +376,7 @@ component MessageList inherits Rectangle {
     }
 }
 
-// page: 0 = connection editor, 1 = live session, 2 = settings.
+// page: 0 = connection editor, 1 = live session, 2 = settings, 3 = auto-reply.
 export component AppWindow inherits Window {
     title: "mqttc";
     icon: @image-url("../assets/icon.png");
@@ -426,6 +437,9 @@ export component AppWindow inherits Window {
         { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
         { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
     ];
+    in-out property <[AutoReplyRuleRow]> auto-reply-rules: [];
+    // 0 = skip own echo, 1 = rematch own echo
+    in-out property <int> auto-reply-echo: 0;
 
     in-out property <[LogEntry]> logs: [];
     in-out property <int> log-format: 0;
@@ -477,6 +491,9 @@ export component AppWindow inherits Window {
     callback skin-changed();
     callback language-changed();
     callback settings-requested();
+    callback auto-reply-requested();
+    callback add-auto-reply-requested();
+    callback delete-auto-reply-requested(int);
 
     HorizontalBox {
         padding: 12px;
@@ -568,6 +585,10 @@ export component AppWindow inherits Window {
                     }
                 }
                 Button {
+                    text: I18n.t("自动回复", "Auto-reply");
+                    clicked => { root.auto-reply-requested(); }
+                }
+                Button {
                     text: I18n.t("设置", "Settings");
                     clicked => { root.settings-requested(); }
                 }
@@ -634,6 +655,147 @@ export component AppWindow inherits Window {
                         font-size: 12px;
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
+                }
+            }
+        }
+
+        if root.page == 3: Rectangle {
+            border-radius: 10px;
+            background: Theme.panel-bg;
+            horizontal-stretch: 1;
+            VerticalBox {
+                padding: 16px;
+                spacing: 12px;
+                HorizontalBox {
+                    spacing: 10px;
+                    Text {
+                        text: I18n.t("自动回复", "Auto-reply");
+                        color: Theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        width: 88px;
+                        text: I18n.t("返回会话", "Back");
+                        clicked => { root.back-to-session-requested(); }
+                    }
+                }
+                HorizontalBox {
+                    spacing: 12px;
+                    FieldLabel { caption: I18n.t("自身回投", "Own echo"); }
+                    Select {
+                        width: 220px;
+                        options: [
+                            I18n.t("跳过自身回投", "Skip own echo"),
+                            I18n.t("再匹配自身回投", "Rematch own echo"),
+                        ];
+                        current-index <=> root.auto-reply-echo;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        text: I18n.t("新增规则", "Add rule");
+                        clicked => { root.add-auto-reply-requested(); }
+                    }
+                }
+                Text {
+                    text: I18n.t("勾选后该条才参与匹配；同一条消息只触发第一条命中的规则。", "Only checked rules match; the first hit sends its own fixed reply.");
+                    color: Theme.text-faint;
+                    font-size: 12px;
+                }
+                Rectangle {
+                    background: Theme.inset-bg;
+                    border-radius: 8px;
+                    vertical-stretch: 1;
+                    clip: true;
+                    if root.auto-reply-rules.length == 0: Text {
+                        text: I18n.t("还没有规则。点「新增规则」添加。", "No rules yet. Click Add rule.");
+                        color: Theme.text-muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    ListView {
+                        for rule[index] in root.auto-reply-rules: Rectangle {
+                            height: 148px;
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 6px;
+                                HorizontalBox {
+                                    padding: 0;
+                                    spacing: 8px;
+                                    CheckBox {
+                                        text: I18n.t("启用", "On");
+                                        checked <=> rule.enabled;
+                                    }
+                                    Text {
+                                        text: I18n.t("规则", "Rule");
+                                        color: Theme.text-title;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    Button {
+                                        width: 64px;
+                                        text: I18n.t("删除", "Delete");
+                                        clicked => { root.delete-auto-reply-requested(index); }
+                                    }
+                                }
+                                HorizontalBox {
+                                    padding: 0;
+                                    spacing: 8px;
+                                    FieldLabel { caption: I18n.t("匹配 Topic", "Match topic"); width: 88px; }
+                                    LineEdit {
+                                        text <=> rule.match-topic;
+                                        placeholder-text: "sensor/+/status";
+                                        horizontal-stretch: 1;
+                                    }
+                                    FieldLabel { caption: I18n.t("包含", "Contains"); width: 48px; }
+                                    LineEdit {
+                                        text <=> rule.payload-contains;
+                                        placeholder-text: I18n.t("可选", "optional");
+                                        width: 160px;
+                                    }
+                                }
+                                HorizontalBox {
+                                    padding: 0;
+                                    spacing: 8px;
+                                    FieldLabel { caption: I18n.t("回复 Topic", "Reply topic"); width: 88px; }
+                                    LineEdit {
+                                        text <=> rule.reply-topic;
+                                        placeholder-text: "Topic";
+                                        horizontal-stretch: 1;
+                                    }
+                                    Select {
+                                        width: 52px;
+                                        options: ["0", "1", "2"];
+                                        current-index <=> rule.qos;
+                                    }
+                                    CheckBox {
+                                        text: "Retain";
+                                        checked <=> rule.retain;
+                                    }
+                                    Select {
+                                        width: 78px;
+                                        options: [
+                                            I18n.t("文本", "Text"),
+                                            "JSON",
+                                            "Base64",
+                                            "Hex",
+                                        ];
+                                        current-index <=> rule.format;
+                                    }
+                                }
+                                TextEdit {
+                                    text <=> rule.reply-payload;
+                                    placeholder-text: "Payload";
+                                    wrap: word-wrap;
+                                    font-family: Theme.mono-font;
+                                    height: 44px;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

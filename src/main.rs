@@ -2,7 +2,7 @@
 
 //! Desktop MQTT debug client (Slint UI + rumqttc).
 //!
-//! Pages: 0 = connection settings, 1 = live session, 2 = app settings.
+//! Pages: 0 = connection settings, 1 = live session, 2 = app settings, 3 = auto-reply.
 //! Slint callbacks stay on the UI thread; each connection's rumqttc eventloop
 //! runs on its own worker and posts [`UiEvent`]s back with `invoke_from_event_loop`.
 
@@ -13,8 +13,8 @@ mod mqtt;
 use base64::Engine;
 use chrono::Local;
 use config::{
-    ensure_publish_presets, AppConfig, ConnectionConfig, PublishPreset, SubscriptionConfig,
-    PUBLISH_PRESET_COUNT,
+    ensure_auto_reply_rules, ensure_publish_presets, normalize_auto_reply_echo, AppConfig,
+    AutoReplyRule, ConnectionConfig, PublishPreset, SubscriptionConfig, PUBLISH_PRESET_COUNT,
 };
 use i18n::Lang;
 use mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, UiEvent};
@@ -250,6 +250,8 @@ struct ConnRuntime {
     timed_running: bool,
     /// Empty = show every topic; otherwise filter RECV/SEND by MQTT wildcard.
     active_sub_topic: String,
+    /// Last Fixed Reply used to detect Own Echo. Manual / preset / timed publish leave this alone.
+    last_auto_reply: Option<(String, Vec<u8>)>,
 }
 
 impl ConnRuntime {
@@ -261,6 +263,7 @@ impl ConnRuntime {
             timed_generation: Arc::new(AtomicU64::new(0)),
             timed_running: false,
             active_sub_topic: String::new(),
+            last_auto_reply: None,
         }
     }
 }
@@ -314,6 +317,22 @@ impl AppState {
             runtime.timed_generation.fetch_add(1, Ordering::Relaxed);
             runtime.timed_running = false;
         }
+    }
+}
+
+fn echo_policy_from_index(index: i32) -> &'static str {
+    if index == 1 {
+        "rematch"
+    } else {
+        "skip"
+    }
+}
+
+fn echo_policy_to_index(key: &str) -> i32 {
+    if normalize_auto_reply_echo(key) == "rematch" {
+        1
+    } else {
+        0
     }
 }
 
@@ -528,6 +547,7 @@ fn register_callbacks(ui: &AppWindow) {
                 let id = cfg.id.clone();
                 st.stop_timed(&id);
                 st.runtime_mut(&id).status = ConnStatus::Connecting;
+                st.runtime_mut(&id).last_auto_reply = None;
                 let will_hint = if cfg.will_topic.trim().is_empty() {
                     String::new()
                 } else if i18n::is_en() {
@@ -655,6 +675,7 @@ fn register_callbacks(ui: &AppWindow) {
                 st.stop_timed(&id);
                 st.runtime_mut(&id).mqtt.disconnect();
                 st.runtime_mut(&id).status = ConnStatus::Disconnected;
+                st.runtime_mut(&id).last_auto_reply = None;
                 ui.set_timed_running(false);
                 push_log(
                     &ui,
@@ -1013,6 +1034,52 @@ fn register_callbacks(ui: &AppWindow) {
         }
     });
 
+    ui.on_auto_reply_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                persist(st);
+                show_page(&ui, 3);
+            });
+        }
+    });
+
+    ui.on_add_auto_reply_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                let Some(idx) = st.active_index() else { return };
+                st.config.connections[idx]
+                    .auto_reply_rules
+                    .push(AutoReplyRule::default());
+                refresh_auto_reply(&ui, &st.config.connections[idx]);
+                persist(st);
+            });
+        }
+    });
+
+    ui.on_delete_auto_reply_requested({
+        let ui_weak = ui_weak.clone();
+        move |index| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                let Some(idx) = st.active_index() else { return };
+                let pos = index.max(0) as usize;
+                if pos >= st.config.connections[idx].auto_reply_rules.len() {
+                    return;
+                }
+                st.config.connections[idx].auto_reply_rules.remove(pos);
+                refresh_auto_reply(&ui, &st.config.connections[idx]);
+                persist(st);
+            });
+        }
+    });
+
     ui.on_save_logs_requested({
         let ui_weak = ui_weak.clone();
         move || {
@@ -1092,6 +1159,7 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
             }
             let previous = st.runtime_mut(conn_id).status;
             st.runtime_mut(conn_id).status = ConnStatus::Disconnected;
+            st.runtime_mut(conn_id).last_auto_reply = None;
             if previous != ConnStatus::Disconnected && !reason.is_empty() {
                 push_log_for(
                     ui,
@@ -1122,7 +1190,8 @@ fn handle_event(ui: &AppWindow, st: &mut AppState, conn_id: &str, event: UiEvent
             }
         }
         UiEvent::Recv { topic, payload } => {
-            push_log_for(ui, st, conn_id, "RECV", &topic, payload);
+            push_log_for(ui, st, conn_id, "RECV", &topic, payload.clone());
+            maybe_auto_reply(ui, st, conn_id, &topic, &payload);
         }
         UiEvent::Error { message } => {
             push_log_for(ui, st, conn_id, "ERR", "", message.into_bytes());
@@ -1524,7 +1593,7 @@ unsafe fn set_window_pos(
     let _ = SetWindowPos(hwnd, hwnd_insert_after, x, y, cx, cy, flags);
 }
 
-/// 0 = connection editor, 1 = session, 2 = settings.
+/// 0 = connection editor, 1 = session, 2 = settings, 3 = auto-reply.
 fn show_page(ui: &AppWindow, page: i32) {
     ui.set_page(page);
 }
@@ -1594,6 +1663,7 @@ fn refresh_active_form(ui: &AppWindow, st: &AppState) {
     ui.set_pub_retain(cfg.pub_retain);
     ui.set_pub_format(PayloadFormat::from_key(&cfg.pub_format).to_index());
     refresh_publish_presets(ui, cfg);
+    refresh_auto_reply(ui, cfg);
 }
 
 fn refresh_status(ui: &AppWindow, st: &AppState) {
@@ -1691,6 +1761,7 @@ fn sync_form(ui: &AppWindow, st: &mut AppState) {
         .to_key()
         .to_string();
     sync_publish_presets(ui, cfg);
+    sync_auto_reply(ui, cfg);
     if cfg.name.trim().is_empty() {
         cfg.name = format!("{}:{}", cfg.host.trim(), cfg.port.trim());
     }
@@ -1749,6 +1820,157 @@ fn sync_publish_presets(ui: &AppWindow, cfg: &mut ConnectionConfig) {
     }
     cfg.publish_presets = presets;
     ensure_publish_presets(&mut cfg.publish_presets);
+}
+
+fn refresh_auto_reply(ui: &AppWindow, cfg: &ConnectionConfig) {
+    let rows: Vec<AutoReplyRuleRow> = cfg
+        .auto_reply_rules
+        .iter()
+        .map(|rule| AutoReplyRuleRow {
+            enabled: rule.enabled,
+            match_topic: rule.match_topic.clone().into(),
+            payload_contains: rule.payload_contains.clone().into(),
+            reply_topic: rule.reply_topic.clone().into(),
+            reply_payload: rule.reply_payload.clone().into(),
+            qos: rule.qos.min(2) as i32,
+            retain: rule.retain,
+            format: PayloadFormat::from_key(&rule.format).to_index(),
+        })
+        .collect();
+    ui.set_auto_reply_rules(Rc::new(VecModel::from(rows)).into());
+    ui.set_auto_reply_echo(echo_policy_to_index(&cfg.auto_reply_echo));
+}
+
+fn sync_auto_reply(ui: &AppWindow, cfg: &mut ConnectionConfig) {
+    let model = ui.get_auto_reply_rules();
+    let mut rules = Vec::with_capacity(model.row_count());
+    for i in 0..model.row_count() {
+        let Some(row) = model.row_data(i) else {
+            continue;
+        };
+        rules.push(AutoReplyRule {
+            enabled: row.enabled,
+            match_topic: row.match_topic.to_string(),
+            payload_contains: row.payload_contains.to_string(),
+            reply_topic: row.reply_topic.to_string(),
+            reply_payload: row.reply_payload.to_string(),
+            qos: row.qos.clamp(0, 2) as u8,
+            retain: row.retain,
+            format: PayloadFormat::from_index(row.format).to_key().to_string(),
+        });
+    }
+    cfg.auto_reply_rules = rules;
+    ensure_auto_reply_rules(&mut cfg.auto_reply_rules);
+    cfg.auto_reply_echo = echo_policy_from_index(ui.get_auto_reply_echo()).to_string();
+}
+
+fn inbound_payload_text(payload: &[u8]) -> String {
+    String::from_utf8_lossy(payload).into_owned()
+}
+
+fn rule_matches(rule: &AutoReplyRule, topic: &str, payload_text: &str) -> bool {
+    if !rule.enabled {
+        return false;
+    }
+    let match_topic = rule.match_topic.trim();
+    if match_topic.is_empty() {
+        return false;
+    }
+    if !topic_matches_filter(topic, match_topic) {
+        return false;
+    }
+    let needle = rule.payload_contains.as_str();
+    needle.is_empty() || payload_text.contains(needle)
+}
+
+fn select_auto_reply_rule(rules: &[AutoReplyRule], topic: &str, payload_text: &str) -> Option<usize> {
+    rules
+        .iter()
+        .enumerate()
+        .find(|(_, rule)| rule_matches(rule, topic, payload_text))
+        .map(|(i, _)| i)
+}
+
+fn is_own_echo(runtime: &ConnRuntime, topic: &str, payload: &[u8]) -> bool {
+    runtime
+        .last_auto_reply
+        .as_ref()
+        .map(|(echo_topic, echo_payload)| echo_topic == topic && echo_payload.as_slice() == payload)
+        .unwrap_or(false)
+}
+
+fn maybe_auto_reply(
+    ui: &AppWindow,
+    st: &mut AppState,
+    conn_id: &str,
+    topic: &str,
+    payload: &[u8],
+) {
+    if !st.is_connected(conn_id) {
+        return;
+    }
+    if ui.get_page() == 3 && st.config.active_id == conn_id {
+        sync_form(ui, st);
+    }
+    let Some(idx) = st
+        .config
+        .connections
+        .iter()
+        .position(|conn| conn.id == conn_id)
+    else {
+        return;
+    };
+    let echo_skip = normalize_auto_reply_echo(&st.config.connections[idx].auto_reply_echo) == "skip";
+    if echo_skip {
+        let runtime = st.runtime_mut(conn_id);
+        if is_own_echo(runtime, topic, payload) {
+            return;
+        }
+    }
+    let payload_text = inbound_payload_text(payload);
+    let Some(rule_idx) = select_auto_reply_rule(
+        &st.config.connections[idx].auto_reply_rules,
+        topic,
+        &payload_text,
+    ) else {
+        return;
+    };
+    let rule = st.config.connections[idx].auto_reply_rules[rule_idx].clone();
+    let reply_topic = rule.reply_topic.trim().to_string();
+    if reply_topic.is_empty() {
+        push_log_for(
+            ui,
+            st,
+            conn_id,
+            "ERR",
+            "",
+            i18n::t("回复 Topic 为空", "Reply topic is empty").into_bytes(),
+        );
+        return;
+    }
+    let format = PayloadFormat::from_key(&rule.format);
+    let reply_bytes = match encode_payload(&rule.reply_payload, format) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            push_log_for(ui, st, conn_id, "ERR", &reply_topic, err.into_bytes());
+            return;
+        }
+    };
+    let mqtt = st.runtime_mut(conn_id).mqtt.clone();
+    match mqtt.publish(
+        &reply_topic,
+        qos_from_u8(rule.qos.min(2)),
+        rule.retain,
+        reply_bytes.clone(),
+    ) {
+        Ok(()) => {
+            st.runtime_mut(conn_id).last_auto_reply = Some((reply_topic.clone(), reply_bytes.clone()));
+            push_log_for(ui, st, conn_id, "SEND", &reply_topic, reply_bytes);
+        }
+        Err(err) => {
+            push_log_for(ui, st, conn_id, "ERR", &reply_topic, err.into_bytes());
+        }
+    }
 }
 
 /// Bottom "Publish" button: read topic/payload/qos/retain/format from the form.
@@ -2366,5 +2588,72 @@ mod tests {
         assert!(topic_matches_filter("a/b/c", "#"));
         assert!(!topic_matches_filter("a/b/c", "a/+"));
         assert!(!topic_matches_filter("a/b/c", "b/#"));
+    }
+
+    fn sample_rule(enabled: bool, match_topic: &str, contains: &str) -> AutoReplyRule {
+        AutoReplyRule {
+            enabled,
+            match_topic: match_topic.to_string(),
+            payload_contains: contains.to_string(),
+            reply_topic: "out".to_string(),
+            reply_payload: "pong".to_string(),
+            ..AutoReplyRule::default()
+        }
+    }
+
+    #[test]
+    fn auto_reply_selects_first_enabled_match() {
+        let rules = vec![
+            sample_rule(false, "a/#", ""),
+            sample_rule(true, "a/#", "ping"),
+            sample_rule(true, "a/#", "ping"),
+        ];
+        assert_eq!(select_auto_reply_rule(&rules, "a/b", "hello ping"), Some(1));
+    }
+
+    #[test]
+    fn auto_reply_skips_disabled_and_empty_match_topic() {
+        let rules = vec![
+            sample_rule(true, "", "ping"),
+            sample_rule(false, "a/#", "ping"),
+            sample_rule(true, "a/#", "ping"),
+        ];
+        assert_eq!(select_auto_reply_rule(&rules, "a/b", "ping"), Some(2));
+        assert_eq!(select_auto_reply_rule(&rules, "other", "ping"), None);
+    }
+
+    #[test]
+    fn auto_reply_payload_contains_is_case_sensitive() {
+        let rules = vec![sample_rule(true, "a/#", "Hello")];
+        assert_eq!(select_auto_reply_rule(&rules, "a/b", "Hello"), Some(0));
+        assert_eq!(select_auto_reply_rule(&rules, "a/b", "hello"), None);
+    }
+
+    #[test]
+    fn auto_reply_empty_contains_matches_any_payload() {
+        let rules = vec![sample_rule(true, "dev/+", "")];
+        assert_eq!(select_auto_reply_rule(&rules, "dev/1", ""), Some(0));
+        assert_eq!(select_auto_reply_rule(&rules, "dev/1", "anything"), Some(0));
+    }
+
+    #[test]
+    fn own_echo_compares_topic_and_raw_bytes() {
+        let mut runtime = ConnRuntime::new();
+        runtime.last_auto_reply = Some(("out".into(), b"pong".to_vec()));
+        assert!(is_own_echo(&runtime, "out", b"pong"));
+        assert!(!is_own_echo(&runtime, "out", b"Pong"));
+        assert!(!is_own_echo(&runtime, "other", b"pong"));
+        runtime.last_auto_reply = None;
+        assert!(!is_own_echo(&runtime, "out", b"pong"));
+    }
+
+    #[test]
+    fn echo_policy_index_round_trip() {
+        assert_eq!(echo_policy_from_index(0), "skip");
+        assert_eq!(echo_policy_from_index(1), "rematch");
+        assert_eq!(echo_policy_from_index(99), "skip");
+        assert_eq!(echo_policy_to_index("skip"), 0);
+        assert_eq!(echo_policy_to_index("rematch"), 1);
+        assert_eq!(echo_policy_to_index("unknown"), 0);
     }
 }
