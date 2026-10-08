@@ -1,7 +1,8 @@
 # 自动回复
 
 Feature Name: auto-reply
-Updated: 2026-10-07
+Updated: 2026-10-08
+Status: implemented in `2d14018`
 
 ## Description
 

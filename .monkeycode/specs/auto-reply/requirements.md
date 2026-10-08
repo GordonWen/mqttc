@@ -1,5 +1,7 @@
 # Requirements Document
 
+Status: implemented in `2d14018`
+
 ## Introduction
 
 调试时常要在收到指定 Topic / 内容后立刻回一条固定报文。本需求为每条连接提供可增减的自动回复规则，放在独立页面编辑。每条规则自带匹配条件与回复内容：规则 N 只按规则 N 的条件匹配，并只发送规则 N 配置的固定报文。同一条入站消息按列表顺序只触发第一条命中的已启用规则。
@@ -57,7 +59,7 @@
 2. WHILE Auto-Reply Page 可见, the System SHALL 为每条规则展示独立的启用复选框、匹配 Topic、Payload 包含、回复 Topic、回复 Payload、QoS、Retain、格式，以及删除该规则的入口
 3. WHILE Auto-Reply Page 可见, the System SHALL 展示当前 Connection 的 Echo Policy 选项：「跳过自身回投」与「再匹配自身回投」
 4. WHEN 用户在 Auto-Reply Page 点击新增, the System SHALL 在列表末尾追加一条默认 Auto-Reply Rule 并展示该条
-5. WHEN 用户改完规则字段或 Echo Policy, the System SHALL 在下一次成功发布、断开、切连接、离开 Auto-Reply Page 或关闭窗口时把规则列表与 Echo Policy 写入 `mqttc.json`
+5. WHEN 用户新增或删除 Auto-Reply Rule，或改完规则字段与 Echo Policy 后离开 Auto-Reply Page、切连接、连接、断开、成功发布或关闭窗口, the System SHALL 把当前 Connection 的规则列表与 Echo Policy 写入 `mqttc.json`
 6. WHEN 界面语言为中文或英文, the System SHALL 用当前语言显示 Auto-Reply Page 的标题、字段标签、按钮、Echo Policy 文案与空列表提示
 7. WHILE 当前 Connection 未连接, the System SHALL 仍允许在 Auto-Reply Page 增删和编辑规则，并允许修改 Echo Policy
 

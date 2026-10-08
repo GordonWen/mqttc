@@ -1,11 +1,11 @@
 # mqttc Windows MVP
 
 Feature Name: mqtt-debug-client
-Updated: 2026-09-13
+Updated: 2026-10-08
 
 ## Description
 
-在 Windows 上交付可运行的 mqttc：一个 Slint 窗口 + rumqttc MQTT 3.1.1 会话，覆盖连接、订阅、发布与消息日志。源码同时可在 macOS / Linux 编译，本阶段以 Windows 功能完整性为验收基线。
+原始 Windows MVP 设计，保留作历史基线。当时交付一个 Slint 窗口 + rumqttc MQTT 3.1.1 会话，覆盖连接、订阅、发布与消息日志。当前实现已扩展到 MQTT 5.0、TLS、多连接并行、发布预设、自动回复、皮肤与中英界面；详见后续规格与 wiki。
 
 ## Architecture
 

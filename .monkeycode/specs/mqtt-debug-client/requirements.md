@@ -2,7 +2,7 @@
 
 ## Introduction
 
-mqttc Windows 最小可用版本：用户通过桌面窗口连接 MQTT 3.1.1 Broker，完成订阅、发布，并在日志中查看消息。本文件描述 MVP 范围；TLS、MQTT 5.0、多会话为后续需求。
+原始 Windows MVP 规格，保留作历史基线。当时范围是：桌面窗口连接 MQTT 3.1.1 Broker，完成订阅、发布，并在日志中查看消息。TLS、MQTT 5.0、多连接、发布预设、自动回复、皮肤与中英界面已在后续规格与 wiki 中落地。
 
 ## Glossary
 

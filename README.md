@@ -1,6 +1,8 @@
 # mqttc
 
-跨平台桌面 MQTT 调试客户端，功能与界面参考 [MQTTX](https://github.com/emqx/MQTTX)。当前交付 Windows 与 Linux 版本；macOS 需在本机编译。功能包括多连接管理、订阅、发布、消息日志。协议支持 MQTT 3.1.1 与 MQTT 5.0。
+跨平台桌面 MQTT 调试客户端，功能与界面参考 [MQTTX](https://github.com/emqx/MQTTX)。当前交付 Windows 与 Linux 版本；macOS 需在本机编译。功能包括多连接管理、订阅、发布、发布预设、自动回复、消息日志。协议支持 MQTT 3.1.1 与 MQTT 5.0。
+
+更完整的使用说明见 当前工作区 `/.monkeycode/docs/USER_GUIDE.md`。
 
 ## 环境
 
@@ -40,7 +42,7 @@ bash scripts/package-macos.sh
 已构建好的文件放在 当前工作区 `/dist/`：
 
 - `/dist/mqttc.exe`（约 16MB，拷到 Windows 后双击即可运行）
-- `/dist/mqttc-linux-amd64`（约 20MB）
+- `/dist/mqttc-linux-amd64`（约 21MB）
 - macOS `.app` 需在 Mac 上运行 `scripts/package-macos.sh` 生成
 
 ## 测试
@@ -99,13 +101,14 @@ xattr -dr com.apple.quarantine dist/mqttc.app
 
 ## 最小用法
 
-界面按 MQTTX 拆成三页：左侧始终是连接列表；右侧默认是会话页，点 `+` 或「编辑」进入连接配置页，点「设置」进入皮肤与语言页。
+界面按 MQTTX 拆成四页：左侧始终是连接列表；右侧默认是会话页，点 `+` 或「编辑」进入连接配置页，点「自动回复」进入规则页，点「设置」进入皮肤与语言页。
 
 1. 左侧连接列表点击 `+` 进入配置页，填写名称、主机与端口（默认 `127.0.0.1:1883`），并选择 MQTT 3.1.1 或 5.0
 2. 需要认证时填写用户名和密码，留空则匿名连接。同一页还可设置 Keep Alive、连接超时、Clean Session、SSL/TLS 与 Last Will。勾选 SSL 会把默认端口切到 8883。MQTT 5.0 的 Clean Session 对应 Clean Start
 3. 点右上角「连接」。成功后自动进入会话页。多个连接可同时在线，点左侧条目切换
 4. 会话页左侧是订阅栏：选择 QoS 后点「订阅」。点击某条订阅可按该 Topic（含通配符）筛选消息，再点一次取消筛选
-5. 会话页中间是聊天气泡。底部发布栏一行放下 Topic、QoS、Retain、格式和定时，下面是矮 payload 输入框。再往下是 3 个发布预设，点「发送」即用该组 Topic、Payload、QoS、Retain 与格式发布，不改底部表单。定时发布仍用底部表单。
+5. 会话页中间是聊天气泡。底部发布栏一行放下 Topic、QoS、Retain、格式和定时，下面是矮 payload 输入框。再往下是 3 个发布预设，点「发送」即用该组 Topic、Payload、QoS、Retain 与格式发布，不改底部表单。定时发布仍用底部表单
+6. 左侧「自动回复」打开独立规则页。每条规则有自己的启用勾选、匹配 Topic、Payload 包含，以及固定回复的 Topic / Payload / QoS / Retain / 格式。勾选后才参与匹配；同一条入站消息只触发第一条命中的规则。自身回投默认为跳过
 
 删除连接：点左侧条目右侧的 `×`。
 
