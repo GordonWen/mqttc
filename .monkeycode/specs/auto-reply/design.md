@@ -80,7 +80,7 @@ Own Echo：入站 Topic 与 Payload 字节均等于 `last_auto_reply`。比较�
 - 规则 N 匹配成功时只发送规则 N 自己的回复字段
 - 规则 N 的启用复选框只控制规则 N；取消勾选后该条被跳过，其余规则的勾选状态不变
 - 同一条 Inbound Publish 最多触发一次 Fixed Reply（第一条命中的已勾选规则）
-- Fixed Reply 成功后底部 `pub_*` 与 3 个发布预设与发送前一致
+- Fixed Reply 成功后底部 `pub_*` 与全部发布预设与发送前一致
 - 定时发布与预设发送不读取 `auto_reply_rules`
 - 旧 `mqttc.json` 缺自动回复字段时仍能加载，规则为空，Echo Policy 为 skip
 - Echo Policy 为 skip 时，Own Echo 记 RECV 且本轮不评估规则

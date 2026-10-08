@@ -25,10 +25,10 @@ cargo run
 
 ## 项目结构说明
 
-- `ui/app-window.slint`：MQTTX 式多页布局，含连接配置、会话、设置、自动回复，以及 `Select`、聊天气泡、发布预设行、自动回复规则行
-- `src/main.rs`：窗口创建与回调、多连接运行时、Payload 编解码、日志筛选、定时发布、自动回复匹配发送
+- `ui/app-window.slint`：MQTTX 式多页布局，含连接配置、会话、设置、自动回复、发布预设，以及 `Select`、聊天气泡、预设发送按钮、自动回复规则行
+- `src/main.rs`：窗口创建与回调、多连接运行时、Payload 编解码、日志筛选、定时发布、自动回复匹配发送、发布预设增删
 - `src/mqtt.rs`：单连接 MQTT 会话与事件，含协议版本、Keep Alive / Clean Session / 超时 / Last Will / TLS
-- `src/config.rs`：多连接配置 `mqttc.json` 的读写、旧格式迁移、发布预设补齐、自动回复规范化
+- `src/config.rs`：多连接配置 `mqttc.json` 的读写、旧格式迁移、发布预设与自动回复规范化
 - `src/i18n.rs`：进程级中/英切换
 - `build.rs`：编译 `.slint` 文件；Windows 额外嵌入图标并链接 dwmapi/user32
 - `scripts/package-macos.sh`：在 Mac 上打包 `dist/mqttc.app`
@@ -49,7 +49,7 @@ cargo run
 cargo test
 ```
 
-当前覆盖：Payload 编解码（文本 / JSON / Base64 / Hex）、格式 / 皮肤 / 协议 / 语言索引与键往返、日志筛选、定时间隔校验、MQTT 通配符过滤器、配置序列化与旧格式迁移、发布预设补齐、自动回复缺字段加载、Echo Policy 规范化、`select_auto_reply_rule` 第一命中 / 未勾选 / 空匹配 Topic / 大小写包含 / 空包含、自身回投字节比较。
+当前覆盖：Payload 编解码（文本 / JSON / Base64 / Hex）、格式 / 皮肤 / 协议 / 语言索引与键往返、日志筛选、定时间隔校验、MQTT 通配符过滤器、配置序列化与旧格式迁移、发布预设缺字段加载与 QoS/格式规范化、自动回复缺字段加载、Echo Policy 规范化、`select_auto_reply_rule` 第一命中 / 未勾选 / 空匹配 Topic / 大小写包含 / 空包含、自身回投字节比较。
 
 `cargo test` 峰值内存约 2.1GiB。release 构建因 LTO 更慢。无显示环境冒烟属预期。
 

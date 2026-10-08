@@ -376,7 +376,7 @@ component MessageList inherits Rectangle {
     }
 }
 
-// page: 0 = connection editor, 1 = live session, 2 = settings, 3 = auto-reply.
+// page: 0 = connection editor, 1 = live session, 2 = settings, 3 = auto-reply, 4 = publish presets.
 export component AppWindow inherits Window {
     title: "mqttc";
     icon: @image-url("../assets/icon.png");
@@ -431,12 +431,7 @@ export component AppWindow inherits Window {
     in-out property <int> pub-format: 0;
     in-out property <string> timed-interval: "5";
     in-out property <bool> timed-running: false;
-    // Three per-connection shortcuts. Sending a row does not copy into pub-topic / pub-payload.
-    in-out property <[PublishPresetRow]> publish-presets: [
-        { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
-        { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
-        { name: "", topic: "", payload: "", qos: 0, retain: false, format: 0 },
-    ];
+    in-out property <[PublishPresetRow]> publish-presets: [];
     in-out property <[AutoReplyRuleRow]> auto-reply-rules: [];
     // 0 = skip own echo, 1 = rematch own echo
     in-out property <int> auto-reply-echo: 0;
@@ -494,6 +489,9 @@ export component AppWindow inherits Window {
     callback auto-reply-requested();
     callback add-auto-reply-requested();
     callback delete-auto-reply-requested(int);
+    callback publish-presets-requested();
+    callback add-publish-preset-requested();
+    callback delete-publish-preset-requested(int);
 
     HorizontalBox {
         padding: 12px;
@@ -587,6 +585,10 @@ export component AppWindow inherits Window {
                 Button {
                     text: I18n.t("自动回复", "Auto-reply");
                     clicked => { root.auto-reply-requested(); }
+                }
+                Button {
+                    text: I18n.t("发布预设", "Presets");
+                    clicked => { root.publish-presets-requested(); }
                 }
                 Button {
                     text: I18n.t("设置", "Settings");
@@ -792,6 +794,118 @@ export component AppWindow inherits Window {
                                     wrap: word-wrap;
                                     font-family: Theme.mono-font;
                                     height: 44px;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.page == 4: Rectangle {
+            border-radius: 10px;
+            background: Theme.panel-bg;
+            horizontal-stretch: 1;
+            VerticalBox {
+                padding: 16px;
+                spacing: 12px;
+                HorizontalBox {
+                    spacing: 10px;
+                    Text {
+                        text: I18n.t("发布预设", "Publish presets");
+                        color: Theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        width: 88px;
+                        text: I18n.t("返回会话", "Back");
+                        clicked => { root.back-to-session-requested(); }
+                    }
+                }
+                HorizontalBox {
+                    spacing: 12px;
+                    Text {
+                        text: I18n.t("在会话页发布区下方点发送即可发出对应报文。", "Send from the session page under the publish form.");
+                        color: Theme.text-faint;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        text: I18n.t("新增预设", "Add preset");
+                        clicked => { root.add-publish-preset-requested(); }
+                    }
+                }
+                Rectangle {
+                    background: Theme.inset-bg;
+                    border-radius: 8px;
+                    vertical-stretch: 1;
+                    clip: true;
+                    if root.publish-presets.length == 0: Text {
+                        text: I18n.t("还没有预设。点「新增预设」添加。", "No presets yet. Click Add preset.");
+                        color: Theme.text-muted;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    ListView {
+                        for preset[index] in root.publish-presets: Rectangle {
+                            height: 148px;
+                            VerticalLayout {
+                                padding: 10px;
+                                spacing: 6px;
+                                HorizontalBox {
+                                    padding: 0;
+                                    spacing: 8px;
+                                    LineEdit {
+                                        width: 140px;
+                                        text <=> preset.name;
+                                        placeholder-text: I18n.t("名称", "Name");
+                                    }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    Button {
+                                        width: 64px;
+                                        text: I18n.t("删除", "Delete");
+                                        clicked => { root.delete-publish-preset-requested(index); }
+                                    }
+                                }
+                                HorizontalBox {
+                                    padding: 0;
+                                    spacing: 8px;
+                                    FieldLabel { caption: I18n.t("Topic", "Topic"); width: 48px; }
+                                    LineEdit {
+                                        text <=> preset.topic;
+                                        placeholder-text: "Topic";
+                                        horizontal-stretch: 1;
+                                    }
+                                    Select {
+                                        width: 52px;
+                                        options: ["0", "1", "2"];
+                                        current-index <=> preset.qos;
+                                    }
+                                    CheckBox {
+                                        text: "Retain";
+                                        checked <=> preset.retain;
+                                    }
+                                    Select {
+                                        width: 78px;
+                                        options: [
+                                            I18n.t("文本", "Text"),
+                                            "JSON",
+                                            "Base64",
+                                            "Hex",
+                                        ];
+                                        current-index <=> preset.format;
+                                    }
+                                }
+                                TextEdit {
+                                    text <=> preset.payload;
+                                    placeholder-text: "Payload";
+                                    wrap: word-wrap;
+                                    font-family: Theme.mono-font;
+                                    height: 56px;
                                 }
                             }
                         }
@@ -1384,66 +1498,23 @@ export component AppWindow inherits Window {
                                 font-family: Theme.mono-font;
                                 height: 56px;
                             }
-                            // vertical-stretch: 0 keeps the three rows from inheriting leftover panel height.
-                            VerticalLayout {
-                                spacing: 4px;
+                            if root.publish-presets.length > 0: HorizontalBox {
+                                padding: 0;
+                                spacing: 8px;
                                 vertical-stretch: 0;
                                 Text {
-                                    text: I18n.t("发布预设", "Publish presets");
+                                    text: I18n.t("发布预设", "Presets");
                                     color: Theme.text-title;
                                     font-weight: 600;
-                                    vertical-stretch: 0;
+                                    vertical-alignment: center;
                                 }
-                                for preset[index] in root.publish-presets: VerticalLayout {
-                                    spacing: 4px;
-                                    vertical-stretch: 0;
-                                    HorizontalBox {
-                                        padding: 0;
-                                        spacing: 8px;
-                                        LineEdit {
-                                            width: 88px;
-                                            text <=> preset.name;
-                                            placeholder-text: index == 0 ? I18n.t("预设 1", "Preset 1") : (index == 1 ? I18n.t("预设 2", "Preset 2") : I18n.t("预设 3", "Preset 3"));
-                                        }
-                                        LineEdit {
-                                            text <=> preset.topic;
-                                            placeholder-text: "Topic";
-                                            horizontal-stretch: 1;
-                                        }
-                                        Select {
-                                            width: 52px;
-                                            options: ["0", "1", "2"];
-                                            current-index <=> preset.qos;
-                                        }
-                                        CheckBox {
-                                            text: "Retain";
-                                            checked <=> preset.retain;
-                                        }
-                                        Select {
-                                            width: 78px;
-                                            options: [
-                                                I18n.t("文本", "Text"),
-                                                "JSON",
-                                                "Base64",
-                                                "Hex",
-                                            ];
-                                            current-index <=> preset.format;
-                                        }
-                                        Button {
-                                            width: 64px;
-                                            text: I18n.t("发送", "Send");
-                                            enabled: root.connected;
-                                            clicked => { root.preset-publish-requested(index); }
-                                        }
-                                    }
-                                    TextEdit {
-                                        text <=> preset.payload;
-                                        placeholder-text: "Payload";
-                                        wrap: word-wrap;
-                                        font-family: Theme.mono-font;
-                                        height: 40px;
-                                    }
+                                for preset[index] in root.publish-presets: Button {
+                                    min-width: 72px;
+                                    text: preset.name == "" ? (I18n.language == 1 ? "Preset \{index + 1}" : "预设 \{index + 1}") : preset.name;
+                                    enabled: root.connected;
+                                    clicked => { root.preset-publish-requested(index); }
                                 }
+                                Rectangle { horizontal-stretch: 1; background: transparent; }
                             }
                         }
                     }

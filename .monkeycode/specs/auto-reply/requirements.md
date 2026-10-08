@@ -71,7 +71,7 @@ Status: implemented in `2d14018`
 
 1. WHEN System 收到 Inbound Publish, the System SHALL 先按现有规则追加 RECV 日志，再按 Echo Policy 决定是否评估 Auto-Reply Rule
 2. WHEN 用户通过底部发布表单、发布预设或定时发布发送, the System SHALL 保持这些路径使用各自原有字段，不改用 Auto-Reply Rule
-3. WHEN System 因 Auto-Reply Rule 发出 Fixed Reply, the System SHALL 保持底部发布表单与 3 个发布预设的内容不变
+3. WHEN System 因 Auto-Reply Rule 发出 Fixed Reply, the System SHALL 保持底部发布表单与全部 Publish Preset 的内容不变
 4. WHEN Echo Policy 为「跳过」且 Inbound Publish 的 Topic 与 Payload 字节等于本 Connection 最近一次 Fixed Reply, the System SHALL 记录 RECV 日志并跳过本轮 Auto-Reply Rule 评估
 5. WHEN Echo Policy 为「再匹配」, the System SHALL 对每一条 Inbound Publish（含 Own Echo）按 Requirement 2 评估 Auto-Reply Rule
 

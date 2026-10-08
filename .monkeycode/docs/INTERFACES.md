@@ -2,7 +2,7 @@
 
 ## UI 组件接口
 
-`AppWindow` 是唯一窗口组件。左侧为连接列表，右侧按 `page` 切换：0 连接配置，1 会话，2 设置，3 自动回复。
+`AppWindow` 是唯一窗口组件。左侧为连接列表，右侧按 `page` 切换：0 连接配置，1 会话，2 设置，3 自动回复，4 发布预设。
 
 ### 通用组件
 
@@ -19,7 +19,7 @@
 
 | 属性 | 类型 | 含义 |
 |------|------|------|
-| page | int | 0 连接配置，1 会话，2 设置，3 自动回复 |
+| page | int | 0 连接配置，1 会话，2 设置，3 自动回复，4 发布预设 |
 | active-connection-id | string | 当前选中连接的 id |
 | connections | [ConnectionEntry] | 左侧连接列表 |
 | connection-name | string | 当前连接名称 |
@@ -44,7 +44,7 @@
 | pub-format | int | 发送格式索引：0 文本、1 JSON、2 Base64、3 Hex |
 | timed-interval | string | 定时发布间隔（秒），合法范围 1 到 3600 |
 | timed-running | bool | 当前连接是否正在定时发布 |
-| publish-presets | [PublishPresetRow] | 当前连接恰好 3 个发布预设 |
+| publish-presets | [PublishPresetRow] | 当前连接的发布预设，允许空 |
 | auto-reply-rules | [AutoReplyRuleRow] | 当前连接的自动回复规则，允许空 |
 | auto-reply-echo | int | 0 跳过自身回投，1 再匹配自身回投 |
 | logs | [LogEntry] | 当前连接的日志列表（已按筛选过滤） |
@@ -64,13 +64,13 @@
 | select-connection-requested | 点击连接列表条目，参数为 id，进入会话页 |
 | delete-connection-requested | 点击连接条目右侧 `×`，参数为 id |
 | edit-connection-requested | 会话页点击编辑，进入配置页 |
-| back-to-session-requested | 配置页 / 设置页 / 自动回复页点击返回会话 |
+| back-to-session-requested | 配置页 / 设置页 / 自动回复页 / 发布预设页点击返回会话 |
 | connect-requested / disconnect-requested | 点击连接 / 断开 |
 | subscribe-requested | 点击订阅 |
 | unsubscribe-requested | 点击订阅条目右侧 `×`，参数为索引 |
 | filter-subscription-requested | 点击订阅条目按 Topic 筛选消息，再点一次取消 |
 | publish-requested | 点击底部发布 |
-| preset-publish-requested | 点击某个发布预设的发送，参数为下标 0..2 |
+| preset-publish-requested | 会话页点击某个发布预设的发送按钮，参数为下标 |
 | format-payload-requested | 点击美化，按 JSON 格式化 payload 编辑框 |
 | generate-client-id-requested | 点击生成 Client ID |
 | timed-toggle-requested | 启动或停止定时发布 |
@@ -83,6 +83,9 @@
 | auto-reply-requested | 左侧栏打开自动回复页 |
 | add-auto-reply-requested | 自动回复页点击新增规则 |
 | delete-auto-reply-requested | 删除指定下标的自动回复规则，越界则忽略 |
+| publish-presets-requested | 左侧栏打开发布预设页 |
+| add-publish-preset-requested | 发布预设页点击新增预设 |
+| delete-publish-preset-requested | 删除指定下标的发布预设，越界则忽略 |
 
 ## MQTT 会话命令
 
@@ -153,9 +156,7 @@
         { "topic": "mqttc/mvp/#", "qos": 1 }
       ],
       "publish_presets": [
-        { "name": "", "topic": "", "payload": "", "qos": 0, "retain": false, "format": "text" },
-        { "name": "", "topic": "", "payload": "", "qos": 0, "retain": false, "format": "text" },
-        { "name": "", "topic": "", "payload": "", "qos": 0, "retain": false, "format": "text" }
+        { "name": "heartbeat", "topic": "dev/hb", "payload": "ping", "qos": 0, "retain": false, "format": "text" }
       ],
       "auto_reply_rules": [
         {
@@ -177,9 +178,9 @@
 
 `skin` 取值：`auto` / `black` / `white` / `blue` / `green` / `purple`。`language` 取值：`zh` / `en`。`protocol` 取值：`3.1.1` / `5.0`。`auto_reply_echo` 取值：`skip` / `rematch`，未知值按 `skip`。
 
-旧版扁平结构（仅有 `host`、`port`、`pub_topic` 等字段）会在加载时自动迁移为一条连接，`subscriptions` 中的纯字符串 Topic 迁移为 `{topic, qos: 0}`。缺 `publish_presets` 时补齐恰好 3 个空预设。缺 `auto_reply_rules` / `auto_reply_echo` 时规则为空列表、Echo Policy 为 skip。
+旧版扁平结构（仅有 `host`、`port`、`pub_topic` 等字段）会在加载时自动迁移为一条连接，`subscriptions` 中的纯字符串 Topic 迁移为 `{topic, qos: 0}`。缺 `publish_presets` 时预设列表为空。缺 `auto_reply_rules` / `auto_reply_echo` 时规则为空列表、Echo Policy 为 skip。已有文件中的预设条数保持原样，加载后不截断、不补齐。
 
-写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、预设发送、切换接收格式、皮肤与语言变化、启动/停止定时发布、进入设置或自动回复页、新增或删除规则，以及退出窗口时。
+写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、预设发送、切换接收格式、皮肤与语言变化、启动/停止定时发布、进入设置、自动回复或发布预设页、新增或删除规则与预设，以及退出窗口时。
 
 ## 日志文件
 
@@ -204,5 +205,5 @@
 - 连接超时：可配置，默认 10 秒
 - Last Will：Topic 非空时随 CONNECT 发送
 - 订阅与发布 QoS：可选 0/1/2，默认 0
-- 发布支持 Retain 保留消息、定时循环发送、每连接 3 个预设，以及自动回复 Fixed Reply
+- 发布支持 Retain 保留消息、定时循环发送、每连接可增减的发布预设，以及自动回复 Fixed Reply
 - 重连后按订阅列表自动重新订阅

@@ -2,7 +2,7 @@
 
 //! Desktop MQTT debug client (Slint UI + rumqttc).
 //!
-//! Pages: 0 = connection settings, 1 = live session, 2 = app settings, 3 = auto-reply.
+//! Pages: 0 = connection settings, 1 = live session, 2 = app settings, 3 = auto-reply, 4 = publish presets.
 //! Slint callbacks stay on the UI thread; each connection's rumqttc eventloop
 //! runs on its own worker and posts [`UiEvent`]s back with `invoke_from_event_loop`.
 
@@ -14,7 +14,7 @@ use base64::Engine;
 use chrono::Local;
 use config::{
     ensure_auto_reply_rules, ensure_publish_presets, normalize_auto_reply_echo, AppConfig,
-    AutoReplyRule, ConnectionConfig, PublishPreset, SubscriptionConfig, PUBLISH_PRESET_COUNT,
+    AutoReplyRule, ConnectionConfig, PublishPreset, SubscriptionConfig,
 };
 use i18n::Lang;
 use mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, UiEvent};
@@ -1046,6 +1046,52 @@ fn register_callbacks(ui: &AppWindow) {
         }
     });
 
+    ui.on_publish_presets_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                persist(st);
+                show_page(&ui, 4);
+            });
+        }
+    });
+
+    ui.on_add_publish_preset_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                let Some(idx) = st.active_index() else { return };
+                st.config.connections[idx]
+                    .publish_presets
+                    .push(PublishPreset::default());
+                refresh_publish_presets(&ui, &st.config.connections[idx]);
+                persist(st);
+            });
+        }
+    });
+
+    ui.on_delete_publish_preset_requested({
+        let ui_weak = ui_weak.clone();
+        move |index| {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                let Some(idx) = st.active_index() else { return };
+                let pos = index.max(0) as usize;
+                if pos >= st.config.connections[idx].publish_presets.len() {
+                    return;
+                }
+                st.config.connections[idx].publish_presets.remove(pos);
+                refresh_publish_presets(&ui, &st.config.connections[idx]);
+                persist(st);
+            });
+        }
+    });
+
     ui.on_add_auto_reply_requested({
         let ui_weak = ui_weak.clone();
         move || {
@@ -1593,7 +1639,7 @@ unsafe fn set_window_pos(
     let _ = SetWindowPos(hwnd, hwnd_insert_after, x, y, cx, cy, flags);
 }
 
-/// 0 = connection editor, 1 = session, 2 = settings, 3 = auto-reply.
+/// 0 = connection editor, 1 = session, 2 = settings, 3 = auto-reply, 4 = publish presets.
 fn show_page(ui: &AppWindow, page: i32) {
     ui.set_page(page);
 }
@@ -1779,19 +1825,17 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     i18n::set_lang(Lang::from_index(ui.get_language()));
 }
 
-/// Always push exactly three rows so the Slint `for` loop stays in sync with config.
 fn refresh_publish_presets(ui: &AppWindow, cfg: &ConnectionConfig) {
-    let rows: Vec<PublishPresetRow> = (0..PUBLISH_PRESET_COUNT)
-        .map(|i| {
-            let preset = cfg.publish_presets.get(i).cloned().unwrap_or_default();
-            PublishPresetRow {
-                name: preset.name.into(),
-                topic: preset.topic.into(),
-                payload: preset.payload.into(),
-                qos: preset.qos.min(2) as i32,
-                retain: preset.retain,
-                format: PayloadFormat::from_key(&preset.format).to_index(),
-            }
+    let rows: Vec<PublishPresetRow> = cfg
+        .publish_presets
+        .iter()
+        .map(|preset| PublishPresetRow {
+            name: preset.name.clone().into(),
+            topic: preset.topic.clone().into(),
+            payload: preset.payload.clone().into(),
+            qos: preset.qos.min(2) as i32,
+            retain: preset.retain,
+            format: PayloadFormat::from_key(&preset.format).to_index(),
         })
         .collect();
     ui.set_publish_presets(Rc::new(VecModel::from(rows)).into());
@@ -1799,16 +1843,11 @@ fn refresh_publish_presets(ui: &AppWindow, cfg: &ConnectionConfig) {
 
 fn sync_publish_presets(ui: &AppWindow, cfg: &mut ConnectionConfig) {
     let model = ui.get_publish_presets();
-    let mut presets = Vec::with_capacity(PUBLISH_PRESET_COUNT);
-    for i in 0..PUBLISH_PRESET_COUNT {
-        let row = model.row_data(i).unwrap_or(PublishPresetRow {
-            name: Default::default(),
-            topic: Default::default(),
-            payload: Default::default(),
-            qos: 0,
-            retain: false,
-            format: 0,
-        });
+    let mut presets = Vec::with_capacity(model.row_count());
+    for i in 0..model.row_count() {
+        let Some(row) = model.row_data(i) else {
+            continue;
+        };
         presets.push(PublishPreset {
             name: row.name.to_string(),
             topic: row.topic.to_string(),
