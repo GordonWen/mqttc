@@ -107,7 +107,7 @@ xattr -dr com.apple.quarantine dist/mqttc.app
 2. 需要认证时填写用户名和密码，留空则匿名连接。同一页还可设置 Keep Alive、连接超时、Clean Session、SSL/TLS 与 Last Will。勾选 SSL 会把默认端口切到 8883。MQTT 5.0 的 Clean Session 对应 Clean Start
 3. 点右上角「连接」。成功后自动进入会话页。多个连接可同时在线，点左侧条目切换
 4. 会话页左侧是订阅栏：选择 QoS 后点「订阅」。点击某条订阅可按该 Topic（含通配符）筛选消息，再点一次取消筛选
-5. 会话页中间是聊天气泡。底部发布栏一行放下 Topic、QoS、Retain、格式和定时，下面是矮 payload 输入框。再往下是当前连接的预设发送按钮，点哪条就发哪组 Topic、Payload、QoS、Retain 与格式，不改底部表单。定时发布仍用底部表单
+5. 会话页中间是聊天气泡。底部发布栏一行放下 Topic、QoS、Retain、格式和定时，下面是矮 payload 输入框。再往下是当前连接的预设发送按钮，固定一行，超出时横向滑动。点哪条就发哪组 Topic、Payload、QoS、Retain 与格式，不改底部表单。定时发布仍用底部表单
 6. 左侧「自动回复」打开独立规则页。每条规则有自己的启用勾选、匹配 Topic、Payload 包含，以及固定回复的 Topic / Payload / QoS / Retain / 格式。勾选后才参与匹配；同一条入站消息只触发第一条命中的规则。自身回投默认为跳过
 7. 左侧「发布预设」打开独立编辑页，条数可增减。会话页只负责点发送
 

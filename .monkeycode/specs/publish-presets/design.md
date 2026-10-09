@@ -32,7 +32,7 @@ UI 主线程在 `sync_form` 时把预设列表写回当前连接；`refresh_acti
 - `PublishPreset`（`src/config.rs`）：名称、Topic、Payload、QoS、Retain、格式字符串
 - `ConnectionConfig.publish_presets`：`Vec<PublishPreset>`，允许空；旧配置缺字段时反序列化为空列表
 - `ensure_publish_presets`：只规范化格式与 QoS，不补齐、不截断条数
-- `ui/app-window.slint`：`page == 4` 的 Publish Preset Page；会话页发布表单下方按列表展示发送按钮
+- `ui/app-window.slint`：`page == 4` 的 Publish Preset Page；会话页发布表单下方按列表展示发送按钮，固定一行，超出时横向滑动
 - `publish-presets-requested` / `add-publish-preset-requested` / `delete-publish-preset-requested(int)`
 - `preset-publish-requested(int)`：发送对应下标预设
 - `publish_from_preset`（`src/main.rs`）：按预设字段发布，不改 `pub-topic` / `pub-payload`

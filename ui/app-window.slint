@@ -1508,13 +1508,30 @@ export component AppWindow inherits Window {
                                     font-weight: 600;
                                     vertical-alignment: center;
                                 }
-                                for preset[index] in root.publish-presets: Button {
-                                    min-width: 72px;
-                                    text: preset.name == "" ? (I18n.language == 1 ? "Preset \{index + 1}" : "预设 \{index + 1}") : preset.name;
-                                    enabled: root.connected;
-                                    clicked => { root.preset-publish-requested(index); }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 32px;
+                                    clip: true;
+                                    Flickable {
+                                        width: 100%;
+                                        height: 100%;
+                                        viewport-height: self.height;
+                                        viewport-width: max(self.width, preset-buttons.preferred-width);
+                                        preset-buttons := HorizontalLayout {
+                                            padding: 0;
+                                            spacing: 8px;
+                                            height: 100%;
+                                            width: self.preferred-width;
+                                            alignment: start;
+                                            for preset[index] in root.publish-presets: Button {
+                                                min-width: 72px;
+                                                text: preset.name == "" ? (I18n.language == 1 ? "Preset \{index + 1}" : "预设 \{index + 1}") : preset.name;
+                                                enabled: root.connected;
+                                                clicked => { root.preset-publish-requested(index); }
+                                            }
+                                        }
+                                    }
                                 }
-                                Rectangle { horizontal-stretch: 1; background: transparent; }
                             }
                         }
                     }
