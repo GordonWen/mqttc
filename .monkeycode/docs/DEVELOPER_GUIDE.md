@@ -25,7 +25,7 @@ cargo run
 
 ## 项目结构说明
 
-- `ui/app-window.slint`：MQTTX 式多页布局，含连接配置、会话、设置、自动回复、发布预设，以及 `Select`、聊天气泡、预设发送按钮、自动回复规则行
+- `ui/app-window.slint`：MQTTX 式多页布局，含连接配置、会话、设置、自动回复、发布预设、关于，以及 `Select`、聊天气泡、预设发送按钮、自动回复规则行
 - `src/main.rs`：窗口创建与回调、多连接运行时、Payload 编解码、日志筛选、定时发布、自动回复匹配发送、发布预设增删
 - `src/mqtt.rs`：单连接 MQTT 会话与事件，含协议版本、Keep Alive / Clean Session / 超时 / Last Will / TLS
 - `src/config.rs`：多连接配置 `mqttc.json` 的读写、旧格式迁移、发布预设与自动回复规范化

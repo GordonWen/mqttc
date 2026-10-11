@@ -2,7 +2,7 @@
 
 //! Desktop MQTT debug client (Slint UI + rumqttc).
 //!
-//! Pages: 0 = connection settings, 1 = live session, 2 = app settings, 3 = auto-reply, 4 = publish presets.
+//! Pages: 0 = connection settings, 1 = live session, 2 = app settings, 3 = auto-reply, 4 = publish presets, 5 = about.
 //! Slint callbacks stay on the UI thread; each connection's rumqttc eventloop
 //! runs on its own worker and posts [`UiEvent`]s back with `invoke_from_event_loop`.
 
@@ -1034,6 +1034,18 @@ fn register_callbacks(ui: &AppWindow) {
         }
     });
 
+    ui.on_about_requested({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_form(&ui, st);
+                persist(st);
+                show_page(&ui, 5);
+            });
+        }
+    });
+
     ui.on_auto_reply_requested({
         let ui_weak = ui_weak.clone();
         move || {
@@ -1324,6 +1336,7 @@ fn platform_fonts() -> (&'static str, &'static str) {
 }
 
 fn apply_prefs(ui: &AppWindow, st: &AppState) {
+    ui.set_app_version(env!("CARGO_PKG_VERSION").into());
     ui.set_log_format(PayloadFormat::from_key(&st.config.log_format).to_index());
     ui.set_auto_scroll(st.config.auto_scroll);
     ui.set_log_filter(st.config.log_filter.clone().into());
@@ -1639,7 +1652,7 @@ unsafe fn set_window_pos(
     let _ = SetWindowPos(hwnd, hwnd_insert_after, x, y, cx, cy, flags);
 }
 
-/// 0 = connection editor, 1 = session, 2 = settings, 3 = auto-reply, 4 = publish presets.
+/// 0 = connection editor, 1 = session, 2 = settings, 3 = auto-reply, 4 = publish presets, 5 = about.
 fn show_page(ui: &AppWindow, page: i32) {
     ui.set_page(page);
 }

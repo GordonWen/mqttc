@@ -33,7 +33,7 @@ mqttc/
 
 ## 核心模块/组件
 
-- **UI 层** (`ui/app-window.slint`): MQTTX 式多页布局。左侧连接列表常驻；`page=0` 连接配置，`page=1` 会话（订阅栏 + 聊天气泡 + 底部发布 + 预设发送按钮），`page=2` 设置，`page=3` 自动回复，`page=4` 发布预设
+- **UI 层** (`ui/app-window.slint`): MQTTX 式多页布局。左侧连接列表常驻；`page=0` 连接配置，`page=1` 会话（订阅栏 + 聊天气泡 + 底部发布 + 预设发送按钮），`page=2` 设置，`page=3` 自动回复，`page=4` 发布预设，`page=5` 关于
 - **应用入口** (`src/main.rs`): 窗口创建、回调绑定、多连接运行时、Payload 编解码、日志筛选、定时发布、自动回复匹配与发送、发布预设增删
 - **配置层** (`src/config.rs`): 多连接配置与界面偏好的读写、旧配置迁移、发布预设与自动回复字段规范化
 - **MQTT 会话** (`src/mqtt.rs`): 单连接生命周期、协议版本、Keep Alive / Clean Session / 超时 / Last Will / TLS、订阅、取消订阅、发布、事件翻译

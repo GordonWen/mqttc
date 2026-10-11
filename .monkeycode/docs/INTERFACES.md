@@ -2,7 +2,7 @@
 
 ## UI 组件接口
 
-`AppWindow` 是唯一窗口组件。左侧为连接列表，右侧按 `page` 切换：0 连接配置，1 会话，2 设置，3 自动回复，4 发布预设。
+`AppWindow` 是唯一窗口组件。左侧为连接列表，右侧按 `page` 切换：0 连接配置，1 会话，2 设置，3 自动回复，4 发布预设，5 关于。
 
 ### 通用组件
 
@@ -19,7 +19,8 @@
 
 | 属性 | 类型 | 含义 |
 |------|------|------|
-| page | int | 0 连接配置，1 会话，2 设置，3 自动回复，4 发布预设 |
+| page | int | 0 连接配置，1 会话，2 设置，3 自动回复，4 发布预设，5 关于 |
+| app-version | string | 关于页展示的版本号，启动时写入 `CARGO_PKG_VERSION` |
 | active-connection-id | string | 当前选中连接的 id |
 | connections | [ConnectionEntry] | 左侧连接列表 |
 | connection-name | string | 当前连接名称 |
@@ -64,7 +65,7 @@
 | select-connection-requested | 点击连接列表条目，参数为 id，进入会话页 |
 | delete-connection-requested | 点击连接条目右侧 `×`，参数为 id |
 | edit-connection-requested | 会话页点击编辑，进入配置页 |
-| back-to-session-requested | 配置页 / 设置页 / 自动回复页 / 发布预设页点击返回会话 |
+| back-to-session-requested | 配置页 / 设置页 / 自动回复页 / 发布预设页 / 关于页点击返回会话 |
 | connect-requested / disconnect-requested | 点击连接 / 断开 |
 | subscribe-requested | 点击订阅 |
 | unsubscribe-requested | 点击订阅条目右侧 `×`，参数为索引 |
@@ -80,6 +81,7 @@
 | skin-changed | 切换皮肤 |
 | language-changed | 切换界面语言 |
 | settings-requested | 左侧栏打开设置页 |
+| about-requested | 左侧栏打开关于页 |
 | auto-reply-requested | 左侧栏打开自动回复页 |
 | add-auto-reply-requested | 自动回复页点击新增规则 |
 | delete-auto-reply-requested | 删除指定下标的自动回复规则，越界则忽略 |
@@ -180,7 +182,7 @@
 
 旧版扁平结构（仅有 `host`、`port`、`pub_topic` 等字段）会在加载时自动迁移为一条连接，`subscriptions` 中的纯字符串 Topic 迁移为 `{topic, qos: 0}`。缺 `publish_presets` 时预设列表为空。缺 `auto_reply_rules` / `auto_reply_echo` 时规则为空列表、Echo Policy 为 skip。已有文件中的预设条数保持原样，加载后不截断、不补齐。
 
-写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、预设发送、切换接收格式、皮肤与语言变化、启动/停止定时发布、进入设置、自动回复或发布预设页、新增或删除规则与预设，以及退出窗口时。
+写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、预设发送、切换接收格式、皮肤与语言变化、启动/停止定时发布、进入设置、关于、自动回复或发布预设页、新增或删除规则与预设，以及退出窗口时。
 
 ## 日志文件
 

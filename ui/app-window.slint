@@ -376,7 +376,7 @@ component MessageList inherits Rectangle {
     }
 }
 
-// page: 0 = connection editor, 1 = live session, 2 = settings, 3 = auto-reply, 4 = publish presets.
+// page: 0 = connection editor, 1 = live session, 2 = settings, 3 = auto-reply, 4 = publish presets, 5 = about.
 export component AppWindow inherits Window {
     title: "mqttc";
     icon: @image-url("../assets/icon.png");
@@ -447,6 +447,7 @@ export component AppWindow inherits Window {
     in-out property <int> language <=> I18n.language;
     in-out property <string> ui-font <=> Theme.ui-font;
     in-out property <string> mono-font <=> Theme.mono-font;
+    in-out property <string> app-version: "0.0.0";
 
     init => {
         Palette.color-scheme = skin == 1 ? ColorScheme.light : ColorScheme.dark;
@@ -486,6 +487,7 @@ export component AppWindow inherits Window {
     callback skin-changed();
     callback language-changed();
     callback settings-requested();
+    callback about-requested();
     callback auto-reply-requested();
     callback add-auto-reply-requested();
     callback delete-auto-reply-requested(int);
@@ -593,6 +595,10 @@ export component AppWindow inherits Window {
                 Button {
                     text: I18n.t("设置", "Settings");
                     clicked => { root.settings-requested(); }
+                }
+                Button {
+                    text: I18n.t("关于", "About");
+                    clicked => { root.about-requested(); }
                 }
             }
         }
@@ -910,6 +916,86 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        if root.page == 5: Rectangle {
+            border-radius: 10px;
+            background: Theme.panel-bg;
+            horizontal-stretch: 1;
+            VerticalBox {
+                padding: 16px;
+                spacing: 16px;
+                HorizontalBox {
+                    spacing: 10px;
+                    Text {
+                        text: I18n.t("关于", "About");
+                        color: Theme.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                    Button {
+                        width: 88px;
+                        text: I18n.t("返回会话", "Back");
+                        clicked => { root.back-to-session-requested(); }
+                    }
+                }
+                VerticalBox {
+                    spacing: 12px;
+                    Text {
+                        text: "mqttc";
+                        color: Theme.text-primary;
+                        font-size: 22px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: I18n.t("版本 ", "Version ") + root.app-version;
+                        color: Theme.text-muted;
+                        font-size: 13px;
+                    }
+                    Text {
+                        text: I18n.t(
+                            "跨平台桌面 MQTT 调试客户端，界面参考 MQTTX。同一套代码覆盖 Windows、macOS 与 Linux。",
+                            "A cross-platform desktop MQTT debug client inspired by MQTTX. One codebase covers Windows, macOS, and Linux."
+                        );
+                        color: Theme.text-body;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: I18n.t("能做什么", "What it does");
+                        color: Theme.text-title;
+                        font-weight: 600;
+                    }
+                    Text {
+                        text: I18n.t(
+                            "同时维护多条 Broker 连接，订阅 Topic、发布消息、查看聊天气泡日志。每条连接可配置发布预设与自动回复。协议支持 MQTT 3.1.1 与 MQTT 5.0，可选 TLS。",
+                            "Keep several Broker connections online at once. Subscribe, publish, and watch chat-style logs. Each connection has its own publish presets and auto-reply rules. MQTT 3.1.1 and 5.0, with optional TLS."
+                        );
+                        color: Theme.text-body;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: I18n.t("说明", "Notes");
+                        color: Theme.text-title;
+                        font-weight: 600;
+                    }
+                    Text {
+                        text: I18n.t(
+                            "连接、皮肤与语言写入可执行文件同目录的 mqttc.json。日志上限每连接 200 条。Windows 与 Linux 提供预编译文件；macOS 需在本机编译。",
+                            "Connections, skin, and language are saved to mqttc.json next to the executable. Each connection keeps up to 200 log rows in memory. Windows and Linux ship prebuilt binaries; macOS must be compiled on a Mac."
+                        );
+                        color: Theme.text-body;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: "MIT";
+                        color: Theme.text-faint;
+                        font-size: 12px;
+                    }
+                    Rectangle { vertical-stretch: 1; background: transparent; }
                 }
             }
         }
