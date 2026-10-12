@@ -1,4 +1,4 @@
-import { Button, CheckBox, LineEdit, ListView, TextEdit, VerticalBox, HorizontalBox, ScrollView, Palette } from "std-widgets.slint";
+import { AboutSlint, Button, CheckBox, LineEdit, ListView, TextEdit, VerticalBox, HorizontalBox, ScrollView, Palette } from "std-widgets.slint";
 
 export struct ConnectionEntry {
     id: string,
@@ -991,9 +991,20 @@ export component AppWindow inherits Window {
                         wrap: word-wrap;
                     }
                     Text {
-                        text: "MIT";
-                        color: Theme.text-faint;
-                        font-size: 12px;
+                        text: I18n.t("开源协议", "License");
+                        color: Theme.text-title;
+                        font-weight: 600;
+                    }
+                    Text {
+                        text: I18n.t(
+                            "MIT License。源码仓库根目录有 LICENSE 全文。Copyright (c) 2026 Gordon Wen。",
+                            "MIT License. The full text is in LICENSE at the repository root. Copyright (c) 2026 Gordon Wen."
+                        );
+                        color: Theme.text-body;
+                        wrap: word-wrap;
+                    }
+                    AboutSlint {
+                        height: 72px;
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }

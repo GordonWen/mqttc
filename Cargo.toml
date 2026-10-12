@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "A desktop MQTT debug client"
 license = "MIT"
+readme = "README.md"
+authors = ["Gordon Wen <godwen@qq.com>"]
+repository = "https://gitee.com/gordonwen/mqttc"
+homepage = "https://gitee.com/gordonwen/mqttc"
+keywords = ["mqtt", "iot", "debug", "client", "gui"]
+categories = ["network-programming", "gui"]
 
 [dependencies]
 base64 = "0.22"

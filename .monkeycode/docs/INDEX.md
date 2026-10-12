@@ -11,6 +11,7 @@ mqttc 是跨平台桌面 MQTT 调试客户端，界面参考 MQTTX。用户通�
 - 基于 Rust 与 Slint，同一套代码覆盖 Windows、macOS、Linux
 - 多连接并行在线，每条连接有独立日志、发布预设与自动回复规则
 - 消息日志即时可见，便于对照 Topic 与 Payload
+- 以 MIT License 开源，全文见仓库根目录 `LICENSE`
 
 ## 技术选型
 
@@ -59,7 +60,7 @@ mqttc 是跨平台桌面 MQTT 调试客户端，界面参考 MQTTX。用户通�
 
 ### 关于
 - **目的**: 查看项目介绍、使用说明摘要与版本号
-- **描述**: 左侧栏「设置」下方进入独立关于页，展示 mqttc 简介、主要能力、配置与平台说明，以及 `Cargo.toml` 中的版本号
+- **描述**: 左侧栏「设置」下方进入独立关于页，展示 mqttc 简介、主要能力、配置与平台说明、`Cargo.toml` 中的版本号、MIT 开源协议，以及 Made with Slint 署名
 
 ### 配置持久化
 - **目的**: 下次打开时自动恢复上次的连接与参数
@@ -67,6 +68,7 @@ mqttc 是跨平台桌面 MQTT 调试客户端，界面参考 MQTTX。用户通�
 
 ## 文档导航
 
+- 当前工作区 `/LICENSE` - MIT 开源协议全文
 - 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md` - 架构设计
 - 当前工作区 `/.monkeycode/docs/INTERFACES.md` - 接口定义
 - 当前工作区 `/.monkeycode/docs/DEVELOPER_GUIDE.md` - 开发指南
