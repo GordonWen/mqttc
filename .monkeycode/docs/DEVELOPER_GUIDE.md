@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Rust stable（rustup），当前开发环境 rustc 1.98.1
+- Rust stable（rustup），当前开发环境 rustc 1.99.0
 - 系统库（Linux 编译）：`build-essential`、`pkg-config`、`libfontconfig1-dev`、`libxcb*`、`libxkbcommon-dev`
 - Windows：MSVC Build Tools，或 GNU 工具链 `x86_64-pc-windows-gnu`（Linux 交叉编译需 `gcc-mingw-w64-x86-64`）
 - macOS：Xcode Command Line Tools，在本机执行 `cargo build --release`（无法从 Linux 交叉编译 Darwin）

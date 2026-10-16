@@ -7,7 +7,7 @@ mqttc 采用「Slint 主线程 UI + 每连接独立 MQTT 工作线程」结构�
 ## 技术栈
 
 - Rust 2021 edition，release 开启 thin LTO、单 codegen unit、strip
-- Slint 1.11（`std`、`backend-winit`、`renderer-software`、`compat-1-2`）
+- Slint 1.18（`std`、`backend-winit`、`renderer-software`、`compat-1-2`）
 - rumqttc 0.24 同步客户端（MQTT 3.1.1 与 5.0），TLS 走 rustls
 - 标准库通道与线程，不引入异步运行时
 
