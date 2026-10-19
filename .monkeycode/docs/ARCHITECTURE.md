@@ -1,5 +1,7 @@
 # 架构设计
 
+面向维护者的精简说明。想按「先骨架、再细节」的顺序阅读源码，或第一次接触 Rust / Slint，请先看 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`。
+
 ## 系统概述
 
 mqttc 采用「Slint 主线程 UI + 每连接独立 MQTT 工作线程」结构。UI 只负责展示与发起命令；rumqttc 的 `Client` 发送订阅/发布，事件循环在独立线程轮询并通过 `invoke_from_event_loop` 回写界面。图形后端固定为 `winit-software`，避免 FemtoVG/OpenGL 在启动时多占约 100 MB。

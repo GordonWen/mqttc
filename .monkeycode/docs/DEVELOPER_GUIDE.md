@@ -35,6 +35,8 @@ cargo run
 - `dist/`：已构建的 Windows exe 与 Linux AMD64 二进制
 - `LICENSE`：MIT 开源协议全文
 
+第一次阅读源码，先看 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`：其中按层次解释了状态存放位置、线程模型、Slint 语法与本项目的阅读顺序。
+
 ## 开发规范
 
 - 模块、类型、函数使用 Rust 惯例命名

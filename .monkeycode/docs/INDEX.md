@@ -69,7 +69,8 @@ mqttc 是跨平台桌面 MQTT 调试客户端，界面参考 MQTTX。用户通�
 ## 文档导航
 
 - 当前工作区 `/LICENSE` - MIT 开源协议全文
-- 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md` - 架构设计
+- 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md` - 架构与源码导读（面向使用者与 Rust / Slint 初学者）
+- 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md` - 架构设计（面向维护者）
 - 当前工作区 `/.monkeycode/docs/INTERFACES.md` - 接口定义
 - 当前工作区 `/.monkeycode/docs/DEVELOPER_GUIDE.md` - 开发指南
 - 当前工作区 `/.monkeycode/docs/USER_GUIDE.md` - 使用说明
