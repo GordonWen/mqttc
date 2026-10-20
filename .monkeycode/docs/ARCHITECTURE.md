@@ -76,7 +76,7 @@ graph TD
 2. 新建进入配置页，点选已有连接进入会话页；切换前先把表单（含预设与自动回复）写回配置。删除时断开该连接的会话并丢掉 runtime。
 3. 用户点击连接：按该连接的 host/port/client-id/认证/协议/Keep Alive/Clean Session/超时/Last Will/SSL 创建 `Client` 与事件循环，启动轮询线程。Client ID 为空时自动生成。连接成功后切到会话页，并清空 `last_auto_reply`。启用 SSL 时用 rustls，可校验系统/自定义 CA，也可关闭校验或附带客户端证书。
 4. `ConnAck` 到达后标记为已连接，并按该连接的订阅列表自动重新订阅（Clean Session 下重连需要恢复订阅）。
-5. 订阅/发布在主线程调用 `Client` 方法；发布前按所选格式把文本编码为字节。底部「发布」与定时发布读表单；会话页预设发送按钮读对应预设，不改表单。定时发布用独立线程按间隔回调主线程发送。预设的增删与字段编辑在页 4 完成。
+5. 订阅/发布在主线程调用 `Client` 方法；发布前按所选格式把文本编码为字节。底部「发布」读表单；定时发布读该连接已保存字段（界面正在查看该连接时会先 `sync_form`）；会话页预设发送按钮读对应预设，不改表单。定时发布用独立线程按间隔回调主线程发送。预设的增删与字段编辑在页 4 完成。
 6. 收到 `Publish` 后按连接 id 先写 RECV 日志，再在 UI 线程跑 `maybe_auto_reply`：若页 3 可见且是当前连接则先 `sync_form`；skip 且自身回投则结束；否则按列表选第一条已勾选命中规则，编码并 `MqttHandle.publish`，成功则记 SEND 并更新 `last_auto_reply`。
 7. 断开时调用 `disconnect`，停止该连接的定时发布，清空 `last_auto_reply`，轮询线程退出。窗口退出前再 `sync_form` / `sync_prefs` 并写入 `mqttc.json`。
 

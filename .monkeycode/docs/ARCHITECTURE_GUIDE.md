@@ -364,13 +364,15 @@ graph TD
 
 ### 发布
 
-发布有三个入口，共用 `publish_from_connection_inner`：
+发布有三个入口，底层都走 `MqttHandle::publish`，读数据的函数不同：
 
-| 入口 | 数据来源 | 是否改底部表单 |
-|------|----------|----------------|
-| 底部「发布」 | Slint 表单属性 | 否 |
-| 预设按钮 | `config.publish_presets[index]` | 否 |
-| 定时发布 | 底部表单 | 否 |
+| 入口 | 函数 | 数据来源 | 是否改底部表单 |
+|------|------|----------|----------------|
+| 底部「发布」 | `publish_from_form` | 当前 Slint 表单 | 发送前 `sync_form` 把表单写回配置 |
+| 预设按钮 | `publish_from_preset` | `config.publish_presets[index]` | 否 |
+| 定时发布 | `publish_from_connection` | 该连接已保存的发布字段 | 否 |
+
+`publish_from_form` 与 `publish_from_connection` 都进入 `publish_from_connection_inner`，用 `from_form` 决定读表单还是读配置。预设走独立函数，避免把预设内容写进底部表单。
 
 流程：读 Topic、格式、Payload、QoS、Retain → `encode_payload` 转成字节 → `MqttHandle::publish` → 成功写 SEND 日志，失败写 ERR 日志。
 
@@ -391,16 +393,17 @@ graph TD
     K --> L["记 SEND 并更新 last_auto_reply"]
 ```
 
-自动回复评估发生在 RECV 写入之后，所以日志顺序与真实处理顺序一致。规则数据来自 `config`，与底部表单、发布预设无关。
+自动回复评估发生在 RECV 写入之后，所以日志顺序与真实处理顺序一致。规则数据来自 `config`。若自动回复页（page 3）正打开且是当前连接，会先 `sync_form` 再匹配，避免刚改过、尚未离开页面的规则被漏掉。
 
 ### 定时发布
 
-启动时先同步发送一次，然后开线程循环：
+启动时先 `sync_form` 把底部表单写入当前连接配置，立刻按该连接已保存字段发送一次，然后开线程循环：
 
 1. 线程睡眠间隔秒数
 2. 检查 `timed_generation` 是否仍等于启动时捕获的值
 3. 投递闭包回主线程
-4. 主线程确认连接仍有效，读取表单并发送
+4. 主线程确认该连接仍在线；若界面正在查看这条连接，先 `sync_form`
+5. 调用 `publish_from_connection`，按该连接已保存的 Topic / Payload / QoS / Retain / 格式发送
 
 切换连接不会停止定时发布。断开连接或手动停止会递增代数，线程在下一轮自动退出。
 
@@ -524,7 +527,7 @@ match event {
 - `normalize_auto_reply_echo` / `ensure_publish_presets`
 - `parse_timed_interval` / `log_matches`
 
-测试放在各自文件底部。读测试可以快速确认边界行为，例如空匹配 Topic 会被跳过、Payload 包含区分大小写、自身回投按原始字节比较。
+测试放在各自文件底部，共 33 个：`main.rs` 22、`config.rs` 7、`mqtt.rs` 3、`i18n.rs` 1。读测试可以快速确认边界行为，例如空匹配 Topic 会被跳过、Payload 包含区分大小写、自身回投按原始字节比较。
 
 ## 功能改动配方
 
@@ -532,7 +535,7 @@ match event {
 
 1. `src/main.rs`：给 `PayloadFormat` 加成员，补齐 `from_index`、`from_key`、`to_index`、`to_key`
 2. `src/main.rs`：在 `encode_payload` 与 `render_payload` 加分支
-3. `src/main.rs`：在 `src/main.rs` 底部加往返测试
+3. `src/main.rs`：在文件底部加往返测试
 4. `ui/app-window.slint`：发布栏与日志格式的 `Select.options` 增加名称
 5. 更新 `README.md` 与 `USER_GUIDE.md` 的格式说明
 

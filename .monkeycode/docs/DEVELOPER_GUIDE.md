@@ -91,6 +91,6 @@ Windows 发布产物：
 Linux 本机产物名为 `mqttc`。已拷贝到 `dist/` 的文件：
 
 - `dist/mqttc.exe`（约 16MB）
-- `dist/mqttc-linux-amd64`（约 21MB）
+- `dist/mqttc-linux-amd64`（约 20MB）
 
 产物为单文件，Windows 依赖系统 DLL（gdi32、user32 等），无需额外安装 MinGW 运行库。macOS 本机产物同样名为 `mqttc`，打包后为 `dist/mqttc.app`。
