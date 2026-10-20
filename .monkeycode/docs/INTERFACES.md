@@ -1,5 +1,7 @@
 # 接口定义
 
+属性、回调、配置 JSON 与 MQTT 命令的对照表。分层与线程模型见 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`。
+
 ## UI 组件接口
 
 `AppWindow` 是唯一窗口组件。左侧为连接列表，右侧按 `page` 切换：0 连接配置，1 会话，2 设置，3 自动回复，4 发布预设，5 关于。
@@ -122,7 +124,7 @@
   "auto_scroll": true,
   "log_filter": "",
   "log_kind_filter": 0,
-  "skin": "auto",
+      "skin": "system",
   "language": "zh",
   "connections": [
     {
@@ -178,7 +180,7 @@
 }
 ```
 
-`skin` 取值：`auto` / `black` / `white` / `blue` / `green` / `purple`。`language` 取值：`zh` / `en`。`protocol` 取值：`3.1.1` / `5.0`。`auto_reply_echo` 取值：`skip` / `rematch`，未知值按 `skip`。
+`skin` 写入键为 `system` / `black` / `white` / `blue` / `green` / `purple`。加载时 `auto`、`follow` 也按跟随系统处理。`language` 取值：`zh` / `en`。`protocol` 取值：`3.1.1` / `5.0`。`auto_reply_echo` 取值：`skip` / `rematch`，未知值按 `skip`。
 
 旧版扁平结构（仅有 `host`、`port`、`pub_topic` 等字段）会在加载时自动迁移为一条连接，`subscriptions` 中的纯字符串 Topic 迁移为 `{topic, qos: 0}`。缺 `publish_presets` 时预设列表为空。缺 `auto_reply_rules` / `auto_reply_echo` 时规则为空列表、Echo Policy 为 skip。已有文件中的预设条数保持原样，加载后不截断、不补齐。
 

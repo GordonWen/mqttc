@@ -11,7 +11,7 @@
 2. MQTT 消息从 Broker 到达界面，中间经过了哪些线程
 3. 想新增一个字段、一个页面或一种 Payload 格式，应该改哪些文件
 
-维护者视角的精简设计说明见 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md`。
+维护者视角的精简设计说明见 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md`。属性、回调与 `mqttc.json` 字段对照见 当前工作区 `/.monkeycode/docs/INTERFACES.md`。
 
 ## 一分钟认识项目
 
@@ -477,7 +477,7 @@ Slint 1.18 把 `Flickable` 的 `viewport-*` 属性重命名为 `content-*`。本
 | `ProtocolVersion` | 0 表示 3.1.1，1 表示 5.0 | `3.1.1` / `5.0` |
 | `ConnStatus` | 无 | 仅内存状态 |
 
-注意 `Skin` 有两套索引：设置页包含「跟随系统」，而 `Theme.skin` 没有自动档，只有解析后的视觉索引。看到 `to_index` 与 `to_visual_index` 两个方法时，前者面向配置，后者面向界面。
+注意 `Skin` 有两套索引：设置页包含「跟随系统」，而 `Theme.skin` 没有自动档，只有解析后的视觉索引。看到 `to_index` 与 `to_visual_index` 两个方法时，前者面向配置，后者面向界面。写入键是 `system`；加载时 `auto`、`follow` 也按跟随系统处理。
 
 ### 事件处理中枢
 
@@ -641,3 +641,5 @@ MQTT 工作线程在生成 ConnAck 错误文案时也需要当前语言。`i18n.
 | 自动回复 | 收到匹配消息后自动发送固定报文 |
 | 运行时 | 每条连接在内存中的 `ConnRuntime` |
 | 代数 | 用于让旧线程自动退出的递增计数 |
+
+界面操作说明见 当前工作区 `/.monkeycode/docs/USER_GUIDE.md`。自动回复与发布预设的字段细节见 当前工作区 `/.monkeycode/docs/专有概念/`。
