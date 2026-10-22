@@ -2,7 +2,7 @@
 
 跨平台桌面 MQTT 调试客户端。Windows 与 Linux 可直接运行预编译文件；macOS 需在本机编译。协议支持 MQTT 3.1.1 与 MQTT 5.0。
 
-想了解源码分层与阅读顺序，见 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`。
+想了解源码分层与阅读顺序，见 [架构与源码导读](ARCHITECTURE_GUIDE.md)。
 
 ## 界面结构
 

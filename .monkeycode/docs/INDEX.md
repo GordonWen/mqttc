@@ -68,14 +68,17 @@ mqttc 是跨平台桌面 MQTT 调试客户端，界面参考 MQTTX。用户通�
 
 ## 文档导航
 
-- 当前工作区 `/LICENSE` - MIT 开源协议全文
-- 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md` - 架构与源码导读（面向使用者与 Rust / Slint 初学者）
-- 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md` - 架构设计（面向维护者）
-- 当前工作区 `/.monkeycode/docs/INTERFACES.md` - 接口定义
-- 当前工作区 `/.monkeycode/docs/DEVELOPER_GUIDE.md` - 开发指南
-- 当前工作区 `/.monkeycode/docs/USER_GUIDE.md` - 使用说明
-- 当前工作区 `/.monkeycode/docs/专有概念/自动回复.md` - 自动回复规则与自身回投
-- 当前工作区 `/.monkeycode/docs/专有概念/发布预设.md` - 可增减的发布快捷报文
-- 当前工作区 `/.monkeycode/specs/auto-reply/` - 自动回复需求与设计
-- 当前工作区 `/.monkeycode/specs/publish-presets/` - 发布预设需求与设计
-- 当前工作区 `/.monkeycode/specs/mqtt-debug-client/` - 原始 Windows MVP 历史规格
+- [LICENSE](../../LICENSE) - MIT 开源协议全文
+- [ARCHITECTURE_GUIDE.md](ARCHITECTURE_GUIDE.md) - 架构与源码导读（面向使用者与 Rust / Slint 初学者）
+- [ARCHITECTURE.md](ARCHITECTURE.md) - 架构设计（面向维护者）
+- [INTERFACES.md](INTERFACES.md) - 接口定义
+- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) - 开发指南
+- [USER_GUIDE.md](USER_GUIDE.md) - 使用说明
+- [自动回复](专有概念/自动回复.md) - 自动回复规则与自身回投
+- [发布预设](专有概念/发布预设.md) - 可增减的发布快捷报文
+- [auto-reply](../specs/auto-reply/) - 自动回复需求与设计
+- [publish-presets](../specs/publish-presets/) - 发布预设需求与设计
+- [mqtt-debug-client](../specs/mqtt-debug-client/) - 原始 Windows MVP 历史规格
+- [CONTRIBUTING.md](../../CONTRIBUTING.md) - 参与贡献
+- [CHANGELOG.md](../../CHANGELOG.md) - 更新日志
+- [SECURITY.md](../../SECURITY.md) - 安全政策

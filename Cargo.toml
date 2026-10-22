@@ -6,10 +6,11 @@ description = "A desktop MQTT debug client"
 license = "MIT"
 readme = "README.md"
 authors = ["Gordon Wen <godwen@qq.com>"]
-repository = "https://gitee.com/gordonwen/mqttc"
-homepage = "https://gitee.com/gordonwen/mqttc"
+repository = "https://github.com/gordonwen/mqttc"
+homepage = "https://github.com/gordonwen/mqttc"
 keywords = ["mqtt", "iot", "debug", "client", "gui"]
 categories = ["network-programming", "gui"]
+exclude = ["dist/*", ".monkeycode/*"]
 
 [dependencies]
 base64 = "0.22"

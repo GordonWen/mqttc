@@ -32,10 +32,10 @@ cargo run
 - `src/i18n.rs`：进程级中/英切换
 - `build.rs`：编译 `.slint` 文件；Windows 额外嵌入图标并链接 dwmapi/user32
 - `scripts/package-macos.sh`：在 Mac 上打包 `dist/mqttc.app`
-- `dist/`：已构建的 Windows exe 与 Linux AMD64 二进制
+- `dist/`：本机构建产物目录；预编译包发布在 GitHub Releases，不随源码提交
 - `LICENSE`：MIT 开源协议全文
 
-第一次阅读源码，先看 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`：其中按层次解释了状态存放位置、线程模型、Slint 语法与本项目的阅读顺序。
+第一次阅读源码，先看 [架构与源码导读](ARCHITECTURE_GUIDE.md)：其中按层次解释了状态存放位置、线程模型、Slint 语法与本项目的阅读顺序。
 
 ## 开发规范
 
@@ -44,7 +44,7 @@ cargo run
 - 不在代码中硬编码密钥；用户名密码由界面输入并写入本地配置
 - 提交信息使用 `feat` / `fix` / `chore` / `docs` 前缀
 - 新增的纯逻辑（编解码、配置迁移、规则匹配）需附单元测试
-- 改 Web 以外的桌面源码后，需要时刷新 `dist/mqttc.exe` 与 `dist/mqttc-linux-amd64`
+- 改桌面源码后，需要时在本机刷新 `dist/` 产物，正式包走 GitHub Releases
 
 ## 测试
 
@@ -88,7 +88,7 @@ Windows 发布产物：
 - 本机：`target/release/mqttc.exe`
 - 交叉编译：`target/x86_64-pc-windows-gnu/release/mqttc.exe`
 
-Linux 本机产物名为 `mqttc`。已拷贝到 `dist/` 的文件：
+Linux 本机产物名为 `mqttc`。需要分发时拷到 `dist/` 或上传到 GitHub Releases：
 
 - `dist/mqttc.exe`（约 16MB）
 - `dist/mqttc-linux-amd64`（约 20MB）

@@ -5,3 +5,6 @@ logs/
 .idea/
 .vscode/
 *.pdb
+/dist/*.exe
+/dist/mqttc-linux-amd64
+/dist/*.app/

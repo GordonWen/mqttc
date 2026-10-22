@@ -1,5 +1,7 @@
 # mqttc
 
+<img src="assets/icon.png" alt="mqttc" width="96">
+
 跨平台桌面 MQTT 调试客户端，用 Rust 和 [Slint](https://slint.dev) 编写，界面与交互参考 [MQTTX](https://github.com/emqx/MQTTX)。Windows 与 Linux 提供预编译产物，macOS 可在本机编译。协议支持 MQTT 3.1.1 与 MQTT 5.0。
 
 这个项目适合两类读者：
@@ -72,7 +74,7 @@
 | 4 | 左侧「发布预设」 | 发布预设编辑 |
 | 5 | 左侧「关于」 | 项目介绍与版本号 |
 
-窗口默认宽度约 1360px。启动后显示当前连接的配置页，点「连接」成功或选中左侧已有连接后进入会话页。
+窗口默认宽度约 1360px。启动后进入当前连接的会话页；点左侧 `+` 或「编辑」打开配置页。
 
 ## 最短上手路径
 
@@ -82,7 +84,7 @@
 4. 在左侧订阅栏选择 QoS 后点「订阅」，例如 `mqttc/mvp/#`
 5. 在底部填写 Topic 与 Payload 后点「发布」；收到的消息会出现在中间的气泡列表
 
-完整的界面操作、自动回复与发布预设说明见 当前工作区 `/.monkeycode/docs/USER_GUIDE.md`。
+完整的界面操作、自动回复与发布预设说明见 [使用说明](.monkeycode/docs/USER_GUIDE.md)。
 
 ## 项目结构
 
@@ -98,7 +100,7 @@ mqttc/
 │   └── i18n.rs             # 进程级中英文切换
 ├── assets/                 # 图标与 Windows 资源脚本
 ├── scripts/                # macOS 打包脚本与图标生成脚本
-├── dist/                   # 已构建的 Windows / Linux 可执行文件
+├── dist/                   # 本机构建产物，不随源码提交；发布包见 GitHub Releases
 └── .monkeycode/docs/       # 使用、架构、开发文档
 ```
 
@@ -118,7 +120,7 @@ mqttc/
 - Rust 主线程持有全部状态，Slint 只能在创建它的线程访问
 - 每条连接有一个独立的 MQTT 工作线程，通过 `invoke_from_event_loop` 把事件送回主线程
 
-想深入线程模型、数据流与 Slint 语法，请阅读 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`。
+想深入线程模型、数据流与 Slint 语法，请阅读 [架构与源码导读](.monkeycode/docs/ARCHITECTURE_GUIDE.md)。
 
 ## 环境
 
@@ -160,10 +162,10 @@ bash scripts/package-macos.sh
 - Linux AMD64：`target/release/mqttc`
 - macOS 本机：`target/release/mqttc`，打包后为 `dist/mqttc.app`
 
-已构建好的文件放在 当前工作区 `/dist/`：
+预编译 Windows / Linux 包发布在 [GitHub Releases](https://github.com/gordonwen/mqttc/releases)。本机构建时也可拷到 `dist/`：
 
-- `/dist/mqttc.exe`（约 16MB，拷到 Windows 后双击即可运行）
-- `/dist/mqttc-linux-amd64`（约 20MB）
+- `dist/mqttc.exe`（约 16MB，拷到 Windows 后双击即可运行）
+- `dist/mqttc-linux-amd64`（约 20MB）
 - macOS `.app` 需在 Mac 上运行 `scripts/package-macos.sh` 生成
 
 ## 测试
@@ -258,13 +260,16 @@ xattr -dr com.apple.quarantine dist/mqttc.app
 
 ## 文档
 
-- 当前工作区 `/.monkeycode/docs/USER_GUIDE.md` - 使用说明
-- 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md` - 架构与源码导读（面向初学者）
-- 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md` - 架构设计（面向维护者）
-- 当前工作区 `/.monkeycode/docs/INTERFACES.md` - 接口定义
-- 当前工作区 `/.monkeycode/docs/DEVELOPER_GUIDE.md` - 开发指南
-- 当前工作区 `/.monkeycode/docs/INDEX.md` - 文档索引与功能清单
+- [使用说明](.monkeycode/docs/USER_GUIDE.md)
+- [架构与源码导读](.monkeycode/docs/ARCHITECTURE_GUIDE.md)（面向初学者）
+- [架构设计](.monkeycode/docs/ARCHITECTURE.md)（面向维护者）
+- [接口定义](.monkeycode/docs/INTERFACES.md)
+- [开发指南](.monkeycode/docs/DEVELOPER_GUIDE.md)
+- [文档索引](.monkeycode/docs/INDEX.md)
+- [参与贡献](CONTRIBUTING.md)
+- [更新日志](CHANGELOG.md)
+- [安全政策](SECURITY.md)
 
 ## 开源协议
 
-本项目以 [MIT License](LICENSE) 发布。Copyright (c) 2026 Gordon Wen。全文见仓库根目录 `LICENSE`。界面使用 [Slint](https://slint.dev)，按免版税许可在关于页展示 Made with Slint。
+本项目以 [MIT License](LICENSE) 发布。Copyright (c) 2026 Gordon Wen。全文见仓库根目录 `LICENSE`。界面使用 [Slint](https://slint.dev)，按免版税许可在关于页展示 Made with Slint。参与本仓库即表示同意 [行为准则](CODE_OF_CONDUCT.md)。

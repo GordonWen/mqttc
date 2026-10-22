@@ -1,6 +1,6 @@
 # 接口定义
 
-属性、回调、配置 JSON 与 MQTT 命令的对照表。分层与线程模型见 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`。
+属性、回调、配置 JSON 与 MQTT 命令的对照表。分层与线程模型见 [架构与源码导读](ARCHITECTURE_GUIDE.md)。
 
 ## UI 组件接口
 

@@ -11,7 +11,7 @@
 2. MQTT 消息从 Broker 到达界面，中间经过了哪些线程
 3. 想新增一个字段、一个页面或一种 Payload 格式，应该改哪些文件
 
-维护者视角的精简设计说明见 当前工作区 `/.monkeycode/docs/ARCHITECTURE.md`。属性、回调与 `mqttc.json` 字段对照见 当前工作区 `/.monkeycode/docs/INTERFACES.md`。
+维护者视角的精简设计说明见 [架构设计](ARCHITECTURE.md)。属性、回调与 `mqttc.json` 字段对照见 [接口定义](INTERFACES.md)。
 
 ## 一分钟认识项目
 
@@ -154,7 +154,7 @@ mqttc/
 │   └── i18n.rs         # 93 行，语言开关
 ├── assets/             # icon.png / icon.ico / windows.rc
 ├── scripts/            # macOS 打包、图标生成
-├── dist/               # 已构建产物
+├── dist/               # 本机构建产物，发布包见 GitHub Releases
 └── .monkeycode/docs/   # 文档
 ```
 
@@ -642,4 +642,4 @@ MQTT 工作线程在生成 ConnAck 错误文案时也需要当前语言。`i18n.
 | 运行时 | 每条连接在内存中的 `ConnRuntime` |
 | 代数 | 用于让旧线程自动退出的递增计数 |
 
-界面操作说明见 当前工作区 `/.monkeycode/docs/USER_GUIDE.md`。自动回复与发布预设的字段细节见 当前工作区 `/.monkeycode/docs/专有概念/`。
+界面操作说明见 [使用说明](USER_GUIDE.md)。自动回复与发布预设的字段细节见 [专有概念](专有概念/)。

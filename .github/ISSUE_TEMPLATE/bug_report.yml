@@ -1,0 +1,48 @@
+name: 缺陷报告
+description: 报告崩溃、连接失败或界面错误
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: 请尽量附上复现步骤与 `mqttc.json` 中可公开的连接参数（不要包含密码）。
+  - type: textarea
+    id: describe
+    attributes:
+      label: 现象
+      description: 实际发生了什么，期望是什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 连接 test.mosquitto.org:1883
+        2. 订阅 mqttc/#
+        3. 发布一条 JSON
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: Cargo.toml 中的 version，或 Git 提交哈希。
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 额外信息
+      description: 日志、Broker 类型、MQTT 3.1.1 / 5.0、是否启用 TLS。

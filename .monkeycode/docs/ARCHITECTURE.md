@@ -1,6 +1,6 @@
 # 架构设计
 
-面向维护者的精简说明。想按「先骨架、再细节」的顺序阅读源码，或第一次接触 Rust / Slint，请先看 当前工作区 `/.monkeycode/docs/ARCHITECTURE_GUIDE.md`。
+面向维护者的精简说明。想按「先骨架、再细节」的顺序阅读源码，或第一次接触 Rust / Slint，请先看 [架构与源码导读](ARCHITECTURE_GUIDE.md)。
 
 ## 系统概述
 
@@ -21,9 +21,7 @@ mqttc/
 ├── build.rs
 ├── README.md
 ├── assets/icon.png
-├── dist/
-│   ├── mqttc.exe
-│   └── mqttc-linux-amd64
+├── dist/                   # 本机构建产物，不随源码提交
 ├── scripts/package-macos.sh
 ├── ui/app-window.slint
 └── src/

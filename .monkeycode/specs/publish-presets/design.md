@@ -82,7 +82,7 @@ ConnectionConfig
 
 ## References
 
-[^1]: (Filename) - 当前工作区 `/src/config.rs`
-[^2]: (Filename) - 当前工作区 `/src/main.rs`
-[^3]: (Filename) - 当前工作区 `/ui/app-window.slint`
-[^4]: (Filename) - 当前工作区 `/.monkeycode/specs/publish-presets/requirements.md`
+[^1]: (Filename) - [src/config.rs](../../../src/config.rs)
+[^2]: (Filename) - [src/main.rs](../../../src/main.rs)
+[^3]: (Filename) - [ui/app-window.slint](../../../ui/app-window.slint)
+[^4]: (Filename) - [requirements.md](requirements.md)
