@@ -1,5 +1,8 @@
 //! Compile the Slint UI and, on Windows targets, embed `assets/icon.ico` plus DWM/user32.
 //! Darwin binaries must be built on a Mac; this script does not cross-compile for macOS.
+//!
+//! Cargo runs this file *before* compiling `src/`. `slint_build::compile` writes Rust
+//! into `OUT_DIR`; `src/main.rs` pulls it in with `slint::include_modules!()`.
 
 use std::env;
 use std::path::PathBuf;
@@ -21,6 +24,7 @@ fn embed_windows_icon() {
     let res_path = out_dir.join("mqttc-icon.res");
     let windres = windows_windres();
 
+    // Tell Cargo to re-run this script when the icon sources change.
     println!("cargo:rerun-if-changed=assets/windows.rc");
     println!("cargo:rerun-if-changed=assets/icon.ico");
     println!("cargo:rerun-if-changed=assets/icon.png");
@@ -35,6 +39,7 @@ fn embed_windows_icon() {
         panic!("{windres} failed with {status}");
     }
 
+    // Link the compiled `.res` (icon) and the Win32 libs used by title-bar coloring.
     println!("cargo:rustc-link-arg={}", res_path.display());
     println!("cargo:rustc-link-lib=dwmapi");
     println!("cargo:rustc-link-lib=user32");

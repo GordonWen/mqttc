@@ -1,5 +1,15 @@
+// Single-window UI. `build.rs` compiles this file into Rust types used by `src/main.rs`.
+//
+// How to read it:
+// 1. `struct` — rows passed from Rust (`ConnectionEntry`, `LogEntry`, …)
+// 2. `global Theme` / `global I18n` — colors and bilingual strings
+// 3. Small components (`Select`, `FieldLabel`, `MessageList`)
+// 4. `AppWindow` — window properties, callbacks, then `if root.page == N` pages
+//
+// Hyphens in property names become underscores in Rust: `pub-topic` → `get_pub_topic()`.
 import { AboutSlint, Button, CheckBox, LineEdit, ListView, TextEdit, VerticalBox, HorizontalBox, ScrollView, Palette } from "std-widgets.slint";
 
+// One left-sidebar row. `status-color` is set from `ConnStatus` in Rust.
 export struct ConnectionEntry {
     id: string,
     name: string,
@@ -7,12 +17,14 @@ export struct ConnectionEntry {
     status-color: color,
 }
 
+// One subscription chip. `selected` highlights the active log filter.
 export struct Subscription {
     topic: string,
     qos: int,
     selected: bool,
 }
 
+// Rendered log row. Payload is already a string; raw bytes live in Rust `LogData`.
 export struct LogEntry {
     time: string,
     timestamp: string,
@@ -93,6 +105,7 @@ export global Theme {
     in-out property <string> mono-font: "Cascadia Mono";
 }
 
+// language 0 = 中文, 1 = English. Widgets call `I18n.t("中文", "English")`.
 export global I18n {
     in-out property <int> language: 0;
 
@@ -104,6 +117,7 @@ export global I18n {
     }
 }
 
+// Compact combo. `options` is the label list; `current-index` is the integer Rust stores.
 component Select inherits Rectangle {
     in property <[string]> options: [];
     in-out property <int> current-index: 0;
@@ -194,6 +208,7 @@ component FieldLabel inherits Text {
     font-weight: 500;
 }
 
+// Chat-style log. `content-y` is Slint 1.18 (older tutorials still say `viewport-y`).
 component MessageList inherits Rectangle {
     in-out property <[LogEntry]> logs: [];
     in-out property <bool> auto-scroll: true;
@@ -202,6 +217,7 @@ component MessageList inherits Rectangle {
     border-radius: 8px;
     clip: true;
 
+    // Flickable content-y is 0 at the top and negative when scrolled down.
     function scroll-to-bottom() {
         if (root.auto-scroll) {
             log-view.content-y = min(0px, log-view.height - log-view.content-height);
@@ -389,6 +405,7 @@ export component AppWindow inherits Window {
     default-font-size: 14px;
     default-font-weight: 500;
 
+    // 0 config, 1 session, 2 settings, 3 auto-reply, 4 presets, 5 about.
     in-out property <int> page: 0;
     in-out property <string> active-connection-id: "";
     in-out property <[ConnectionEntry]> connections: [];
@@ -441,6 +458,7 @@ export component AppWindow inherits Window {
     in-out property <bool> auto-scroll: true;
     in-out property <string> log-filter: "";
     in-out property <int> log-kind-filter: 0;
+    // `<=>` keeps the window property and the global in sync both ways.
     in-out property <int> skin <=> Theme.skin;
     // Stored preference including System. Theme.skin is the resolved visual index.
     in-out property <int> skin-choice: 0;

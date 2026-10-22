@@ -1,5 +1,6 @@
 //! Persistent app state: `mqttc.json` next to the executable (portable, no home-dir lookup).
 //!
+//! `#[serde(default)]` / `#[serde(default = "fn")]` keep old files loadable when a field is added.
 //! Old single-connection files (flat `host` / `port` …) are upgraded on load.
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,7 @@ const LOG_DIR: &str = "logs";
 
 static ID_SEQ: AtomicU64 = AtomicU64::new(0);
 
+/// One saved subscription. A plain string in old files is migrated to `{topic, qos: 0}`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SubscriptionConfig {
     #[serde(default)]
@@ -21,6 +23,7 @@ pub struct SubscriptionConfig {
     pub qos: u8,
 }
 
+/// One-click publish row. Missing `format` becomes `"text"` on load.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PublishPreset {
     #[serde(default)]
@@ -50,6 +53,7 @@ impl Default for PublishPreset {
     }
 }
 
+/// Everything the user can edit for one Broker, including presets and auto-reply.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionConfig {
     #[serde(default)]
@@ -154,6 +158,7 @@ impl Default for AutoReplyRule {
     }
 }
 
+/// Root of `mqttc.json`: the connection list plus window-wide prefs (skin, language, log filters).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
@@ -236,6 +241,7 @@ fn default_auto_reply_echo() -> String {
     "skip".to_string()
 }
 
+/// Unknown values become `"skip"` so a typo in the JSON cannot crash load.
 pub fn normalize_auto_reply_echo(value: &str) -> &'static str {
     if value.trim().eq_ignore_ascii_case("rematch") {
         "rematch"
@@ -244,6 +250,7 @@ pub fn normalize_auto_reply_echo(value: &str) -> &'static str {
     }
 }
 
+/// Fill empty format / clamp QoS. Length is left as-is (same idea as [`ensure_publish_presets`]).
 pub fn ensure_auto_reply_rules(rules: &mut Vec<AutoReplyRule>) {
     for rule in rules.iter_mut() {
         if rule.format.is_empty() {
@@ -322,6 +329,7 @@ impl ConnectionConfig {
     }
 }
 
+/// Short hex id (`c` + millis + sequence). Unique enough for a local JSON file.
 pub fn new_id() -> String {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -341,6 +349,7 @@ pub fn config_path() -> PathBuf {
     dir.join(CONFIG_FILE)
 }
 
+/// `logs/` next to the executable, same portable rule as [`config_path`].
 pub fn log_dir() -> PathBuf {
     let dir = std::env::current_exe()
         .ok()
@@ -350,6 +359,7 @@ pub fn log_dir() -> PathBuf {
     dir.join(LOG_DIR)
 }
 
+/// `Ok(None)` = no file yet (first run). `Err` = file exists but could not be read / parsed.
 pub fn load() -> Result<Option<AppConfig>, String> {
     let path = config_path();
     if !path.exists() {
@@ -448,6 +458,7 @@ fn legacy_connection(value: &serde_json::Value) -> Option<ConnectionConfig> {
         Some(conn)
     }
 
+/// Pretty-printed JSON so users can edit `mqttc.json` by hand if they want.
 pub fn save(config: &AppConfig) -> Result<(), String> {
     let path = config_path();
     let text = serde_json::to_string_pretty(config).map_err(|err| {

@@ -1,5 +1,8 @@
 //! rumqttc wrapper: MQTT 3.1.1 and 5.0 behind one [`MqttHandle`], plus rustls.
 //!
+//! Why a wrapper: rumqttc has two client types. This file hides that so `main.rs`
+//! always talks to [`MqttHandle`].
+//!
 //! `connect` bumps `Inner.generation` and spawns a blocking eventloop thread.
 //! Stale threads see a mismatched generation and exit, so reconnect/disconnect
 //! never deliver events from a previous client.
@@ -13,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+/// Combo index 0 = 3.1.1, 1 = 5.0. Config keys are `"3.1.1"` / `"5.0"`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProtocolVersion {
     V311,
@@ -54,6 +58,7 @@ impl ProtocolVersion {
     }
 }
 
+/// Snapshot of the connection form. Built on the UI thread, consumed by the worker.
 #[derive(Clone, Debug)]
 pub struct ConnectParams {
     pub host: String,
@@ -76,6 +81,7 @@ pub struct ConnectParams {
     pub protocol: ProtocolVersion,
 }
 
+/// Worker → UI. Payload is raw bytes; `main.rs` decides how to display it.
 #[derive(Clone, Debug)]
 pub enum UiEvent {
     Connected,
@@ -85,6 +91,9 @@ pub enum UiEvent {
 }
 
 /// Cloneable handle shared by the UI thread and the rumqttc eventloop thread.
+///
+/// `Arc` = shared ownership across threads. `Mutex` = exclusive access to [`Inner`].
+/// Cloning the handle only clones the `Arc`, not the client.
 #[derive(Clone)]
 pub struct MqttHandle {
     inner: Arc<Mutex<Inner>>,
@@ -96,6 +105,7 @@ struct Inner {
     client: Option<LiveClient>,
 }
 
+/// rumqttc 3.1.1 and 5.0 clients have different types; this enum lets us store either.
 enum LiveClient {
     V311(Client),
     V5(rumqttc::v5::Client),
@@ -195,6 +205,7 @@ impl MqttHandle {
         }
     }
 
+    /// Start a new session. `on_event` must be `Send + 'static` because it runs on the worker.
     pub fn connect<F>(&self, params: ConnectParams, on_event: F)
     where
         F: Fn(UiEvent) + Send + 'static,
@@ -311,6 +322,7 @@ fn start_v311<F>(
     let (client, mut connection) = Client::new(opts, 32);
     connection.eventloop.set_network_options(network);
     inner.client = Some(LiveClient::V311(client));
+    // Release the mutex before blocking on the network, or the UI thread could not publish.
     drop(inner);
 
     thread::spawn(move || {
@@ -362,6 +374,7 @@ fn start_v311<F>(
     });
 }
 
+/// UI stores QoS as 0/1/2. rumqttc wants the `QoS` enum.
 pub fn qos_from_u8(qos: u8) -> QoS {
     match qos {
         1 => QoS::AtLeastOnce,
@@ -416,7 +429,7 @@ fn start_v5<F>(
 
     let (client, mut connection) = rumqttc::v5::Client::new(opts, 32);
     inner.client = Some(LiveClient::V5(client));
-    drop(inner);
+    drop(inner); // same as start_v311: do not hold the mutex across `connection.iter()`.
 
     thread::spawn(move || {
         for notification in connection.iter() {

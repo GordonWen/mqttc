@@ -1,10 +1,14 @@
 //! Process-wide zh/en switch. MQTT worker threads call [`t`] for ConnAck errors,
 //! so the current language is an `AtomicU8` instead of UI state.
+//!
+//! Slint has its own `I18n.t(zh, en)` for widgets. This module is the Rust-side twin.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
+/// 0 = zh, 1 = en. `Relaxed` is enough: a stale language for one error string is harmless.
 static LANG: AtomicU8 = AtomicU8::new(0);
 
+/// Combo index 0 = 中文, 1 = English. Config keys are `"zh"` / `"en"`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lang {
     Zh,
@@ -43,6 +47,7 @@ impl Lang {
     }
 }
 
+/// Called from the settings page. Workers read the new value on their next `t(...)`.
 pub fn set_lang(lang: Lang) {
     LANG.store(lang.to_index() as u8, Ordering::Relaxed);
 }
