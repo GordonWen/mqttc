@@ -4,6 +4,8 @@
 
 跨平台桌面 MQTT 调试客户端，用 Rust 和 [Slint](https://slint.dev) 编写，界面与交互参考 [MQTTX](https://github.com/emqx/MQTTX)。Windows 与 Linux 提供预编译产物，macOS 可在本机编译。协议支持 MQTT 3.1.1 与 MQTT 5.0。
 
+[MQTTX](https://github.com/emqx/MQTTX) 很好用。发起本项目，是为了得到一份拷贝即可运行、体积和内存占用更小的桌面客户端。
+
 这个项目适合两类读者：
 
 - 需要快速验证 MQTT 连通性、观察消息流的开发者、测试与运维人员
