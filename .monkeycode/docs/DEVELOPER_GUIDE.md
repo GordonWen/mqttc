@@ -81,6 +81,10 @@ cargo build --release --target x86_64-pc-windows-gnu
 # macOS 本机发布（必须在 Mac 上执行）
 cargo build --release
 bash scripts/package-macos.sh
+
+# GitHub Actions 云编译通用包（Apple Silicon + Intel）
+# 仓库页 Actions → macOS → Run workflow
+# 或推送 v* 标签后自动构建并上传到 Release
 ```
 
 Windows 发布产物：
@@ -93,4 +97,4 @@ Linux 本机产物名为 `mqttc`。需要分发时拷到 `dist/` 或上传到 Gi
 - `dist/mqttc.exe`（约 16MB）
 - `dist/mqttc-linux-amd64`（约 20MB）
 
-产物为单文件，Windows 依赖系统 DLL（gdi32、user32 等），无需额外安装 MinGW 运行库。macOS 本机产物同样名为 `mqttc`，打包后为 `dist/mqttc.app`。
+产物为单文件，Windows 依赖系统 DLL（gdi32、user32 等），无需额外安装 MinGW 运行库。macOS 本机产物同样名为 `mqttc`，打包后为 `dist/mqttc.app`。GitHub Actions 工作流 `.github/workflows/macos.yml` 在 `macos-latest` 上编出 `mqttc-macos-universal.zip`。

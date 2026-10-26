@@ -1,0 +1,37 @@
+name: macOS
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - name: Build universal app
+        env:
+          MQTTC_UNIVERSAL: "1"
+        run: bash scripts/package-macos.sh
+      - name: Zip app
+        run: |
+          cd dist
+          ditto -c -k --keepParent mqttc.app mqttc-macos-universal.zip
+          lipo -info mqttc.app/Contents/MacOS/mqttc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mqttc-macos-universal
+          path: dist/mqttc-macos-universal.zip
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/mqttc-macos-universal.zip

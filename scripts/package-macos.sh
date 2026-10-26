@@ -20,7 +20,22 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 cd "${ROOT}"
-cargo build --release
+
+if [[ "${MQTTC_UNIVERSAL:-}" == "1" ]]; then
+    rustup target add aarch64-apple-darwin x86_64-apple-darwin
+    cargo build --release --target aarch64-apple-darwin
+    cargo build --release --target x86_64-apple-darwin
+    mkdir -p "${ROOT}/target/release"
+    lipo -create \
+        "${ROOT}/target/aarch64-apple-darwin/release/${APP_NAME}" \
+        "${ROOT}/target/x86_64-apple-darwin/release/${APP_NAME}" \
+        -output "${BINARY}"
+    chmod +x "${BINARY}"
+    ARCH="universal"
+else
+    cargo build --release
+    ARCH="$(uname -m)"
+fi
 
 if [[ ! -x "${BINARY}" ]]; then
     echo "missing release binary: ${BINARY}"
@@ -49,7 +64,6 @@ sips -z 512 512 "${ICON_PNG}" --out "${ICONSET}/mqttc.iconset/icon_512x512.png" 
 sips -z 1024 1024 "${ICON_PNG}" --out "${ICONSET}/mqttc.iconset/icon_512x512@2x.png" >/dev/null
 iconutil -c icns "${ICONSET}/mqttc.iconset" -o "${RESOURCES}/mqttc.icns"
 
-ARCH="$(uname -m)"
 echo "Built ${APP_DIR} (${ARCH})"
 echo "Open with:"
 echo "  open ${APP_DIR}"

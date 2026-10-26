@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- GitHub Actions 在 macOS 上云编译 Apple Silicon + Intel 通用包
+
 ## [0.1.1] - 2026-10-23
 
 ### 文档

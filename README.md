@@ -200,7 +200,7 @@ sudo apt-get install -y libfontconfig1 libfreetype6 libexpat1 zlib1g libpng16-16
 
 ## macOS 说明
 
-当前 Linux 构建环境无法交叉编译 Darwin 二进制，macOS 包需要在 Mac 上完成本机编译。
+当前 Linux 构建环境无法交叉编译 Darwin 二进制。macOS 包可在本机 Mac 编译，或由 GitHub Actions 在 `macos-latest` 上云编译 Apple Silicon + Intel 通用包。
 
 ```bash
 # 安装 Rust
@@ -216,7 +216,7 @@ open dist/mqttc.app
 系统要求：
 
 - macOS 11.0 及以上
-- Apple Silicon（`aarch64-apple-darwin`）或 Intel（`x86_64-apple-darwin`）均可，按本机架构编译
+- Apple Silicon（`aarch64-apple-darwin`）或 Intel（`x86_64-apple-darwin`）均可；云编译产物为通用二进制
 - Xcode Command Line Tools：`xcode-select --install`
 - 首次打开若提示未验证开发者，可在「系统设置 → 隐私与安全性」中允许，或执行：
 
