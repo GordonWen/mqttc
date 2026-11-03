@@ -65,70 +65,57 @@ enum PayloadFormat {
 }
 
 /// Stored preference. `System` follows the OS; Slint `Theme.skin` uses the visual index only
-/// (`from_visual_index`: 0=Black … 4=Purple) because the palette has no "auto" slot.
+/// (`from_visual_index`: 0=Dark, 1=Light, 2=Night) because the palette has no "auto" slot.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Skin {
     System,
-    Black,
-    White,
-    Blue,
-    Green,
-    Purple,
+    Light,
+    Dark,
+    Night,
 }
 
 impl Skin {
     fn from_index(index: i32) -> Self {
-        // Settings combo: 0=System, 1=Black, … 5=Purple.
+        // Settings combo: 0=System, 1=Light, 2=Dark, 3=Night.
         match index {
             0 => Self::System,
-            1 => Self::Black,
-            2 => Self::White,
-            3 => Self::Blue,
-            4 => Self::Green,
-            5 => Self::Purple,
-            _ => Self::Black,
+            1 => Self::Light,
+            3 => Self::Night,
+            _ => Self::Dark,
         }
     }
 
     fn from_visual_index(index: i32) -> Self {
-        // Theme.skin has no System slot; 0 is always the resolved dark (Black) palette.
+        // Theme.skin has no System slot; 0 is always the resolved Dark palette.
         match index {
-            1 => Self::White,
-            2 => Self::Blue,
-            3 => Self::Green,
-            4 => Self::Purple,
-            _ => Self::Black,
+            1 => Self::Light,
+            2 => Self::Night,
+            _ => Self::Dark,
         }
     }
 
     fn from_key(key: &str) -> Self {
         match key {
             "system" | "auto" | "follow" => Self::System,
-            "white" => Self::White,
-            "blue" => Self::Blue,
-            "green" => Self::Green,
-            "purple" => Self::Purple,
-            _ => Self::Black,
+            "light" | "white" => Self::Light,
+            "night" | "blue" | "green" | "purple" => Self::Night,
+            _ => Self::Dark,
         }
     }
 
     fn to_index(self) -> i32 {
         match self {
             Self::System => 0,
-            Self::Black => 1,
-            Self::White => 2,
-            Self::Blue => 3,
-            Self::Green => 4,
-            Self::Purple => 5,
+            Self::Light => 1,
+            Self::Dark => 2,
+            Self::Night => 3,
         }
     }
 
     fn to_visual_index(self) -> i32 {
         match self.resolve() {
-            Self::White => 1,
-            Self::Blue => 2,
-            Self::Green => 3,
-            Self::Purple => 4,
+            Self::Light => 1,
+            Self::Night => 2,
             _ => 0,
         }
     }
@@ -136,22 +123,19 @@ impl Skin {
     fn to_key(self) -> &'static str {
         match self {
             Self::System => "system",
-            Self::Black => "black",
-            Self::White => "white",
-            Self::Blue => "blue",
-            Self::Green => "green",
-            Self::Purple => "purple",
+            Self::Light => "light",
+            Self::Dark => "dark",
+            Self::Night => "night",
         }
     }
 
     fn resolve(self) -> Self {
         match self {
             Self::System => {
-                // Only Black / White follow the OS. Colored skins stay as picked.
                 if system_prefers_dark() {
-                    Self::Black
+                    Self::Dark
                 } else {
-                    Self::White
+                    Self::Light
                 }
             }
             other => other,
@@ -160,26 +144,113 @@ impl Skin {
 
     #[allow(dead_code)]
     fn is_light(self) -> bool {
-        matches!(self.resolve(), Self::White)
+        matches!(self.resolve(), Self::Light)
     }
 
     #[allow(dead_code)]
     fn window_bg_rgb(self) -> (u8, u8, u8) {
         match self.resolve() {
-            Self::White => (0xe8, 0xed, 0xf3),
-            Self::Blue => (0x07, 0x20, 0x48),
-            Self::Green => (0x06, 0x28, 0x20),
-            Self::Purple => (0x2a, 0x12, 0x48),
-            _ => (0x16, 0x18, 0x1d),
+            Self::Light => (0xf9, 0xfa, 0xfd),
+            Self::Night => (0x21, 0x23, 0x28),
+            _ => (0x21, 0x22, 0x23),
         }
     }
 
     #[allow(dead_code)]
     fn caption_text_rgb(self) -> (u8, u8, u8) {
         if self.is_light() {
-            (0x1c, 0x24, 0x30)
+            (0x22, 0x2b, 0x3b)
         } else {
-            (0xf2, 0xf4, 0xf8)
+            (0xff, 0xff, 0xff)
+        }
+    }
+}
+
+/// Settings combo: 0=small 11px, 1=medium 12px, 2=large 14px, 3=xlarge 16px.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FontSize {
+    Small,
+    Medium,
+    Large,
+    XLarge,
+}
+
+impl FontSize {
+    fn from_index(index: i32) -> Self {
+        match index {
+            0 => Self::Small,
+            2 => Self::Large,
+            3 => Self::XLarge,
+            _ => Self::Medium,
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "small" | "11" | "sm" => Self::Small,
+            "large" | "14" | "lg" => Self::Large,
+            "xlarge" | "16" | "18" | "xl" => Self::XLarge,
+            _ => Self::Medium,
+        }
+    }
+
+    fn to_index(self) -> i32 {
+        match self {
+            Self::Small => 0,
+            Self::Medium => 1,
+            Self::Large => 2,
+            Self::XLarge => 3,
+        }
+    }
+
+    fn to_key(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+            Self::XLarge => "xlarge",
+        }
+    }
+}
+
+/// Settings combo: 0=compact 85%, 1=standard 100%, 2=comfortable 120%.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum UiDensity {
+    Compact,
+    Standard,
+    Comfortable,
+}
+
+impl UiDensity {
+    fn from_index(index: i32) -> Self {
+        match index {
+            0 => Self::Compact,
+            2 => Self::Comfortable,
+            _ => Self::Standard,
+        }
+    }
+
+    fn from_key(key: &str) -> Self {
+        match key {
+            "compact" | "tight" => Self::Compact,
+            "comfortable" | "relaxed" | "loose" => Self::Comfortable,
+            _ => Self::Standard,
+        }
+    }
+
+    fn to_index(self) -> i32 {
+        match self {
+            Self::Compact => 0,
+            Self::Standard => 1,
+            Self::Comfortable => 2,
+        }
+    }
+
+    fn to_key(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Standard => "standard",
+            Self::Comfortable => "comfortable",
         }
     }
 }
@@ -792,6 +863,7 @@ fn register_callbacks(ui: &AppWindow) {
                             );
                             refresh_subscriptions(&ui, st);
                         }
+                        ui.set_subscribe_open(false);
                         persist(st);
                     }
                     Err(err) => push_log(&ui, st, "ERR", &topic, err.into_bytes()),
@@ -1056,6 +1128,28 @@ fn register_callbacks(ui: &AppWindow) {
                 sync_prefs(&ui, st);
                 refresh_connections(&ui, st);
                 refresh_status(&ui, st);
+                persist(st);
+            });
+        }
+    });
+
+    ui.on_ui_scale_changed({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_prefs(&ui, st);
+                persist(st);
+            });
+        }
+    });
+
+    ui.on_subs_visible_changed({
+        let ui_weak = ui_weak.clone();
+        move || {
+            let Some(ui) = ui_weak.upgrade() else { return };
+            with_state(|st| {
+                sync_prefs(&ui, st);
                 persist(st);
             });
         }
@@ -1378,7 +1472,7 @@ fn platform_fonts() -> (&'static str, &'static str) {
     }
 }
 
-/// Skin, language, log filters, version string. Also jumps to the session page on startup.
+/// Skin, language, font size, density, log filters, version string. Also jumps to the session page on startup.
 fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_app_version(env!("CARGO_PKG_VERSION").into());
     ui.set_log_format(PayloadFormat::from_key(&st.config.log_format).to_index());
@@ -1389,6 +1483,9 @@ fn apply_prefs(ui: &AppWindow, st: &AppState) {
     ui.set_skin_choice(skin.to_index());
     ui.set_skin(skin.to_visual_index());
     ui.set_language(Lang::from_key(&st.config.language).to_index());
+    ui.set_font_size(FontSize::from_key(&st.config.font_size).to_index());
+    ui.set_density(UiDensity::from_key(&st.config.ui_density).to_index());
+    ui.set_subs_visible(st.config.subs_visible);
     show_page(ui, 1);
 }
 
@@ -1763,6 +1860,7 @@ fn refresh_active_form(ui: &AppWindow, st: &AppState) {
     );
     ui.set_sub_topic(cfg.sub_topic.clone().into());
     ui.set_sub_qos(cfg.sub_qos.min(2) as i32);
+    ui.set_subscribe_open(false);
     ui.set_pub_topic(cfg.pub_topic.clone().into());
     ui.set_pub_payload(cfg.pub_payload.clone().into());
     ui.set_pub_qos(cfg.pub_qos.min(2) as i32);
@@ -1874,7 +1972,7 @@ fn sync_form(ui: &AppWindow, st: &mut AppState) {
     }
 }
 
-/// Copy skin / language / log filters from the window into `AppConfig`.
+/// Copy skin / language / font size / density / log filters from the window into `AppConfig`.
 fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     st.config.log_format = PayloadFormat::from_index(ui.get_log_format())
         .to_key()
@@ -1884,6 +1982,9 @@ fn sync_prefs(ui: &AppWindow, st: &mut AppState) {
     st.config.log_kind_filter = ui.get_log_kind_filter().clamp(0, 4);
     st.config.skin = Skin::from_index(ui.get_skin_choice()).to_key().to_string();
     st.config.language = Lang::from_index(ui.get_language()).to_key().to_string();
+    st.config.font_size = FontSize::from_index(ui.get_font_size()).to_key().to_string();
+    st.config.ui_density = UiDensity::from_index(ui.get_density()).to_key().to_string();
+    st.config.subs_visible = ui.get_subs_visible();
     i18n::set_lang(Lang::from_index(ui.get_language()));
 }
 
@@ -2577,34 +2678,33 @@ mod tests {
 
     #[test]
     fn skin_index_and_key_round_trip() {
-        let skins = [
-            Skin::System,
-            Skin::Black,
-            Skin::White,
-            Skin::Blue,
-            Skin::Green,
-            Skin::Purple,
-        ];
+        let skins = [Skin::System, Skin::Light, Skin::Dark, Skin::Night];
         for skin in skins {
             assert_eq!(Skin::from_index(skin.to_index()), skin);
             assert_eq!(Skin::from_key(skin.to_key()), skin);
         }
-        assert_eq!(Skin::from_key("unknown"), Skin::Black);
+        assert_eq!(Skin::from_key("unknown"), Skin::Dark);
         assert_eq!(Skin::from_key("auto"), Skin::System);
-        assert_eq!(Skin::from_index(99), Skin::Black);
+        assert_eq!(Skin::from_key("follow"), Skin::System);
+        assert_eq!(Skin::from_key("white"), Skin::Light);
+        assert_eq!(Skin::from_key("black"), Skin::Dark);
+        assert_eq!(Skin::from_key("blue"), Skin::Night);
+        assert_eq!(Skin::from_key("green"), Skin::Night);
+        assert_eq!(Skin::from_key("purple"), Skin::Night);
+        assert_eq!(Skin::from_index(99), Skin::Dark);
         assert_eq!(Skin::from_index(0), Skin::System);
-        assert_eq!(Skin::Black.to_visual_index(), 0);
-        assert_eq!(Skin::White.to_visual_index(), 1);
-        assert!(Skin::White.is_light());
-        assert!(!Skin::Black.is_light());
-        assert!(matches!(Skin::System.resolve(), Skin::Black | Skin::White));
-        assert_eq!(Skin::Black.window_bg_rgb(), (0x16, 0x18, 0x1d));
-        assert_eq!(Skin::White.window_bg_rgb(), (0xe8, 0xed, 0xf3));
-        assert_eq!(Skin::Blue.window_bg_rgb(), (0x07, 0x20, 0x48));
-        assert_eq!(Skin::Green.window_bg_rgb(), (0x06, 0x28, 0x20));
-        assert_eq!(Skin::Purple.window_bg_rgb(), (0x2a, 0x12, 0x48));
-        assert_eq!(Skin::White.caption_text_rgb(), (0x1c, 0x24, 0x30));
-        assert_eq!(Skin::Black.caption_text_rgb(), (0xf2, 0xf4, 0xf8));
+        assert_eq!(Skin::Dark.to_visual_index(), 0);
+        assert_eq!(Skin::Light.to_visual_index(), 1);
+        assert_eq!(Skin::Night.to_visual_index(), 2);
+        assert!(Skin::Light.is_light());
+        assert!(!Skin::Dark.is_light());
+        assert!(!Skin::Night.is_light());
+        assert!(matches!(Skin::System.resolve(), Skin::Dark | Skin::Light));
+        assert_eq!(Skin::Dark.window_bg_rgb(), (0x21, 0x22, 0x23));
+        assert_eq!(Skin::Light.window_bg_rgb(), (0xf9, 0xfa, 0xfd));
+        assert_eq!(Skin::Night.window_bg_rgb(), (0x21, 0x23, 0x28));
+        assert_eq!(Skin::Light.caption_text_rgb(), (0x22, 0x2b, 0x3b));
+        assert_eq!(Skin::Dark.caption_text_rgb(), (0xff, 0xff, 0xff));
         assert_eq!(rgb_to_colorref((0x16, 0x18, 0x1d)), 0x001d1816);
         assert_eq!(rgb_to_colorref((0xe8, 0xed, 0xf3)), 0x00f3ede8);
     }
@@ -2642,6 +2742,45 @@ mod tests {
         assert_eq!(Lang::from_key(Lang::En.to_key()), Lang::En);
         assert_eq!(Lang::from_key("unknown"), Lang::Zh);
         assert_eq!(Lang::from_index(99), Lang::Zh);
+    }
+
+    #[test]
+    fn font_size_index_and_key_round_trip() {
+        let sizes = [
+            FontSize::Small,
+            FontSize::Medium,
+            FontSize::Large,
+            FontSize::XLarge,
+        ];
+        for size in sizes {
+            assert_eq!(FontSize::from_index(size.to_index()), size);
+            assert_eq!(FontSize::from_key(size.to_key()), size);
+        }
+        assert_eq!(FontSize::from_key("11"), FontSize::Small);
+        assert_eq!(FontSize::from_key("sm"), FontSize::Small);
+        assert_eq!(FontSize::from_key("14"), FontSize::Large);
+        assert_eq!(FontSize::from_key("lg"), FontSize::Large);
+        assert_eq!(FontSize::from_key("16"), FontSize::XLarge);
+        assert_eq!(FontSize::from_key("xl"), FontSize::XLarge);
+        assert_eq!(FontSize::from_key("unknown"), FontSize::Medium);
+        assert_eq!(FontSize::from_index(99), FontSize::Medium);
+    }
+
+    #[test]
+    fn ui_density_index_and_key_round_trip() {
+        let densities = [
+            UiDensity::Compact,
+            UiDensity::Standard,
+            UiDensity::Comfortable,
+        ];
+        for density in densities {
+            assert_eq!(UiDensity::from_index(density.to_index()), density);
+            assert_eq!(UiDensity::from_key(density.to_key()), density);
+        }
+        assert_eq!(UiDensity::from_key("tight"), UiDensity::Compact);
+        assert_eq!(UiDensity::from_key("relaxed"), UiDensity::Comfortable);
+        assert_eq!(UiDensity::from_key("unknown"), UiDensity::Standard);
+        assert_eq!(UiDensity::from_index(99), UiDensity::Standard);
     }
 
     fn sample_log(kind: &str, topic: &str, payload: &str) -> LogData {

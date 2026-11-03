@@ -11,6 +11,7 @@
 | 组件 | 说明 |
 |------|------|
 | Select | 紧凑下拉，属性 `options`、`current-index`、`interactive`，回调 `activated(int)` |
+| Field | 单行输入，覆盖 Fluent `LineEdit` 的 160×32 下限，高度跟 `Theme.control-h`，文字左对齐 |
 | ConnectionEntry | 左侧连接列表条目，字段 `id`、`name`、`status`、`status-color` |
 | Subscription | 订阅条目，字段 `topic`、`qos`、`selected` |
 | LogEntry | 日志条目，字段 `time`、`timestamp`、`kind`、`topic`、`payload` |
@@ -42,6 +43,8 @@
 | sub-topic / sub-qos | string / int | 待订阅 Topic 与 QoS（0/1/2） |
 | subscriptions | [Subscription] | 当前连接的订阅列表，含 `selected` 筛选高亮 |
 | active-sub-topic | string | 会话页当前点击筛选的订阅 Topic |
+| subscribe-open | bool | 会话页订阅表单是否展开；订成功或切换连接后收起，不入库 |
+| subs-visible | bool | 会话页左侧订阅列表是否显示，写入 `mqttc.json` |
 | pub-topic / pub-payload | string | 待发布 Topic 与内容（payload 支持多行） |
 | pub-qos / pub-retain | int / bool | 发布 QoS 与保留消息开关 |
 | pub-format | int | 发送格式索引：0 文本、1 JSON、2 Base64、3 Hex |
@@ -55,9 +58,11 @@
 | log-filter | string | 按 Topic / Payload / 类型关键字筛选 |
 | log-kind-filter | int | 0 全部、1 收、2 发、3 系统、4 错误 |
 | auto-scroll | bool | 日志自动滚动开关 |
-| skin | int | 解析后的视觉皮肤：0 黑、1 白、2 蓝、3 绿、4 紫 |
-| skin-choice | int | 设置页选项：0 跟随系统、1 黑、2 白、3 蓝、4 绿、5 紫 |
+| skin | int | 解析后的视觉皮肤：0 Dark、1 Light、2 Night |
+| skin-choice | int | 设置页选项：0 跟随系统、1 浅色、2 深色、3 夜间 |
 | language | int | 0 中文，1 English |
+| font-size | int | 0 小 11px、1 中 12px、2 大 14px、3 特大 16px |
+| density | int | 0 紧凑、1 标准、2 宽松 |
 
 ### 回调
 
@@ -69,9 +74,10 @@
 | edit-connection-requested | 会话页点击编辑，进入配置页 |
 | back-to-session-requested | 配置页 / 设置页 / 自动回复页 / 发布预设页 / 关于页点击返回会话 |
 | connect-requested / disconnect-requested | 点击连接 / 断开 |
-| subscribe-requested | 点击订阅 |
-| unsubscribe-requested | 点击订阅条目右侧 `×`，参数为索引 |
-| filter-subscription-requested | 点击订阅条目按 Topic 筛选消息，再点一次取消 |
+| subscribe-requested | 点击订阅表单的确认按钮 |
+| unsubscribe-requested | 点击订阅列表行上的 `×`，参数为索引 |
+| filter-subscription-requested | 点击订阅列表行按 Topic 筛选消息，再点一次取消 |
+| subs-visible-changed | 隐藏或重新显示订阅列表 |
 | publish-requested | 点击底部发布 |
 | preset-publish-requested | 会话页点击某个发布预设的发送按钮，参数为下标 |
 | format-payload-requested | 点击美化，按 JSON 格式化 payload 编辑框 |
@@ -82,6 +88,7 @@
 | save-logs-requested / clear-logs-requested | 保存 / 清空日志 |
 | skin-changed | 切换皮肤 |
 | language-changed | 切换界面语言 |
+| ui-scale-changed | 切换字号或界面密度 |
 | settings-requested | 左侧栏打开设置页 |
 | about-requested | 左侧栏打开关于页 |
 | auto-reply-requested | 左侧栏打开自动回复页 |
@@ -124,8 +131,11 @@
   "auto_scroll": true,
   "log_filter": "",
   "log_kind_filter": 0,
-      "skin": "system",
+  "skin": "system",
+  "subs_visible": true,
   "language": "zh",
+  "font_size": "medium",
+  "ui_density": "standard",
   "connections": [
     {
       "id": "c18f2a0e0",
@@ -180,11 +190,11 @@
 }
 ```
 
-`skin` 写入键为 `system` / `black` / `white` / `blue` / `green` / `purple`。加载时 `auto`、`follow` 也按跟随系统处理。`language` 取值：`zh` / `en`。`protocol` 取值：`3.1.1` / `5.0`。`auto_reply_echo` 取值：`skip` / `rematch`，未知值按 `skip`。
+`skin` 写入键为 `system` / `light` / `dark` / `night`。加载时 `auto`、`follow` 按跟随系统处理；`white` 按 Light，`black` 按 Dark，`blue` / `green` / `purple` 按 Night。`subs_visible` 缺省为 true。`language` 取值：`zh` / `en`。`font_size` 取值：`small` / `medium` / `large` / `xlarge`，未知值按 `medium`。`ui_density` 取值：`compact` / `standard` / `comfortable`，未知值按 `standard`。`protocol` 取值：`3.1.1` / `5.0`。`auto_reply_echo` 取值：`skip` / `rematch`，未知值按 `skip`。
 
 旧版扁平结构（仅有 `host`、`port`、`pub_topic` 等字段）会在加载时自动迁移为一条连接，`subscriptions` 中的纯字符串 Topic 迁移为 `{topic, qos: 0}`。缺 `publish_presets` 时预设列表为空。缺 `auto_reply_rules` / `auto_reply_echo` 时规则为空列表、Echo Policy 为 skip。已有文件中的预设条数保持原样，加载后不截断、不补齐。
 
-写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、预设发送、切换接收格式、皮肤与语言变化、启动/停止定时发布、进入设置、关于、自动回复或发布预设页、新增或删除规则与预设，以及退出窗口时。
+写入时机：新建 / 删除 / 切换连接、连接、断开、订阅、取消订阅、发布、预设发送、切换接收格式、皮肤与语言变化、字号与密度变化、订阅列表显隐、启动/停止定时发布、进入设置、关于、自动回复或发布预设页、新增或删除规则与预设，以及退出窗口时。
 
 ## 日志文件
 

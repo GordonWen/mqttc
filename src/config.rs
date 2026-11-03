@@ -158,7 +158,7 @@ impl Default for AutoReplyRule {
     }
 }
 
-/// Root of `mqttc.json`: the connection list plus window-wide prefs (skin, language, log filters).
+/// Root of `mqttc.json`: the connection list plus window-wide prefs (skin, language, font, density, log filters).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
@@ -177,8 +177,14 @@ pub struct AppConfig {
     pub log_kind_filter: i32,
     #[serde(default = "default_skin")]
     pub skin: String,
+    #[serde(default = "default_true")]
+    pub subs_visible: bool,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_font_size")]
+    pub font_size: String,
+    #[serde(default = "default_ui_density")]
+    pub ui_density: String,
 }
 
 fn default_host() -> String {
@@ -226,11 +232,19 @@ fn default_timed_interval() -> u32 {
 }
 
 fn default_skin() -> String {
-    "black".to_string()
+    "system".to_string()
 }
 
 fn default_language() -> String {
     "zh".to_string()
+}
+
+fn default_font_size() -> String {
+    "medium".to_string()
+}
+
+fn default_ui_density() -> String {
+    "standard".to_string()
 }
 
 fn default_protocol() -> String {
@@ -285,7 +299,10 @@ impl Default for AppConfig {
             log_filter: String::new(),
             log_kind_filter: 0,
             skin: default_skin(),
+            subs_visible: true,
             language: default_language(),
+            font_size: default_font_size(),
+            ui_density: default_ui_density(),
         }
     }
 }
@@ -548,8 +565,11 @@ mod tests {
         config.connections.push(conn);
         config.log_format = "base64".to_string();
         config.auto_scroll = false;
-        config.skin = "green".to_string();
+        config.skin = "night".to_string();
+        config.subs_visible = false;
         config.language = "en".to_string();
+        config.font_size = "large".to_string();
+        config.ui_density = "compact".to_string();
 
         let text = serde_json::to_string(&config).expect("serialize");
         let back: AppConfig = serde_json::from_str(&text).expect("deserialize");
@@ -590,8 +610,29 @@ mod tests {
         assert_eq!(back.connections[0].auto_reply_rules[0].reply_payload, "pong");
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);
-        assert_eq!(back.skin, "green");
+        assert_eq!(back.skin, "night");
+        assert!(!back.subs_visible);
         assert_eq!(back.language, "en");
+        assert_eq!(back.font_size, "large");
+        assert_eq!(back.ui_density, "compact");
+    }
+
+    #[test]
+    fn missing_font_size_and_density_load_as_medium_standard() {
+        let text = r#"{
+            "active_id": "c1",
+            "connections": [{
+                "id": "c1",
+                "name": "broker",
+                "host": "127.0.0.1",
+                "port": "1883"
+            }]
+        }"#;
+        let config: AppConfig = serde_json::from_str(text).expect("deserialize");
+        assert_eq!(config.font_size, "medium");
+        assert_eq!(config.ui_density, "standard");
+        assert!(config.subs_visible);
+        assert_eq!(config.skin, "system");
     }
 
     #[test]

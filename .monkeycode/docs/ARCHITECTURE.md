@@ -33,7 +33,7 @@ mqttc/
 
 ## 核心模块/组件
 
-- **UI 层** (`ui/app-window.slint`): MQTTX 式多页布局。左侧连接列表常驻；`page=0` 连接配置，`page=1` 会话（订阅栏 + 聊天气泡 + 底部发布 + 预设发送按钮），`page=2` 设置，`page=3` 自动回复，`page=4` 发布预设，`page=5` 关于
+- **UI 层** (`ui/app-window.slint`): MQTTX 式多页布局。左侧 Nav Rail 常驻连接与次级入口；`page=0` 连接配置，`page=1` 会话（顶栏 + 左侧可隐藏订阅列表 + 聊天气泡 + 底部发布 + 预设发送按钮），`page=2` 设置，`page=3` 自动回复，`page=4` 发布预设，`page=5` 关于
 - **应用入口** (`src/main.rs`): 窗口创建、回调绑定、多连接运行时、Payload 编解码、日志筛选、定时发布、自动回复匹配与发送、发布预设增删
 - **配置层** (`src/config.rs`): 多连接配置与界面偏好的读写、旧配置迁移、发布预设与自动回复字段规范化
 - **MQTT 会话** (`src/mqtt.rs`): 单连接生命周期、协议版本、Keep Alive / Clean Session / 超时 / Last Will / TLS、订阅、取消订阅、发布、事件翻译
@@ -70,7 +70,7 @@ graph TD
 
 ## 关键流程
 
-1. 启动：加载 `mqttc.json`，旧格式迁移为一条连接；为空则创建默认连接；为每条连接建立 `ConnRuntime`。缺发布预设或自动回复字段视为空列表；自身回投缺省为 skip。
+1. 启动：加载 `mqttc.json`，旧格式迁移为一条连接；为空则创建默认连接；为每条连接建立 `ConnRuntime`。缺发布预设或自动回复字段视为空列表；自身回投缺省为 skip。缺字号或密度时分别为 medium 与 standard。
 2. 新建进入配置页，点选已有连接进入会话页；切换前先把表单（含预设与自动回复）写回配置。删除时断开该连接的会话并丢掉 runtime。
 3. 用户点击连接：按该连接的 host/port/client-id/认证/协议/Keep Alive/Clean Session/超时/Last Will/SSL 创建 `Client` 与事件循环，启动轮询线程。Client ID 为空时自动生成。连接成功后切到会话页，并清空 `last_auto_reply`。启用 SSL 时用 rustls，可校验系统/自定义 CA，也可关闭校验或附带客户端证书。
 4. `ConnAck` 到达后标记为已连接，并按该连接的订阅列表自动重新订阅（Clean Session 下重连需要恢复订阅）。

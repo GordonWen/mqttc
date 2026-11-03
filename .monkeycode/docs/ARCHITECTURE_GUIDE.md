@@ -37,7 +37,7 @@ mqttc 是一个桌面 MQTT 调试客户端。界面与交互参考 MQTTX。MQTTX
 |------|------|------------------|
 | Broker | 消息服务器，客户端连上它收发消息 | 连接配置页的 host / port |
 | Client ID | 客户端标识，同一 Broker 上应唯一 | 留空时 `default_client_id` 自动生成 |
-| Topic | 消息主题，用 `/` 分层 | 订阅栏、发布栏、预设、自动回复 |
+| Topic | 消息主题，用 `/` 分层 | 订阅列表、发布栏、预设、自动回复 |
 | 通配符 | `+` 匹配一层，`#` 匹配多层 | `topic_matches_filter` 实现筛选与规则匹配 |
 | QoS | 投递质量 0/1/2 | 订阅、发布、预设、自动回复都可选 |
 | Retain | Broker 保留最后一条消息，新订阅者立即收到 | 发布栏与规则里的 Retain 开关 |
@@ -57,7 +57,7 @@ Slint 用 `.slint` 文件描述界面，编译期由 `build.rs` 转成 Rust 代�
 | 位置 | 内容 |
 |------|------|
 | 第 3 到 42 行 | `struct`：界面用的数据结构，如 `ConnectionEntry`、`LogEntry` |
-| 第 46 到 94 行 | `global Theme`：全部配色，按皮肤索引取色 |
+| 第 56 到 169 行 | `global Theme`：Dark / Light / Night 三套配色与字号密度 Token |
 | 第 96 到 105 行 | `global I18n`：双语文案函数 `t(zh, en)` |
 | 第 107 到 195 行 | 可复用小组件 `Select`、`FieldLabel` |
 | 第 197 到 379 行 | `MessageList`：聊天气泡与滚动逻辑 |
@@ -88,7 +88,7 @@ background: Theme.panel-bg;
 enabled: root.connected;
 ```
 
-`Theme.pick(black, white, blue, green, purple)` 是纯函数，用当前皮肤索引选择一套配色。新增皮肤时需要同时扩展 `Skin` 枚举与 `pick` 的参数。
+`Theme.pick(dark, light, night)` 是纯函数，用当前视觉皮肤索引选择一套配色。设置页的跟随系统由 Rust 解析后再写入 `Theme.skin`。
 
 ### 4. 回调与事件
 
@@ -122,6 +122,8 @@ ui.set_connections(Rc::new(VecModel::from(entries)).into());
 ```slint
 in-out property <int> skin <=> Theme.skin;
 in-out property <int> language <=> I18n.language;
+in-out property <int> font-size <=> Theme.font-size;
+in-out property <int> density <=> Theme.density;
 ```
 
 `<=>` 让窗口属性与全局属性保持同步。改一处，另一处立即跟随。
@@ -360,7 +362,7 @@ graph TD
 
 ### 订阅
 
-订阅操作本身很短：从表单读 Topic 与 QoS，写入 `config.subscriptions`，调用 `MqttHandle::subscribe`。重连后由 `resubscribe_all` 重放这份列表。
+订阅操作本身很短：点「新建订阅」在左侧列表底部展开表单，读 Topic 与 QoS，写入 `config.subscriptions`，调用 `MqttHandle::subscribe`，成功后收起表单。已订阅 Topic 纵向列在消息区左侧，可隐藏。重连后由 `resubscribe_all` 重放这份列表。
 
 ### 发布
 
@@ -473,11 +475,11 @@ Slint 1.18 把 `Flickable` 的 `viewport-*` 属性重命名为 `content-*`。本
 | 枚举 | 界面索引 | 配置键 |
 |------|----------|--------|
 | `PayloadFormat` | 0 文本、1 JSON、2 Base64、3 Hex | `text` / `json` / `base64` / `hex` |
-| `Skin` | 0 跟随系统、1 黑、2 白、3 蓝、4 绿、5 紫 | `system` / `black` / `white` / `blue` / `green` / `purple` |
+| `Skin` | 0 跟随系统、1 浅色、2 深色、3 夜间 | `system` / `light` / `dark` / `night` |
 | `ProtocolVersion` | 0 表示 3.1.1，1 表示 5.0 | `3.1.1` / `5.0` |
 | `ConnStatus` | 无 | 仅内存状态 |
 
-注意 `Skin` 有两套索引：设置页包含「跟随系统」，而 `Theme.skin` 没有自动档，只有解析后的视觉索引。看到 `to_index` 与 `to_visual_index` 两个方法时，前者面向配置，后者面向界面。写入键是 `system`；加载时 `auto`、`follow` 也按跟随系统处理。
+注意 `Skin` 有两套索引：设置页包含「跟随系统」，而 `Theme.skin` 没有自动档，只有解析后的视觉索引 0 Dark、1 Light、2 Night。看到 `to_index` 与 `to_visual_index` 两个方法时，前者面向配置，后者面向界面。写入键是 `system` / `light` / `dark` / `night`；加载时 `auto`、`follow` 按跟随系统，`white`→Light，`black`→Dark，`blue`/`green`/`purple`→Night。
 
 ### 事件处理中枢
 

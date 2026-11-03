@@ -17,7 +17,7 @@ export struct ConnectionEntry {
     status-color: color,
 }
 
-// One subscription chip. `selected` highlights the active log filter.
+// One subscription row. `selected` highlights the active log filter.
 export struct Subscription {
     topic: string,
     qos: int,
@@ -53,56 +53,119 @@ export struct AutoReplyRuleRow {
     format: int,
 }
 
-// Visual palette only: 0=Black, 1=White, 2=Blue, 3=Green, 4=Purple.
+// Visual palette only: 0=Dark, 1=Light, 2=Night.
 // The settings combo's System (index 0) is resolved in Rust before writing `skin`.
 export global Theme {
     in-out property <int> skin: 0;
+    // 0=small 11px, 1=medium 12px (Windows 9pt), 2=large 14px, 3=xlarge 16px
+    in-out property <int> font-size: 1;
+    // 0=compact 75%, 1=standard 90%, 2=comfortable 110%
+    in-out property <int> density: 1;
 
-    pure function pick(black: color, white: color, blue: color, green: color, purple: color) -> color {
+    pure function pick(dark: color, light: color, night: color) -> color {
         if (skin == 1) {
-            return white;
+            return light;
         }
         if (skin == 2) {
-            return blue;
+            return night;
         }
-        if (skin == 3) {
-            return green;
-        }
-        if (skin == 4) {
-            return purple;
-        }
-        return black;
+        return dark;
     }
 
-    out property <color> window-bg: pick(#16181d, #e8edf3, #072048, #062820, #2a1248);
-    out property <color> panel-bg: pick(#1e2229, #ffffff, #0d2d5c, #0d3830, #3c1c64);
-    out property <color> inset-bg: pick(#12141a, #f3f6fa, #051830, #041c18, #1c0c34);
-    out property <color> hover-bg: pick(#3a3f49, #e4eaf2, #164070, #145048, #553088);
-    out property <color> selected-bg: pick(#2b3240, #d7e6f8, #18508c, #186058, #6438a0);
-    out property <color> badge-bg: pick(#242830, #e7ecf3, #123a68, #104440, #482870);
-    out property <color> text-primary: pick(#f2f4f8, #1c2430, #eaf3ff, #e0faf4, #f4ecff);
-    out property <color> text-title: pick(#c5cad3, #334155, #8eb8e8, #8ed4c4, #cbb0f0);
-    out property <color> text-muted: pick(#8b919a, #5b6573, #5d8fc4, #5aaa9a, #a888d0);
-    out property <color> text-faint: pick(#6d737c, #7a8491, #4674a8, #3e8878, #8668b0);
-    out property <color> text-body: pick(#e4e8ef, #1c2430, #c2d8f2, #b8e8dc, #e4d4f8);
-    out property <color> accent: pick(#2f6fd0, #2f6fd0, #4d9fff, #2ec4a0, #a78bfa);
+    out property <color> window-bg: pick(#212223, #f9fafd, #212328);
+    out property <color> panel-bg: pick(#262729, #ffffff, #292b33);
+    out property <color> inset-bg: pick(#1f2021, #f1f8fc, #31333f);
+    out property <color> hover-bg: pick(#323232, #efefef, #393a42);
+    out property <color> selected-bg: pick(#303133, #edf4fc, #394452);
+    out property <color> badge-bg: pick(#303133, #f4f4f5, #31333f);
+    out property <color> text-primary: pick(#ffffff, #222b3b, #ffffff);
+    out property <color> text-title: pick(#d3d3d3, #222b3b, #d3d3d3);
+    out property <color> text-muted: pick(#a3a3a3, #616161, #a2a9b0);
+    out property <color> text-faint: pick(#b4b4b4, #a2a9b0, #b4b4b4);
+    out property <color> text-body: pick(#d3d3d3, #616161, #d3d3d3);
+    out property <color> accent: #34c388;
     out property <color> accent-fg: #ffffff;
-    out property <color> muted: pick(#9aa0a6, #6b7280, #6a96c8, #6ab8a8, #b49ae0);
-    out property <color> recv-bg: pick(#1b2f24, #e4f6ea, #0c2e32, #0e4034, #1b2f24);
-    out property <color> recv-topic: pick(#4ecf7a, #1f8a4c, #4ecf7a, #3ee0b8, #4ecf7a);
-    out property <color> recv-payload: pick(#d7e8dc, #1a3d28, #d7e8dc, #c8f0e4, #d7e8dc);
-    out property <color> send-bg: pick(#1d2f4a, #e4eefc, #123a68, #0e3848, #3c2468);
-    out property <color> send-topic: pick(#5aa7ff, #1d5fbf, #7ab8ff, #5ad4e8, #c4b5fd);
-    out property <color> send-payload: pick(#d5e4f7, #1a2d4a, #d5e4f7, #c8eef4, #e8defa);
-    out property <color> sys-bg: pick(#242830, #e7ecf3, #123a68, #104440, #482870);
-    out property <color> sys-text: pick(#b8c0cc, #3d4654, #c5d6ee, #b8e8dc, #e4d4f8);
-    out property <color> err-bg: pick(#3a2224, #fde8e8, #3a2224, #3a2224, #3a2224);
-    out property <color> err-label: pick(#e85d5d, #c62828, #e85d5d, #e85d5d, #e85d5d);
-    out property <color> err-text: pick(#f0c4c4, #7a1f1f, #f0c4c4, #f0c4c4, #f0c4c4);
-    out property <color> danger: pick(#e85d5d, #c62828, #e85d5d, #e85d5d, #e85d5d);
-    out property <color> sub-selected: pick(#243248, #d7e6f8, #18508c, #186058, #6438a0);
+    out property <color> muted: pick(#9ea3b1, #a2a9b0, #9ea3b1);
+    out property <color> recv-bg: pick(#303133, #ebf8f2, #31333f);
+    out property <color> recv-topic: pick(#53daa2, #34c388, #53daa2);
+    out property <color> recv-payload: pick(#d3d3d3, #222b3b, #d3d3d3);
+    out property <color> send-bg: pick(#1b3d32, #34c388, #1b3d32);
+    out property <color> send-topic: pick(#53daa2, #ffffff, #53daa2);
+    out property <color> send-payload: pick(#d3d3d3, #ffffff, #d3d3d3);
+    out property <color> sys-bg: pick(#303133, #edeef3, #31333f);
+    out property <color> sys-text: pick(#a3a3a3, #616161, #a2a9b0);
+    out property <color> err-bg: pick(#3a2224, #fcdee4, #3a2224);
+    out property <color> err-label: pick(#f56c6c, #f56c6c, #f56c6c);
+    out property <color> err-text: pick(#fcdee4, #7a1f1f, #fcdee4);
+    out property <color> danger: pick(#f56c6c, #f56c6c, #f56c6c);
+    out property <color> sub-selected: pick(#1b3d32, #ebf8f2, #394452);
+    out property <color> nav-bg: pick(#1f2122, #ffffff, #212328);
+    out property <color> nav-top: pick(#232325, #f9fafd, #292b33);
+    out property <color> nav-item: pick(#1f2021, #f1f8fc, #31333f);
+    out property <color> nav-text: pick(#d3d3d3, #222b3b, #d3d3d3);
+    out property <color> nav-muted: pick(#868787, #616161, #83929b);
+    out property <color> nav-selected: pick(#303133, #edf4fc, #394452);
+    out property <color> nav-hover: pick(#323232, #efefef, #393a42);
     in-out property <string> ui-font: "Microsoft YaHei UI";
     in-out property <string> mono-font: "Cascadia Mono";
+
+    public pure function font-px() -> int {
+        if (font-size == 0) {
+            return 11;
+        }
+        if (font-size == 2) {
+            return 14;
+        }
+        if (font-size == 3) {
+            return 16;
+        }
+        return 12;
+    }
+
+    public pure function dens-pct() -> int {
+        if (density == 0) {
+            return 75;
+        }
+        if (density == 2) {
+            return 110;
+        }
+        return 90;
+    }
+
+    public pure function sz(base: int) -> length {
+        return 1px * base * font-px() * dens-pct() / 1400;
+    }
+
+    out property <length> font-xs: 1px * max(9, font-px() - 2);
+    out property <length> font-sm: 1px * max(10, font-px() - 1);
+    out property <length> font-md: 1px * font-px();
+    out property <length> font-base: 1px * font-px();
+    out property <length> font-lg: 1px * (font-px() + 1);
+    out property <length> font-title: 1px * (font-px() + 1);
+    out property <length> font-hero: 1px * (font-px() + 6);
+
+    out property <length> space-1: sz(2);
+    out property <length> space-2: sz(4);
+    out property <length> space-3: sz(6);
+    out property <length> space-4: sz(8);
+    out property <length> space-5: sz(10);
+    out property <length> space-6: sz(12);
+    out property <length> space-7: sz(16);
+    out property <length> space-8: sz(18);
+
+    out property <length> control-h: max(32px, sz(32));
+    out property <length> menu-item-h: max(20px, sz(24));
+    out property <length> row-conn: max(36px, sz(48));
+    out property <length> row-sub: max(32px, sz(40));
+    out property <length> payload-h: max(40px, sz(48));
+    out property <length> icon-btn: max(18px, sz(20));
+    out property <length> sidebar-w: max(132px, sz(168));
+    out property <length> nav-w: max(160px, sz(200));
+    out property <length> sub-panel-w: max(160px, sz(220));
+    out property <length> window-min-w: max(560px, sz(880));
+    out property <length> window-min-h: max(420px, sz(600));
+    out property <length> window-pref-w: max(880px, sz(1200));
+    out property <length> window-pref-h: max(560px, sz(760));
 }
 
 // language 0 = 中文, 1 = English. Widgets call `I18n.t("中文", "English")`.
@@ -124,21 +187,21 @@ component Select inherits Rectangle {
     in property <bool> interactive: true;
     callback activated(int);
 
-    height: 28px;
+    height: Theme.control-h;
     width: 72px;
     border-radius: 6px;
     background: Theme.inset-bg;
     opacity: interactive ? 1 : 0.45;
 
     HorizontalLayout {
-        padding-left: 8px;
-        padding-right: 6px;
-        spacing: 2px;
+        padding-left: Theme.space-4;
+        padding-right: Theme.space-3;
+        spacing: Theme.space-1;
         Text {
             text: current-index >= 0 && current-index < options.length ? options[current-index] : "";
             color: Theme.text-body;
             font-family: Theme.ui-font;
-            font-size: 13px;
+            font-size: Theme.font-md;
             font-weight: 500;
             overflow: elide;
             vertical-alignment: center;
@@ -148,7 +211,7 @@ component Select inherits Rectangle {
             text: "v";
             color: Theme.text-muted;
             font-family: Theme.ui-font;
-            font-size: 11px;
+            font-size: Theme.font-xs;
             vertical-alignment: center;
         }
     }
@@ -169,17 +232,17 @@ component Select inherits Rectangle {
             background: Theme.panel-bg;
             border-radius: 6px;
             VerticalLayout {
-                padding: 4px;
-                spacing: 2px;
+                padding: Theme.space-2;
+                spacing: Theme.space-1;
                 for opt[index] in root.options: Rectangle {
-                    height: 26px;
+                    height: Theme.menu-item-h;
                     border-radius: 4px;
                     background: item-touch.has-hover ? Theme.hover-bg : (index == root.current-index ? Theme.selected-bg : transparent);
                     Text {
                         text: opt;
                         color: Theme.text-body;
                         font-family: Theme.ui-font;
-                        font-size: 13px;
+                        font-size: Theme.font-md;
                         vertical-alignment: center;
                         horizontal-alignment: left;
                         x: 8px;
@@ -204,8 +267,19 @@ component FieldLabel inherits Text {
     text: caption;
     color: Theme.text-muted;
     font-family: Theme.ui-font;
-    font-size: 12px;
+    font-size: Theme.font-sm;
     font-weight: 500;
+    vertical-alignment: center;
+}
+
+component Field inherits LineEdit {
+    min-width: 0px;
+    min-height: Theme.control-h;
+    preferred-height: Theme.control-h;
+    max-height: Theme.control-h;
+    font-size: Theme.font-md;
+    horizontal-alignment: left;
+    vertical-stretch: 0;
 }
 
 // Chat-style log. `content-y` is Slint 1.18 (older tutorials still say `viewport-y`).
@@ -267,10 +341,10 @@ component MessageList inherits Rectangle {
                 height: self.preferred-height;
                 background: Theme.inset-bg;
                 VerticalLayout {
-                    padding-top: 5px;
-                    padding-bottom: 5px;
-                    padding-left: 10px;
-                    padding-right: 10px;
+                    padding-top: Theme.sz(5);
+                    padding-bottom: Theme.sz(5);
+                    padding-left: Theme.space-5;
+                    padding-right: Theme.space-5;
                     if entry.kind == "RECV": HorizontalLayout {
                         alignment: start;
                         Rectangle {
@@ -279,15 +353,15 @@ component MessageList inherits Rectangle {
                             border-radius: 10px;
                             background: Theme.recv-bg;
                             VerticalLayout {
-                                padding: 8px;
-                                spacing: 4px;
+                                padding: Theme.space-4;
+                                spacing: Theme.space-2;
                                 HorizontalLayout {
-                                    spacing: 8px;
+                                    spacing: Theme.space-4;
                                     Text {
                                         text: entry.topic;
                                         color: Theme.recv-topic;
                                         font-family: Theme.mono-font;
-                                        font-size: 13px;
+                                        font-size: Theme.font-md;
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
@@ -295,7 +369,7 @@ component MessageList inherits Rectangle {
                                         text: entry.time;
                                         color: Theme.text-faint;
                                         font-family: Theme.mono-font;
-                                        font-size: 12px;
+                                        font-size: Theme.font-sm;
                                     }
                                 }
                                 Text {
@@ -303,7 +377,7 @@ component MessageList inherits Rectangle {
                                     color: Theme.recv-payload;
                                     wrap: word-wrap;
                                     font-family: Theme.mono-font;
-                                    font-size: 13px;
+                                    font-size: Theme.font-md;
                                 }
                             }
                         }
@@ -318,15 +392,15 @@ component MessageList inherits Rectangle {
                             border-radius: 10px;
                             background: Theme.send-bg;
                             VerticalLayout {
-                                padding: 8px;
-                                spacing: 4px;
+                                padding: Theme.space-4;
+                                spacing: Theme.space-2;
                                 HorizontalLayout {
-                                    spacing: 8px;
+                                    spacing: Theme.space-4;
                                     Text {
                                         text: entry.topic;
                                         color: Theme.send-topic;
                                         font-family: Theme.mono-font;
-                                        font-size: 13px;
+                                        font-size: Theme.font-md;
                                         overflow: elide;
                                         horizontal-stretch: 1;
                                     }
@@ -334,7 +408,7 @@ component MessageList inherits Rectangle {
                                         text: entry.time;
                                         color: Theme.text-faint;
                                         font-family: Theme.mono-font;
-                                        font-size: 12px;
+                                        font-size: Theme.font-sm;
                                     }
                                 }
                                 Text {
@@ -342,7 +416,7 @@ component MessageList inherits Rectangle {
                                     color: Theme.send-payload;
                                     wrap: word-wrap;
                                     font-family: Theme.mono-font;
-                                    font-size: 13px;
+                                    font-size: Theme.font-md;
                                 }
                             }
                         }
@@ -353,24 +427,24 @@ component MessageList inherits Rectangle {
                             border-radius: 8px;
                             background: entry.kind == "ERR" ? Theme.err-bg : Theme.sys-bg;
                             VerticalLayout {
-                                padding: 6px;
-                                padding-left: 10px;
-                                padding-right: 10px;
+                                padding: Theme.space-3;
+                                padding-left: Theme.space-5;
+                                padding-right: Theme.space-5;
                                 HorizontalLayout {
-                                    spacing: 8px;
+                                    spacing: Theme.space-4;
                                     alignment: center;
                                     Text {
                                         text: entry.time;
                                         color: Theme.text-faint;
                                         font-family: Theme.mono-font;
-                                        font-size: 12px;
+                                        font-size: Theme.font-sm;
                                         vertical-alignment: center;
                                     }
                                     Text {
                                         text: entry.kind == "ERR" ? I18n.t("错误", "Error") : I18n.t("系统", "System");
                                         color: entry.kind == "ERR" ? Theme.err-label : Theme.muted;
                                         font-family: Theme.ui-font;
-                                        font-size: 12px;
+                                        font-size: Theme.font-sm;
                                         font-weight: 600;
                                         vertical-alignment: center;
                                     }
@@ -379,7 +453,7 @@ component MessageList inherits Rectangle {
                                         color: entry.kind == "ERR" ? Theme.err-text : Theme.sys-text;
                                         wrap: word-wrap;
                                         font-family: Theme.mono-font;
-                                        font-size: 13px;
+                                        font-size: Theme.font-md;
                                         vertical-alignment: center;
                                     }
                                 }
@@ -396,14 +470,14 @@ component MessageList inherits Rectangle {
 export component AppWindow inherits Window {
     title: "mqttc";
     icon: @image-url("../assets/icon.png");
-    min-width: 1180px;
-    min-height: 720px;
-    preferred-width: 1360px;
-    preferred-height: 860px;
+    min-width: Theme.window-min-w;
+    min-height: Theme.window-min-h;
+    preferred-width: Theme.window-pref-w;
+    preferred-height: Theme.window-pref-h;
     background: Theme.window-bg;
     default-font-family: Theme.ui-font;
-    default-font-size: 14px;
-    default-font-weight: 500;
+    default-font-size: Theme.font-base;
+    default-font-weight: 400;
 
     // 0 config, 1 session, 2 settings, 3 auto-reply, 4 presets, 5 about.
     in-out property <int> page: 0;
@@ -440,6 +514,8 @@ export component AppWindow inherits Window {
     in-out property <int> sub-qos: 0;
     in-out property <[Subscription]> subscriptions: [];
     in-out property <string> active-sub-topic: "";
+    in-out property <bool> subscribe-open: false;
+    in-out property <bool> subs-visible: true;
 
     in-out property <string> pub-topic: "mqttc/mvp/hello";
     in-out property <string> pub-payload: "hello from mqttc";
@@ -463,6 +539,8 @@ export component AppWindow inherits Window {
     // Stored preference including System. Theme.skin is the resolved visual index.
     in-out property <int> skin-choice: 0;
     in-out property <int> language <=> I18n.language;
+    in-out property <int> font-size <=> Theme.font-size;
+    in-out property <int> density <=> Theme.density;
     in-out property <string> ui-font <=> Theme.ui-font;
     in-out property <string> mono-font <=> Theme.mono-font;
     in-out property <string> app-version: "0.0.0";
@@ -481,6 +559,18 @@ export component AppWindow inherits Window {
 
     changed language => {
         root.language-changed();
+    }
+
+    changed font-size => {
+        root.ui-scale-changed();
+    }
+
+    changed density => {
+        root.ui-scale-changed();
+    }
+
+    changed subs-visible => {
+        root.subs-visible-changed();
     }
 
     callback new-connection-requested();
@@ -504,6 +594,8 @@ export component AppWindow inherits Window {
     callback clear-logs-requested();
     callback skin-changed();
     callback language-changed();
+    callback ui-scale-changed();
+    callback subs-visible-changed();
     callback settings-requested();
     callback about-requested();
     callback auto-reply-requested();
@@ -513,20 +605,25 @@ export component AppWindow inherits Window {
     callback add-publish-preset-requested();
     callback delete-publish-preset-requested(int);
 
-    HorizontalBox {
-        padding: 12px;
-        spacing: 12px;
+    Rectangle {
+        clip: true;
+        min-width: 0px;
+        HorizontalBox {
+        padding: Theme.space-6;
+        spacing: Theme.space-6;
+        min-width: 0px;
 
         Rectangle {
-            width: 188px;
+            min-width: 120px;
+            preferred-width: Theme.nav-w;
             border-radius: 10px;
-            background: Theme.panel-bg;
+            background: Theme.nav-bg;
             VerticalBox {
-                padding: 8px;
-                spacing: 8px;
+                padding: Theme.space-4;
+                spacing: Theme.space-4;
                 HorizontalBox {
-                    spacing: 6px;
-                    Text { text: I18n.t("连接", "Conns"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
+                    spacing: Theme.space-3;
+                    Text { text: I18n.t("连接", "Conns"); color: Theme.nav-text; font-weight: 600; vertical-alignment: center; }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
                     Button {
                         width: 32px;
@@ -535,14 +632,14 @@ export component AppWindow inherits Window {
                     }
                 }
                 Rectangle {
-                    background: Theme.inset-bg;
+                    background: Theme.nav-item;
                     border-radius: 8px;
                     vertical-stretch: 1;
                     clip: true;
                     ListView {
                         for conn in root.connections: Rectangle {
-                            height: 54px;
-                            background: conn.id == root.active-connection-id ? Theme.selected-bg : transparent;
+                            height: Theme.row-conn;
+                            background: conn.id == root.active-connection-id ? Theme.nav-selected : transparent;
                             row-touch := TouchArea {
                                 width: 100%;
                                 height: 100%;
@@ -553,8 +650,8 @@ export component AppWindow inherits Window {
                                 y: 0;
                                 width: parent.width;
                                 height: parent.height;
-                                padding: 6px;
-                                spacing: 6px;
+                                padding: Theme.space-3;
+                                spacing: Theme.space-3;
                                 Rectangle {
                                     width: 8px;
                                     height: 8px;
@@ -564,10 +661,10 @@ export component AppWindow inherits Window {
                                 }
                                 VerticalLayout {
                                     alignment: center;
-                                    spacing: 2px;
+                                    spacing: Theme.space-1;
                                     Text {
                                         text: conn.name;
-                                        color: Theme.text-body;
+                                        color: Theme.nav-text;
                                         overflow: elide;
                                         font-weight: 600;
                                         vertical-alignment: center;
@@ -575,22 +672,22 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: conn.status;
                                         color: conn.status-color;
-                                        font-size: 12px;
+                                        font-size: Theme.font-sm;
                                         overflow: elide;
                                         vertical-alignment: center;
                                     }
                                 }
                                 Rectangle { horizontal-stretch: 1; background: transparent; }
                                 Rectangle {
-                                    width: 22px;
-                                    height: 22px;
-                                    border-radius: 11px;
-                                    background: del-touch.has-hover ? Theme.hover-bg : transparent;
+                                    width: Theme.icon-btn;
+                                    height: Theme.icon-btn;
+                                    border-radius: Theme.icon-btn / 2;
+                                    background: del-touch.has-hover ? Theme.nav-hover : transparent;
                                     y: (parent.height - self.height) / 2;
                                     Text {
                                         text: "×";
                                         color: Theme.danger;
-                                        font-size: 15px;
+                                        font-size: Theme.font-lg;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                     }
@@ -602,21 +699,72 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                Button {
-                    text: I18n.t("自动回复", "Auto-reply");
-                    clicked => { root.auto-reply-requested(); }
-                }
-                Button {
-                    text: I18n.t("发布预设", "Presets");
-                    clicked => { root.publish-presets-requested(); }
-                }
-                Button {
-                    text: I18n.t("设置", "Settings");
-                    clicked => { root.settings-requested(); }
-                }
-                Button {
-                    text: I18n.t("关于", "About");
-                    clicked => { root.about-requested(); }
+                VerticalLayout {
+                    spacing: Theme.space-2;
+                    nav-auto := Rectangle {
+                        height: Theme.control-h;
+                        border-radius: 6px;
+                        background: root.page == 3 ? Theme.nav-selected : (nav-auto-touch.has-hover ? Theme.nav-hover : transparent);
+                        Text {
+                            text: I18n.t("自动回复", "Auto-reply");
+                            color: Theme.nav-text;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                        }
+                        nav-auto-touch := TouchArea {
+                            clicked => { root.auto-reply-requested(); }
+                        }
+                    }
+                    nav-preset := Rectangle {
+                        height: Theme.control-h;
+                        border-radius: 6px;
+                        background: root.page == 4 ? Theme.nav-selected : (nav-preset-touch.has-hover ? Theme.nav-hover : transparent);
+                        Text {
+                            text: I18n.t("发布预设", "Presets");
+                            color: Theme.nav-text;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                        }
+                        nav-preset-touch := TouchArea {
+                            clicked => { root.publish-presets-requested(); }
+                        }
+                    }
+                    nav-set := Rectangle {
+                        height: Theme.control-h;
+                        border-radius: 6px;
+                        background: root.page == 2 ? Theme.nav-selected : (nav-set-touch.has-hover ? Theme.nav-hover : transparent);
+                        Text {
+                            text: I18n.t("设置", "Settings");
+                            color: Theme.nav-text;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                        }
+                        nav-set-touch := TouchArea {
+                            clicked => { root.settings-requested(); }
+                        }
+                    }
+                    nav-about := Rectangle {
+                        height: Theme.control-h;
+                        border-radius: 6px;
+                        background: root.page == 5 ? Theme.nav-selected : (nav-about-touch.has-hover ? Theme.nav-hover : transparent);
+                        Text {
+                            text: I18n.t("关于", "About");
+                            color: Theme.nav-text;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            width: 100%;
+                            height: 100%;
+                        }
+                        nav-about-touch := TouchArea {
+                            clicked => { root.about-requested(); }
+                        }
+                    }
                 }
             }
         }
@@ -625,15 +773,16 @@ export component AppWindow inherits Window {
             border-radius: 10px;
             background: Theme.panel-bg;
             horizontal-stretch: 1;
+            min-width: 0px;
             VerticalBox {
-                padding: 16px;
-                spacing: 16px;
+                padding: Theme.space-7;
+                spacing: Theme.space-6;
                 HorizontalBox {
-                    spacing: 10px;
+                    spacing: Theme.space-5;
                     Text {
                         text: I18n.t("设置", "Settings");
                         color: Theme.text-primary;
-                        font-size: 16px;
+                        font-size: Theme.font-title;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -645,28 +794,55 @@ export component AppWindow inherits Window {
                     }
                 }
                 VerticalBox {
-                    spacing: 18px;
+                    spacing: Theme.space-8;
                     Text { text: I18n.t("外观", "Appearance"); color: Theme.text-title; font-weight: 600; }
                     HorizontalBox {
-                        spacing: 12px;
+                        spacing: Theme.space-6;
                         FieldLabel { caption: I18n.t("皮肤", "Skin"); }
                         Select {
                             width: 148px;
                             options: [
                                 I18n.t("跟随系统", "System"),
-                                I18n.t("黑", "Black"),
-                                I18n.t("白", "White"),
-                                I18n.t("蓝", "Blue"),
-                                I18n.t("绿", "Green"),
-                                I18n.t("紫", "Purple"),
+                                I18n.t("浅色", "Light"),
+                                I18n.t("深色", "Dark"),
+                                I18n.t("夜间", "Night"),
                             ];
                             current-index <=> root.skin-choice;
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
+                    HorizontalBox {
+                        spacing: Theme.space-6;
+                        FieldLabel { caption: I18n.t("字号", "Font size"); }
+                        Select {
+                            width: 148px;
+                            options: [
+                                I18n.t("小", "Small"),
+                                I18n.t("中", "Medium"),
+                                I18n.t("大", "Large"),
+                                I18n.t("特大", "Extra large"),
+                            ];
+                            current-index <=> root.font-size;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
+                    HorizontalBox {
+                        spacing: Theme.space-6;
+                        FieldLabel { caption: I18n.t("界面密度", "Density"); }
+                        Select {
+                            width: 148px;
+                            options: [
+                                I18n.t("紧凑", "Compact"),
+                                I18n.t("标准", "Standard"),
+                                I18n.t("宽松", "Comfortable"),
+                            ];
+                            current-index <=> root.density;
+                        }
+                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                    }
                     Text { text: I18n.t("语言", "Language"); color: Theme.text-title; font-weight: 600; }
                     HorizontalBox {
-                        spacing: 12px;
+                        spacing: Theme.space-6;
                         FieldLabel { caption: I18n.t("界面语言", "UI language"); }
                         Select {
                             width: 140px;
@@ -676,9 +852,9 @@ export component AppWindow inherits Window {
                         Rectangle { horizontal-stretch: 1; background: transparent; }
                     }
                     Text {
-                        text: I18n.t("语言切换立即生效，并写入 mqttc.json。", "Language applies immediately and is saved to mqttc.json.");
+                        text: I18n.t("切换立即生效，并写入 mqttc.json。缩小窗口时可用小字号与紧凑密度。", "Changes apply immediately and are saved to mqttc.json. Use small type and compact density for a smaller window.");
                         color: Theme.text-faint;
-                        font-size: 12px;
+                        font-size: Theme.font-sm;
                     }
                     Rectangle { vertical-stretch: 1; background: transparent; }
                 }
@@ -688,16 +864,17 @@ export component AppWindow inherits Window {
         if root.page == 3: Rectangle {
             border-radius: 10px;
             background: Theme.panel-bg;
+            min-width: 0px;
             horizontal-stretch: 1;
             VerticalBox {
-                padding: 16px;
-                spacing: 12px;
+                padding: Theme.space-7;
+                spacing: Theme.space-6;
                 HorizontalBox {
-                    spacing: 10px;
+                    spacing: Theme.space-5;
                     Text {
                         text: I18n.t("自动回复", "Auto-reply");
                         color: Theme.text-primary;
-                        font-size: 16px;
+                        font-size: Theme.font-title;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -709,10 +886,10 @@ export component AppWindow inherits Window {
                     }
                 }
                 HorizontalBox {
-                    spacing: 12px;
+                    spacing: Theme.space-6;
                     FieldLabel { caption: I18n.t("自身回投", "Own echo"); }
                     Select {
-                        width: 220px;
+                        width: Theme.sub-panel-w;
                         options: [
                             I18n.t("跳过自身回投", "Skip own echo"),
                             I18n.t("再匹配自身回投", "Rematch own echo"),
@@ -728,7 +905,7 @@ export component AppWindow inherits Window {
                 Text {
                     text: I18n.t("勾选后该条才参与匹配；同一条消息只触发第一条命中的规则。", "Only checked rules match; the first hit sends its own fixed reply.");
                     color: Theme.text-faint;
-                    font-size: 12px;
+                    font-size: Theme.font-sm;
                 }
                 Rectangle {
                     background: Theme.inset-bg;
@@ -745,11 +922,11 @@ export component AppWindow inherits Window {
                         for rule[index] in root.auto-reply-rules: Rectangle {
                             height: 148px;
                             VerticalLayout {
-                                padding: 10px;
-                                spacing: 6px;
+                                padding: Theme.space-5;
+                                spacing: Theme.space-3;
                                 HorizontalBox {
                                     padding: 0;
-                                    spacing: 8px;
+                                    spacing: Theme.space-4;
                                     CheckBox {
                                         text: I18n.t("启用", "On");
                                         checked <=> rule.enabled;
@@ -769,25 +946,25 @@ export component AppWindow inherits Window {
                                 }
                                 HorizontalBox {
                                     padding: 0;
-                                    spacing: 8px;
+                                    spacing: Theme.space-4;
                                     FieldLabel { caption: I18n.t("匹配 Topic", "Match topic"); width: 88px; }
-                                    LineEdit {
+                                    Field {
                                         text <=> rule.match-topic;
                                         placeholder-text: "sensor/+/status";
                                         horizontal-stretch: 1;
                                     }
                                     FieldLabel { caption: I18n.t("包含", "Contains"); width: 48px; }
-                                    LineEdit {
+                                    Field {
                                         text <=> rule.payload-contains;
                                         placeholder-text: I18n.t("可选", "optional");
-                                        width: 160px;
+                                        preferred-width: 160px;
                                     }
                                 }
                                 HorizontalBox {
                                     padding: 0;
-                                    spacing: 8px;
+                                    spacing: Theme.space-4;
                                     FieldLabel { caption: I18n.t("回复 Topic", "Reply topic"); width: 88px; }
-                                    LineEdit {
+                                    Field {
                                         text <=> rule.reply-topic;
                                         placeholder-text: "Topic";
                                         horizontal-stretch: 1;
@@ -817,7 +994,7 @@ export component AppWindow inherits Window {
                                     placeholder-text: "Payload";
                                     wrap: word-wrap;
                                     font-family: Theme.mono-font;
-                                    height: 44px;
+                                    height: Theme.row-sub;
                                 }
                             }
                         }
@@ -827,18 +1004,19 @@ export component AppWindow inherits Window {
         }
 
         if root.page == 4: Rectangle {
+            min-width: 0px;
             border-radius: 10px;
             background: Theme.panel-bg;
             horizontal-stretch: 1;
             VerticalBox {
-                padding: 16px;
-                spacing: 12px;
+                padding: Theme.space-7;
+                spacing: Theme.space-6;
                 HorizontalBox {
-                    spacing: 10px;
+                    spacing: Theme.space-5;
                     Text {
                         text: I18n.t("发布预设", "Publish presets");
                         color: Theme.text-primary;
-                        font-size: 16px;
+                        font-size: Theme.font-title;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -850,11 +1028,11 @@ export component AppWindow inherits Window {
                     }
                 }
                 HorizontalBox {
-                    spacing: 12px;
+                    spacing: Theme.space-6;
                     Text {
                         text: I18n.t("在会话页发布区下方点发送即可发出对应报文。", "Send from the session page under the publish form.");
                         color: Theme.text-faint;
-                        font-size: 12px;
+                        font-size: Theme.font-sm;
                         vertical-alignment: center;
                     }
                     Rectangle { horizontal-stretch: 1; background: transparent; }
@@ -878,13 +1056,13 @@ export component AppWindow inherits Window {
                         for preset[index] in root.publish-presets: Rectangle {
                             height: 148px;
                             VerticalLayout {
-                                padding: 10px;
-                                spacing: 6px;
+                                padding: Theme.space-5;
+                                spacing: Theme.space-3;
                                 HorizontalBox {
                                     padding: 0;
-                                    spacing: 8px;
-                                    LineEdit {
-                                        width: 140px;
+                                    spacing: Theme.space-4;
+                                    Field {
+                                        preferred-width: 140px;
                                         text <=> preset.name;
                                         placeholder-text: I18n.t("名称", "Name");
                                     }
@@ -897,9 +1075,9 @@ export component AppWindow inherits Window {
                                 }
                                 HorizontalBox {
                                     padding: 0;
-                                    spacing: 8px;
+                                    spacing: Theme.space-4;
                                     FieldLabel { caption: I18n.t("Topic", "Topic"); width: 48px; }
-                                    LineEdit {
+                                    Field {
                                         text <=> preset.topic;
                                         placeholder-text: "Topic";
                                         horizontal-stretch: 1;
@@ -929,7 +1107,7 @@ export component AppWindow inherits Window {
                                     placeholder-text: "Payload";
                                     wrap: word-wrap;
                                     font-family: Theme.mono-font;
-                                    height: 56px;
+                                    height: Theme.payload-h;
                                 }
                             }
                         }
@@ -942,15 +1120,16 @@ export component AppWindow inherits Window {
             border-radius: 10px;
             background: Theme.panel-bg;
             horizontal-stretch: 1;
+            min-width: 0px;
             VerticalBox {
-                padding: 16px;
-                spacing: 16px;
+                padding: Theme.space-7;
+                spacing: Theme.space-6;
                 HorizontalBox {
-                    spacing: 10px;
+                    spacing: Theme.space-5;
                     Text {
                         text: I18n.t("关于", "About");
                         color: Theme.text-primary;
-                        font-size: 16px;
+                        font-size: Theme.font-title;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -962,17 +1141,17 @@ export component AppWindow inherits Window {
                     }
                 }
                 VerticalBox {
-                    spacing: 12px;
+                    spacing: Theme.space-6;
                     Text {
                         text: "mqttc";
                         color: Theme.text-primary;
-                        font-size: 22px;
+                        font-size: Theme.font-hero;
                         font-weight: 700;
                     }
                     Text {
                         text: I18n.t("版本 ", "Version ") + root.app-version;
                         color: Theme.text-muted;
-                        font-size: 13px;
+                        font-size: Theme.font-md;
                     }
                     Text {
                         text: I18n.t(
@@ -1033,15 +1212,16 @@ export component AppWindow inherits Window {
             border-radius: 10px;
             background: Theme.panel-bg;
             horizontal-stretch: 1;
+            min-width: 0px;
             VerticalBox {
-                padding: 16px;
-                spacing: 12px;
+                padding: Theme.space-7;
+                spacing: Theme.space-6;
                 HorizontalBox {
-                    spacing: 10px;
+                    spacing: Theme.space-5;
                     Text {
                         text: I18n.t("连接配置", "Connection");
                         color: Theme.text-primary;
-                        font-size: 16px;
+                        font-size: Theme.font-title;
                         font-weight: 700;
                         vertical-alignment: center;
                     }
@@ -1067,48 +1247,47 @@ export component AppWindow inherits Window {
                 ScrollView {
                     vertical-stretch: 1;
                     VerticalBox {
-                        padding-right: 8px;
-                        spacing: 14px;
+                        padding-right: Theme.space-4;
+                        spacing: Theme.sz(14);
                         Text { text: I18n.t("基础信息", "General"); color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
-                            spacing: 10px;
+                            spacing: Theme.space-5;
                             VerticalBox {
-                                spacing: 4px;
-                                width: 220px;
+                                spacing: Theme.space-2;
+                                width: Theme.sub-panel-w;
                                 FieldLabel { caption: I18n.t("名称", "Name"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.connection-name;
                                     placeholder-text: I18n.t("连接名称", "Connection name");
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
-                                width: 220px;
+                                spacing: Theme.space-2;
+                                width: Theme.sub-panel-w;
                                 FieldLabel { caption: I18n.t("主机", "Host"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.host;
                                     placeholder-text: "127.0.0.1";
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 width: 100px;
                                 FieldLabel { caption: I18n.t("端口", "Port"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.port;
                                     placeholder-text: "1883";
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 width: 100px;
                                 FieldLabel { caption: I18n.t("MQTT 协议", "MQTT protocol"); }
                                 Select {
                                     width: 100px;
-                                    height: 32px;
                                     options: ["3.1.1", "5.0"];
                                     current-index <=> root.mqtt-protocol;
                                     interactive: !root.connected && !root.connecting;
@@ -1116,13 +1295,13 @@ export component AppWindow inherits Window {
                             }
                         }
                         HorizontalBox {
-                            spacing: 10px;
+                            spacing: Theme.space-5;
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 FieldLabel { caption: "Client ID"; }
                                 HorizontalBox {
-                                    spacing: 6px;
-                                    LineEdit {
+                                    spacing: Theme.space-3;
+                                    Field {
                                         text <=> root.client-id;
                                         placeholder-text: I18n.t("空则自动生成", "Empty = auto");
                                         enabled: !root.connected && !root.connecting;
@@ -1136,18 +1315,18 @@ export component AppWindow inherits Window {
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 FieldLabel { caption: I18n.t("用户名", "Username"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.username;
                                     placeholder-text: I18n.t("可选，空则匿名", "Optional, empty = anonymous");
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 FieldLabel { caption: I18n.t("密码", "Password"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.password;
                                     placeholder-text: I18n.t("可选", "Optional");
                                     input-type: InputType.password;
@@ -1157,29 +1336,29 @@ export component AppWindow inherits Window {
                         }
                         Text { text: I18n.t("高级参数", "Advanced"); color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
-                            spacing: 10px;
+                            spacing: Theme.space-5;
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 width: 140px;
                                 FieldLabel { caption: I18n.t("Keep Alive (秒)", "Keep Alive (s)"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.keep-alive;
                                     placeholder-text: "60";
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 width: 140px;
                                 FieldLabel { caption: I18n.t("连接超时 (秒)", "Timeout (s)"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.connect-timeout;
                                     placeholder-text: "10";
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 alignment: end;
                                 CheckBox {
                                     text: "Clean Session";
@@ -1191,7 +1370,7 @@ export component AppWindow inherits Window {
                         }
                         Text { text: "SSL / TLS"; color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
-                            spacing: 10px;
+                            spacing: Theme.space-5;
                             CheckBox {
                                 text: I18n.t("启用 SSL", "Enable SSL");
                                 checked <=> root.ssl;
@@ -1213,13 +1392,13 @@ export component AppWindow inherits Window {
                             Rectangle { horizontal-stretch: 1; background: transparent; }
                         }
                         if root.ssl: VerticalBox {
-                            spacing: 10px;
+                            spacing: Theme.space-5;
                             HorizontalBox {
-                                spacing: 10px;
+                                spacing: Theme.space-5;
                                 VerticalBox {
-                                    spacing: 4px;
+                                    spacing: Theme.space-2;
                                     FieldLabel { caption: I18n.t("CA 证书路径", "CA certificate"); }
-                                    LineEdit {
+                                    Field {
                                         text <=> root.ssl-ca;
                                         placeholder-text: I18n.t("可选，空则使用系统 CA", "Optional, empty = system CA");
                                         enabled: !root.connected && !root.connecting;
@@ -1227,20 +1406,20 @@ export component AppWindow inherits Window {
                                 }
                             }
                             HorizontalBox {
-                                spacing: 10px;
+                                spacing: Theme.space-5;
                                 VerticalBox {
-                                    spacing: 4px;
+                                    spacing: Theme.space-2;
                                     FieldLabel { caption: I18n.t("客户端证书", "Client cert"); }
-                                    LineEdit {
+                                    Field {
                                         text <=> root.ssl-cert;
                                         placeholder-text: I18n.t("可选，双向认证时填写", "Optional, for mutual TLS");
                                         enabled: !root.connected && !root.connecting;
                                     }
                                 }
                                 VerticalBox {
-                                    spacing: 4px;
+                                    spacing: Theme.space-2;
                                     FieldLabel { caption: I18n.t("客户端私钥", "Client key"); }
-                                    LineEdit {
+                                    Field {
                                         text <=> root.ssl-key;
                                         placeholder-text: I18n.t("可选，与证书成对", "Optional, pair with cert");
                                         enabled: !root.connected && !root.connecting;
@@ -1250,25 +1429,25 @@ export component AppWindow inherits Window {
                             Text {
                                 text: I18n.t("端口常用 8883。关闭校验仅用于自签证书调试。", "Port 8883 is common. Turn off verify only for self-signed certs.");
                                 color: Theme.text-faint;
-                                font-size: 12px;
+                                font-size: Theme.font-sm;
                             }
                         }
                         Text { text: I18n.t("遗嘱消息 (Last Will)", "Last Will"); color: Theme.text-title; font-weight: 600; }
                         HorizontalBox {
-                            spacing: 10px;
+                            spacing: Theme.space-5;
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 FieldLabel { caption: I18n.t("遗嘱 Topic", "Will topic"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.will-topic;
                                     placeholder-text: I18n.t("留空则不发送遗嘱", "Empty = no will");
                                     enabled: !root.connected && !root.connecting;
                                 }
                             }
                             VerticalBox {
-                                spacing: 4px;
+                                spacing: Theme.space-2;
                                 FieldLabel { caption: I18n.t("遗嘱 Payload", "Will payload"); }
-                                LineEdit {
+                                Field {
                                     text <=> root.will-payload;
                                     placeholder-text: I18n.t("异常断开时由 Broker 代发", "Sent by broker on unexpected disconnect");
                                     enabled: !root.connected && !root.connecting;
@@ -1276,8 +1455,8 @@ export component AppWindow inherits Window {
                             }
                         }
                         HorizontalBox {
-                            spacing: 8px;
-                            Text { text: I18n.t("遗嘱 QoS", "Will QoS"); color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
+                            spacing: Theme.space-4;
+                            Text { text: I18n.t("遗嘱 QoS", "Will QoS"); color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
                             Select {
                                 width: 56px;
                                 options: ["0", "1", "2"];
@@ -1298,61 +1477,77 @@ export component AppWindow inherits Window {
 
         if root.page == 1: VerticalLayout {
             padding: 0;
-            spacing: 12px;
+            spacing: Theme.space-6;
             horizontal-stretch: 1;
             vertical-stretch: 1;
+            min-width: 0px;
 
             Rectangle {
                 border-radius: 10px;
                 background: Theme.panel-bg;
+                clip: true;
+                min-width: 0px;
                 VerticalBox {
-                    padding: 12px;
-                    spacing: 8px;
-                    HorizontalBox {
+                    padding: Theme.space-6;
+                    spacing: Theme.space-4;
+                    Rectangle {
+                        min-width: 0px;
+                        width: 100%;
+                        height: max(Theme.control-h, header-bar.preferred-height);
+                        clip: true;
+                    Flickable {
+                        width: 100%;
+                        height: 100%;
+                        content-height: self.height;
+                        content-width: max(self.width, header-bar.preferred-width);
+                        header-bar := HorizontalLayout {
                         padding: 0;
-                        spacing: 10px;
+                        spacing: Theme.space-5;
+                        width: self.preferred-width;
+                        height: 100%;
+                        alignment: center;
                         Text {
                             text: root.connection-name;
                             color: Theme.text-primary;
-                            font-size: 16px;
+                            font-size: Theme.font-title;
                             font-weight: 700;
                             vertical-alignment: center;
+                            height: 100%;
                             overflow: elide;
                         }
                         Text {
                             text: root.connection-summary;
                             color: Theme.text-muted;
                             vertical-alignment: center;
+                            height: 100%;
                             overflow: elide;
                         }
                         Rectangle { horizontal-stretch: 1; background: transparent; }
-                        Rectangle {
-                            border-radius: 11px;
-                            background: Theme.badge-bg;
-                            VerticalLayout {
-                                padding-left: 10px;
-                                padding-right: 10px;
-                                padding-top: 4px;
-                                padding-bottom: 4px;
-                                HorizontalLayout {
-                                    spacing: 8px;
-                                    alignment: center;
-                                    Rectangle {
-                                        width: 8px;
-                                        height: 8px;
-                                        border-radius: 4px;
-                                        background: root.status-color;
-                                        y: (parent.height - self.height) / 2;
-                                    }
-                                    Text {
-                                        text: root.status;
-                                        color: root.status-color;
-                                        font-weight: 600;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                        }
+                         Rectangle {
+                             height: 100%;
+                             border-radius: Theme.control-h / 2;
+                             background: Theme.badge-bg;
+                             HorizontalLayout {
+                                 padding-left: Theme.space-5;
+                                 padding-right: Theme.space-5;
+                                 spacing: Theme.space-3;
+                                 alignment: center;
+                                 Rectangle {
+                                     width: 8px;
+                                     height: 8px;
+                                     border-radius: 4px;
+                                     background: root.status-color;
+                                     y: (parent.height - self.height) / 2;
+                                 }
+                                 Text {
+                                     text: root.status;
+                                     color: root.status-color;
+                                     font-weight: 600;
+                                     vertical-alignment: center;
+                                     height: 100%;
+                                 }
+                             }
+                         }
                         Button {
                             width: 72px;
                             text: I18n.t("编辑", "Edit");
@@ -1371,128 +1566,189 @@ export component AppWindow inherits Window {
                             enabled: root.connected || root.connecting;
                             clicked => { root.disconnect-requested(); }
                         }
+                        if !root.subs-visible: Button {
+                            width: 88px;
+                            text: I18n.t("订阅列表", "Subs");
+                            clicked => { root.subs-visible = true; }
+                        }
+                        }
+                    }
                     }
                 }
             }
 
-            HorizontalLayout {
-                padding: 0;
-                spacing: 12px;
-                vertical-stretch: 1;
+            VerticalLayout {
+                    padding: 0;
+                    spacing: Theme.space-6;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    min-width: 0px;
 
-                Rectangle {
-                    width: 220px;
-                    border-radius: 10px;
-                    background: Theme.panel-bg;
-                    VerticalBox {
-                        padding: 12px;
-                        spacing: 8px;
-                        Text { text: I18n.t("订阅", "Subscribe"); color: Theme.text-title; font-weight: 600; }
-                        LineEdit {
-                            text <=> root.sub-topic;
-                            placeholder-text: "topic/filter/#";
-                            enabled: root.connected;
-                        }
-                        HorizontalBox {
-                            padding: 0;
-                            spacing: 8px;
-                            Text { text: "QoS"; color: Theme.text-muted; font-size: 12px; vertical-alignment: center; }
-                            Select {
-                                width: 56px;
-                                options: ["0", "1", "2"];
-                                current-index <=> root.sub-qos;
-                                interactive: root.connected;
-                            }
-                            Rectangle { horizontal-stretch: 1; background: transparent; }
-                            Button {
-                                width: 72px;
-                                text: I18n.t("订阅", "Sub");
-                                enabled: root.connected;
-                                clicked => { root.subscribe-requested(); }
-                            }
-                        }
-                        Text {
-                            text: root.active-sub-topic == "" ? I18n.t("点击订阅可筛选消息", "Click a subscription to filter") : I18n.t("正在筛选: ", "Filtering: ") + root.active-sub-topic;
-                            color: Theme.text-faint;
-                            font-size: 12px;
-                            overflow: elide;
-                        }
-                        Rectangle {
-                            background: Theme.inset-bg;
-                            border-radius: 8px;
+                    HorizontalLayout {
+                        padding: 0;
+                        spacing: Theme.space-6;
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
+                        min-width: 0px;
+
+                        if root.subs-visible: Rectangle {
+                            border-radius: 10px;
+                            background: Theme.panel-bg;
+                            preferred-width: Theme.sub-panel-w;
+                            min-width: 0px;
+                            horizontal-stretch: 0;
                             vertical-stretch: 1;
                             clip: true;
-                            ListView {
-                                for sub[index] in root.subscriptions: Rectangle {
-                                    height: 44px;
-                                    background: sub.selected ? Theme.sub-selected : transparent;
-                                    sub-touch := TouchArea {
-                                        clicked => { root.filter-subscription-requested(sub.topic); }
+                            VerticalBox {
+                                padding: Theme.space-4;
+                                spacing: Theme.space-3;
+                                HorizontalBox {
+                                    spacing: Theme.space-3;
+                                    Text {
+                                        text: I18n.t("订阅", "Subscriptions");
+                                        color: Theme.text-title;
+                                        font-weight: 600;
+                                        vertical-alignment: center;
                                     }
-                                    HorizontalLayout {
-                                        padding-left: 10px;
-                                        padding-right: 6px;
-                                        spacing: 6px;
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text {
-                                                text: sub.topic;
-                                                color: sub.selected ? Theme.send-topic : Theme.text-body;
-                                                overflow: elide;
-                                                font-family: Theme.mono-font;
-                                                vertical-alignment: center;
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    Button {
+                                        width: 56px;
+                                        text: I18n.t("隐藏", "Hide");
+                                        clicked => { root.subs-visible = false; }
+                                    }
+                                }
+                                Rectangle {
+                                    background: Theme.inset-bg;
+                                    border-radius: 8px;
+                                    vertical-stretch: 1;
+                                    min-width: 0px;
+                                    clip: true;
+                                    ListView {
+                                        for sub[index] in root.subscriptions: Rectangle {
+                                            height: Theme.row-sub;
+                                            background: sub.selected ? Theme.sub-selected : transparent;
+                                            sub-row-touch := TouchArea {
+                                                width: 100%;
+                                                height: 100%;
+                                                clicked => { root.filter-subscription-requested(sub.topic); }
                                             }
-                                            Text {
-                                                text: "QoS " + sub.qos;
-                                                color: Theme.text-muted;
-                                                font-size: 12px;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-                                        Rectangle { horizontal-stretch: 1; background: transparent; }
-                                        Rectangle {
-                                            width: 22px;
-                                            height: 22px;
-                                            border-radius: 11px;
-                                            background: cancel-touch.has-hover ? Theme.hover-bg : transparent;
-                                            y: (parent.height - self.height) / 2;
-                                            Text {
-                                                text: "×";
-                                                color: Theme.danger;
-                                                font-size: 15px;
-                                                horizontal-alignment: center;
-                                                vertical-alignment: center;
-                                            }
-                                            cancel-touch := TouchArea {
-                                                clicked => { root.unsubscribe-requested(index); }
+                                            HorizontalLayout {
+                                                x: 0;
+                                                y: 0;
+                                                width: parent.width;
+                                                height: parent.height;
+                                                padding-left: Theme.space-3;
+                                                padding-right: Theme.space-2;
+                                                spacing: Theme.space-2;
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    spacing: Theme.space-1;
+                                                    Text {
+                                                        text: sub.topic;
+                                                        color: sub.selected ? Theme.accent : Theme.text-body;
+                                                        font-family: Theme.mono-font;
+                                                        font-size: Theme.font-sm;
+                                                        overflow: elide;
+                                                    }
+                                                    Text {
+                                                        text: "QoS " + sub.qos;
+                                                        color: Theme.text-muted;
+                                                        font-size: Theme.font-xs;
+                                                    }
+                                                }
+                                                Rectangle { horizontal-stretch: 1; background: transparent; }
+                                                Rectangle {
+                                                    width: Theme.icon-btn;
+                                                    height: Theme.icon-btn;
+                                                    border-radius: Theme.icon-btn / 2;
+                                                    background: sub-cancel.has-hover ? Theme.hover-bg : transparent;
+                                                    y: (parent.height - self.height) / 2;
+                                                    Text {
+                                                        text: "×";
+                                                        color: Theme.danger;
+                                                        font-size: Theme.font-lg;
+                                                        horizontal-alignment: center;
+                                                        vertical-alignment: center;
+                                                    }
+                                                    sub-cancel := TouchArea {
+                                                        clicked => { root.unsubscribe-requested(index); }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
+                                if root.subscribe-open: VerticalBox {
+                                    padding: 0;
+                                    spacing: Theme.space-3;
+                                     Field {
+                                         text <=> root.sub-topic;
+                                        placeholder-text: "topic/filter/#";
+                                        enabled: root.connected;
+                                    }
+                                    HorizontalBox {
+                                        spacing: Theme.space-3;
+                                        Text { text: "QoS"; color: Theme.text-muted; font-size: Theme.font-sm; vertical-alignment: center; }
+                                        Select {
+                                            width: 56px;
+                                            options: ["0", "1", "2"];
+                                            current-index <=> root.sub-qos;
+                                            interactive: root.connected;
+                                        }
+                                        Rectangle { horizontal-stretch: 1; background: transparent; }
+                                    }
+                                    HorizontalBox {
+                                        spacing: Theme.space-3;
+                                        Button {
+                                            horizontal-stretch: 1;
+                                            text: I18n.t("订阅", "Sub");
+                                            enabled: root.connected;
+                                            clicked => { root.subscribe-requested(); }
+                                        }
+                                        Button {
+                                            width: 64px;
+                                            text: I18n.t("取消", "Cancel");
+                                            clicked => { root.subscribe-open = false; }
+                                        }
+                                    }
+                                }
+                                if !root.subscribe-open: Button {
+                                    text: I18n.t("新建订阅", "New Subscription");
+                                    enabled: root.connected;
+                                    clicked => { root.subscribe-open = true; }
+                                }
                             }
                         }
-                    }
-                }
-
-                VerticalLayout {
-                    padding: 0;
-                    spacing: 12px;
-                    horizontal-stretch: 1;
 
                     Rectangle {
                         border-radius: 10px;
                         background: Theme.panel-bg;
                         vertical-stretch: 1;
+                        horizontal-stretch: 1;
+                        clip: true;
+                        min-width: 0px;
                         VerticalBox {
-                            padding: 12px;
-                            spacing: 8px;
-                            HorizontalBox {
+                            padding: Theme.space-6;
+                            spacing: Theme.space-4;
+                            Rectangle {
+                                min-width: 0px;
+                                width: 100%;
+                                height: max(Theme.control-h, log-bar.preferred-height);
+                                clip: true;
+                            Flickable {
+                                width: 100%;
+                                height: 100%;
+                                content-height: self.height;
+                                content-width: max(self.width, log-bar.preferred-width);
+                            log-bar := HorizontalLayout {
                                 padding: 0;
-                                spacing: 8px;
-                                Text { text: I18n.t("消息", "Messages"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
-                                LineEdit {
-                                    width: 148px;
+                                spacing: Theme.space-4;
+                                width: self.preferred-width;
+                                height: 100%;
+                                alignment: center;
+                                Text { text: I18n.t("消息", "Messages"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; height: 100%; }
+                                Field {
+                                    preferred-width: 148px;
                                     text <=> root.log-filter;
                                     placeholder-text: I18n.t("搜索 Topic / Payload", "Search topic / payload");
                                     edited => { root.log-filter-changed(); }
@@ -1534,6 +1790,8 @@ export component AppWindow inherits Window {
                                     clicked => { root.clear-logs-requested(); }
                                 }
                             }
+                            }
+                            }
                             MessageList {
                                 logs <=> root.logs;
                                 auto-scroll <=> root.auto-scroll;
@@ -1541,20 +1799,37 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                    }
 
                     Rectangle {
                         border-radius: 10px;
                         background: Theme.panel-bg;
                         vertical-stretch: 0;
+                        clip: true;
+                        min-width: 0px;
                         VerticalLayout {
-                            padding: 12px;
-                            spacing: 8px;
-                            HorizontalBox {
+                            padding: Theme.space-6;
+                            spacing: Theme.space-4;
+                            Rectangle {
+                                min-width: 0px;
+                                width: 100%;
+                                height: max(Theme.control-h, pub-bar.preferred-height);
+                                clip: true;
+                            Flickable {
+                                width: 100%;
+                                height: 100%;
+                                content-height: self.height;
+                                content-width: max(self.width, pub-bar.preferred-width);
+                            pub-bar := HorizontalLayout {
                                 padding: 0;
-                                spacing: 8px;
-                                Text { text: I18n.t("发布", "Publish"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; }
-                                LineEdit {
-                                    text <=> root.pub-topic;
+                                spacing: Theme.space-4;
+                                width: self.preferred-width;
+                                height: 100%;
+                                alignment: center;
+                                Text { text: I18n.t("发布", "Publish"); color: Theme.text-title; font-weight: 600; vertical-alignment: center; height: 100%; }
+                                 Field {
+                                     preferred-width: 96px;
+                                     text <=> root.pub-topic;
                                     placeholder-text: "Topic";
                                     enabled: root.connected;
                                 }
@@ -1586,8 +1861,8 @@ export component AppWindow inherits Window {
                                     enabled: root.connected && root.pub-format == 1;
                                     clicked => { root.format-payload-requested(); }
                                 }
-                                LineEdit {
-                                    width: 44px;
+                                Field {
+                                    preferred-width: 44px;
                                     text <=> root.timed-interval;
                                     placeholder-text: I18n.t("秒", "sec");
                                     enabled: root.connected && !root.timed-running;
@@ -1605,17 +1880,19 @@ export component AppWindow inherits Window {
                                     clicked => { root.publish-requested(); }
                                 }
                             }
+                            }
+                            }
                             TextEdit {
                                 text <=> root.pub-payload;
                                 placeholder-text: "Payload";
                                 enabled: root.connected;
                                 wrap: word-wrap;
                                 font-family: Theme.mono-font;
-                                height: 56px;
+                                height: Theme.payload-h;
                             }
                             if root.publish-presets.length > 0: HorizontalBox {
                                 padding: 0;
-                                spacing: 8px;
+                                spacing: Theme.space-4;
                                 vertical-stretch: 0;
                                 Text {
                                     text: I18n.t("发布预设", "Presets");
@@ -1625,7 +1902,7 @@ export component AppWindow inherits Window {
                                 }
                                 Rectangle {
                                     horizontal-stretch: 1;
-                                    height: 32px;
+                                    height: Theme.control-h;
                                     clip: true;
                                     Flickable {
                                         width: 100%;
@@ -1634,7 +1911,7 @@ export component AppWindow inherits Window {
                                         content-width: max(self.width, preset-buttons.preferred-width);
                                         preset-buttons := HorizontalLayout {
                                             padding: 0;
-                                            spacing: 8px;
+                                            spacing: Theme.space-4;
                                             height: 100%;
                                             width: self.preferred-width;
                                             alignment: start;
@@ -1653,5 +1930,5 @@ export component AppWindow inherits Window {
                  }
              }
          }
-     }
-}
+        }
+    }
