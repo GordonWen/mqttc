@@ -10,9 +10,9 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows 10/11 x64 | `mqttc-v0.2.1-windows-x64.zip` | 解压运行 `mqttc.exe` |
-| Linux x64 | `mqttc-v0.2.1-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
-| macOS 11+ | `mqttc-v0.2.1-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
+| Windows 10/11 x64 | `mqttc-v0.2.2-windows-x64.zip` | 解压运行 `mqttc.exe` |
+| Linux x64 | `mqttc-v0.2.2-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
+| macOS 11+ | `mqttc-v0.2.2-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
 
 配置 `mqttc.json` 与导出的 `logs/` 都在可执行文件同目录，不写注册表、不写用户目录，
 整个文件夹可以放在 U 盘里带走。
@@ -37,7 +37,7 @@ Windows x64 release 实测（3 次独立进程中位数，详见 [基准报告](
 
 - exe 5.92 MB，portable zip 3.00 MB
 - 空闲 CPU 接近 0%；10 msg/s 接收时最高 0.03%（按 16 逻辑核归一）
-- 每连接日志固定上限 200 条（环形缓冲），只保留原始字节
+- 每连接日志默认 200 条，可在设置中调到 2000 条；单连接另设 16 MB 字节预算
 
 ## 功能
 
@@ -51,7 +51,9 @@ Windows x64 release 实测（3 次独立进程中位数，详见 [基准报告](
 - 预设发送：多条发布预设一键发送
 - 自动回复：按订阅主题 / 关键字 / 负载内容匹配，按规则顺序首条命中即回复
 - 聊天式日志：收发气泡、系统事件、错误提示；搜索、类型筛选、显示格式切换、
-  自动滚动、导出、清空
+  自动滚动、导出、清空；大负载预览自动截断，可展开查看完整内容（上限 16 KB）
+- 日志缓冲可暂停接收、可在设置中调整历史上限；导出支持当前筛选结果或全部记录，
+  文件名带连接名与毫秒时间戳
 - 中英文界面；6 套皮肤：跟随系统 / 黑 / 白 / 蓝 / 绿 / 紫
 
 ## 从源码构建
