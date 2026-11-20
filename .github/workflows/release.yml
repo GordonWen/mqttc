@@ -1,0 +1,119 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config build-essential \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libx11-dev libxcb1-dev \
+            libxrandr-dev libxi-dev libxcursor-dev \
+            libfontconfig1-dev libfreetype6-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build mqttc (iced, release)
+        run: cargo build --release -p mqttc-iced
+
+      - name: Package
+        run: VERSION="${TAG#v}" bash scripts/package-unix.sh target/release/mqttc-iced linux-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: |
+            dist/release/*.tar.gz
+            dist/release/*.tar.gz.sha256
+          if-no-files-found: error
+
+  macos-universal:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build arm64
+        run: cargo build --release -p mqttc-iced --target aarch64-apple-darwin
+
+      - name: Build x86_64
+        run: cargo build --release -p mqttc-iced --target x86_64-apple-darwin
+
+      - name: Create universal binary
+        run: |
+          mkdir -p target/release
+          lipo -create \
+            target/aarch64-apple-darwin/release/mqttc-iced \
+            target/x86_64-apple-darwin/release/mqttc-iced \
+            -output target/release/mqttc-universal
+          lipo -info target/release/mqttc-universal
+          file target/release/mqttc-universal
+
+      - name: Package
+        run: VERSION="${TAG#v}" bash scripts/package-unix.sh target/release/mqttc-universal macos-universal --app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: |
+            dist/release/*.zip
+            dist/release/*.zip.sha256
+          if-no-files-found: error
+
+  release:
+    needs: [linux-x64, macos-universal]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -lh artifacts
+          cat artifacts/*.sha256 > SHA256SUMS.txt
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; uploading assets"
+          else
+            gh release create "$TAG" --title "mqttc $TAG" --generate-notes --latest
+          fi
+          gh release upload "$TAG" artifacts/* --clobber
+          gh release upload "$TAG" SHA256SUMS.txt --clobber

@@ -1,0 +1,24 @@
+[package]
+name = "mqttc-iced"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mqttc-iced"
+path = "src/main.rs"
+
+[dependencies]
+mqttc-core = { workspace = true }
+iced = { version = "0.14", default-features = false, features = [
+    "tiny-skia",
+    "advanced",
+    "crisp",
+    "thread-pool",
+    "smol",
+    "x11",
+    "wayland",
+    "linux-theme-detection",
+] }
+png = "0.18"

@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "core",
+    "apps/egui",
+    "apps/iced",
+    "apps/gpui",
+    "tools/test-broker",
+]
+exclude = ["参考实现", "bench/ref-build"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+
+[workspace.dependencies]
+mqttc-core = { path = "core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.23"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rumqttc = { version = "0.25.1", default-features = false, features = ["use-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+rustls-native-certs = "0.8"
+rustls-pemfile = "2"
+
+# Small, fast, stripped binaries. Memory first, size second.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+# Same as release, but keeps unwinding (GPUI uses catch_unwind internally).
+[profile.release-unwind]
+inherits = "release"
+panic = "unwind"
+
+# Delivery build for size comparisons: slower compile, smaller output.
+[profile.release-size]
+inherits = "release"
+opt-level = "s"
+lto = "fat"

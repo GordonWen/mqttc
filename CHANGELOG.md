@@ -1,0 +1,32 @@
+# 更新日志
+
+## v0.2.0 — 2026-11-20
+
+首个公开发布版本，定位为「简单轻便易用的 MQTT 调试客户端」。
+
+### 客户端
+
+- 多连接管理：新增 / 编辑 / 删除 / 切换，每条连接独立会话
+- MQTT 3.1.1 与 5.0；QoS 0/1/2、Clean Session、Keep Alive、连接超时、Last Will
+- TLS：系统根证书、自定义 CA、客户端证书 / 私钥、跳过校验
+- 订阅管理：`+` / `#` 通配符，按 QoS 订阅，点击订阅项筛选日志
+- 发布：文本 / JSON / Base64 / Hex 互转，JSON 美化，QoS 与 Retain
+- 定时发布（1–3600s）、发布预设、按主题/关键字/负载自动回复
+- 聊天式日志：搜索、类型筛选、显示格式切换、自动滚动、导出、清空
+- 每连接 200 条环形日志，只保留原始字节
+- 中英文界面；6 套皮肤（跟随系统 / 黑 / 白 / 蓝 / 绿 / 紫）
+- 免安装：配置、日志与可执行文件同目录，不写注册表、不写用户目录
+
+### 性能
+
+- iced 版工作集 28.8–31.2 MB，exe 5.83 MB（Windows x64，release）
+- 相比同作者早期 Slint 版（32–39 MB / 15.53 MB）内存约低 20%，体积约 37%
+- 空闲 CPU 接近 0%，活动场景（10 msg/s）最高 0.03%
+- 详见 [docs/BENCHMARK.md](docs/BENCHMARK.md)
+
+### 仓库与发布
+
+- 提供 iced（发布版）、egui、gpui 三套 UI 实现，共享 `mqttc-core`
+- Windows 由本地构建；Linux x64 与 macOS universal 由 GitHub Actions 构建
+- 便携包：Windows zip、Linux tar.gz、macOS `.app` zip
+- 不签名、不公证；macOS 首次打开需右键 → 打开

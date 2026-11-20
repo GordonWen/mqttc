@@ -1,0 +1,23 @@
+[package]
+name = "mqttc-egui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mqttc-egui"
+path = "src/main.rs"
+
+[dependencies]
+mqttc-core = { workspace = true }
+eframe = { version = "0.37", default-features = false, features = [
+    "glow",
+    "system_fonts",
+    "default_fonts",
+    "clipboard",
+    "links",
+    "x11",
+    "wayland",
+] }
+png = "0.18"

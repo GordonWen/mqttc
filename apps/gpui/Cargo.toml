@@ -1,0 +1,15 @@
+[package]
+name = "mqttc-gpui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mqttc-gpui"
+path = "src/main.rs"
+
+[dependencies]
+mqttc-core = { workspace = true }
+gpui = "0.2.2"
+unicode-segmentation = "1"

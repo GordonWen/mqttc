@@ -1,0 +1,16 @@
+[package]
+name = "mqttc-test-broker"
+description = "Reproducible local MQTT broker and fixture generator for benchmarks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mqttc-test-broker"
+path = "src/main.rs"
+
+[dependencies]
+rumqttd = "0.20"
+rumqttc = { workspace = true }
+serde_json = { workspace = true }

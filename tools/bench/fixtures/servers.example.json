@@ -1,0 +1,35 @@
+{
+  "_comment": "Copy to tools/bench/servers.json and fill in your own test brokers. servers.json is git-ignored and never included in reports or deliverable zips. Passwords are only read from this local file.",
+  "servers": [
+    {
+      "name": "tls-example",
+      "host": "broker.example.com",
+      "port": 8883,
+      "protocol": "5.0",
+      "tls": true,
+      "verify": true,
+      "ca": "",
+      "cert": "",
+      "key": "",
+      "username": "",
+      "password": "",
+      "test_topic": "mqttc/smoke/example",
+      "allow_publish": false
+    },
+    {
+      "name": "plain-auth-example",
+      "host": "broker.example.net",
+      "port": 1883,
+      "protocol": "3.1.1",
+      "tls": false,
+      "verify": false,
+      "ca": "",
+      "cert": "",
+      "key": "",
+      "username": "user",
+      "password": "secret",
+      "test_topic": "mqttc/smoke/example",
+      "allow_publish": false
+    }
+  ]
+}

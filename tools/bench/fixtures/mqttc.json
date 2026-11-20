@@ -1,0 +1,76 @@
+{
+  "active_id": "bench-local",
+  "log_format": "text",
+  "auto_scroll": true,
+  "show_advanced": false,
+  "log_filter": "",
+  "log_kind_filter": 0,
+  "skin": "black",
+  "language": "zh",
+  "connections": [
+    {
+      "id": "bench-local",
+      "name": "Local bench",
+      "host": "127.0.0.1",
+      "port": "1883",
+      "client_id": "",
+      "username": "",
+      "password": "",
+      "sub_topic": "mqttc/mvp/#",
+      "sub_qos": 0,
+      "pub_topic": "mqttc/mvp/hello",
+      "pub_payload": "hello from mqttc",
+      "pub_qos": 0,
+      "pub_retain": false,
+      "pub_format": "text",
+      "keep_alive": 60,
+      "clean_session": true,
+      "connect_timeout": 10,
+      "will_topic": "",
+      "will_payload": "",
+      "will_qos": 0,
+      "will_retain": false,
+      "ssl": false,
+      "ssl_verify": true,
+      "ssl_ca": "",
+      "ssl_cert": "",
+      "ssl_key": "",
+      "protocol": "3.1.1",
+      "timed_interval": 1,
+      "subscriptions": [
+        { "topic": "mqttc/mvp/#", "qos": 0 }
+      ],
+      "publish_presets": [
+        {
+          "name": "Hello",
+          "topic": "mqttc/mvp/hello",
+          "payload": "hello from mqttc",
+          "qos": 0,
+          "retain": false,
+          "format": "text"
+        },
+        {
+          "name": "JSON",
+          "topic": "mqttc/mvp/json",
+          "payload": "{\"seq\":0,\"name\":\"mqttc\"}",
+          "qos": 1,
+          "retain": false,
+          "format": "json"
+        }
+      ],
+      "auto_reply_rules": [
+        {
+          "enabled": true,
+          "match_topic": "mqttc/mvp/ping",
+          "payload_contains": "",
+          "reply_topic": "mqttc/mvp/pong",
+          "reply_payload": "pong",
+          "qos": 0,
+          "retain": false,
+          "format": "text"
+        }
+      ],
+      "auto_reply_echo": "skip"
+    }
+  ]
+}

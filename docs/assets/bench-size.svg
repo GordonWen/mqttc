@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="280" viewBox="0 0 680 280" role="img" aria-label="Executable size">
+  <rect width="680" height="280" fill="#ffffff"/>
+  <text x="24" y="30" font-family="Segoe UI, sans-serif" font-size="16" font-weight="600" fill="#111827">Executable size — release builds (strip symbols)</text>
+  <g font-family="Segoe UI, sans-serif" font-size="13" fill="#374151">
+    <text x="24" y="74">egui</text>
+    <rect x="110" y="58" width="230" height="24" rx="4" fill="#d97706"/>
+    <text x="350" y="75" font-weight="600">8.22 MB</text>
+
+    <text x="24" y="114">iced</text>
+    <rect x="110" y="98" width="163" height="24" rx="4" fill="#0284c7"/>
+    <text x="283" y="115" font-weight="600">5.83 MB</text>
+
+    <text x="24" y="154">gpui</text>
+    <rect x="110" y="138" width="263" height="24" rx="4" fill="#7c3aed"/>
+    <text x="383" y="155" font-weight="600">9.38 MB</text>
+
+    <text x="24" y="194">slint</text>
+    <rect x="110" y="178" width="435" height="24" rx="4" fill="#64748b"/>
+    <text x="555" y="195" font-weight="600">15.53 MB</text>
+  </g>
+  <g stroke="#cbd5e1" stroke-width="1">
+    <line x1="110" y1="214" x2="110" y2="222"/>
+    <line x1="390" y1="214" x2="390" y2="222"/>
+    <line x1="670" y1="214" x2="670" y2="222"/>
+  </g>
+  <g font-family="Segoe UI, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">
+    <text x="110" y="238">0</text>
+    <text x="390" y="238">10</text>
+    <text x="660" y="238">20 MB</text>
+    <text x="340" y="264">Scale: 1 MB = 28 px · Slint = official reference binary (MinGW build)</text>
+  </g>
+</svg>

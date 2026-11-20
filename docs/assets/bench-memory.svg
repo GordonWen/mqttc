@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="680" height="280" viewBox="0 0 680 280" role="img" aria-label="Working set after connecting with 200 logs">
+  <rect width="680" height="280" fill="#ffffff"/>
+  <text x="24" y="30" font-family="Segoe UI, sans-serif" font-size="16" font-weight="600" fill="#111827">Working set — S2 (200 retained messages, median of 3 runs)</text>
+  <g font-family="Segoe UI, sans-serif" font-size="13" fill="#374151">
+    <text x="24" y="74">egui</text>
+    <rect x="110" y="58" width="451" height="24" rx="4" fill="#d97706"/>
+    <text x="571" y="75" font-weight="600">107.9 MB</text>
+
+    <text x="24" y="114">iced</text>
+    <rect x="110" y="98" width="129" height="24" rx="4" fill="#0284c7"/>
+    <text x="249" y="115" font-weight="600">30.8 MB</text>
+
+    <text x="24" y="154">gpui</text>
+    <rect x="110" y="138" width="201" height="24" rx="4" fill="#7c3aed"/>
+    <text x="321" y="155" font-weight="600">48.1 MB</text>
+
+    <text x="24" y="194">slint</text>
+    <rect x="110" y="178" width="161" height="24" rx="4" fill="#64748b"/>
+    <text x="281" y="195" font-weight="600">38.4 MB</text>
+  </g>
+  <g stroke="#cbd5e1" stroke-width="1">
+    <line x1="110" y1="214" x2="110" y2="222"/>
+    <line x1="319" y1="214" x2="319" y2="222"/>
+    <line x1="528" y1="214" x2="528" y2="222"/>
+  </g>
+  <g font-family="Segoe UI, sans-serif" font-size="12" fill="#64748b" text-anchor="middle">
+    <text x="110" y="238">0</text>
+    <text x="319" y="238">50</text>
+    <text x="528" y="238">100 MB</text>
+    <text x="340" y="264">Scale: 1 MB ≈ 4.18 px · Slint = reference baseline</text>
+  </g>
+</svg>
