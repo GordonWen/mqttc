@@ -10,9 +10,9 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows 10/11 x64 | `mqttc-v0.2.2-windows-x64.zip` | 解压运行 `mqttc.exe` |
-| Linux x64 | `mqttc-v0.2.2-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
-| macOS 11+ | `mqttc-v0.2.2-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
+| Windows 10/11 x64 | `mqttc-v0.2.3-windows-x64.zip` | 解压运行 `mqttc.exe` |
+| Linux x64 | `mqttc-v0.2.3-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
+| macOS 11+ | `mqttc-v0.2.3-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
 
 配置 `mqttc.json` 与导出的 `logs/` 都在可执行文件同目录，不写注册表、不写用户目录，
 整个文件夹可以放在 U 盘里带走。
