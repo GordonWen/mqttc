@@ -51,6 +51,35 @@ pub fn render_payload(bytes: &[u8], format: PayloadFormat) -> String {
     }
 }
 
+/// Bytes rendered inline in a log bubble before it is collapsed behind "Open".
+pub fn preview_limit(format: PayloadFormat) -> usize {
+    match format {
+        // Hex / Base64 expand by ~2x, so show fewer source bytes inline.
+        PayloadFormat::Hex => 512,
+        PayloadFormat::Base64 => 768,
+        PayloadFormat::Text | PayloadFormat::Json => 1024,
+    }
+}
+
+/// Hard cap for the expanded detail view. Export still contains the full payload.
+pub const LOG_DETAIL_BYTES: usize = 16 * 1024;
+
+/// Render at most `limit` source bytes. Truncated JSON is shown as plain text
+/// instead of being parsed, and a trailing ellipsis marks the cut.
+pub fn preview_payload(bytes: &[u8], format: PayloadFormat, limit: usize) -> (String, bool) {
+    if bytes.len() <= limit {
+        return (render_payload(bytes, format), false);
+    }
+    let head = &bytes[..limit];
+    let text = match format {
+        PayloadFormat::Base64 => base64::engine::general_purpose::STANDARD.encode(head),
+        PayloadFormat::Hex => encode_hex(head),
+        // A truncated JSON document cannot be parsed; fall back to lossy text.
+        PayloadFormat::Text | PayloadFormat::Json => String::from_utf8_lossy(head).into_owned(),
+    };
+    (format!("{text}\n…"), true)
+}
+
 /// Pretty-print JSON in the payload box. Does not send anything.
 pub fn beautify_json(text: &str) -> Result<String, String> {
     let value: serde_json::Value = serde_json::from_str(text.trim()).map_err(|err| {
@@ -159,5 +188,35 @@ mod tests {
             render_payload(b"{\"a\":1}", PayloadFormat::Json),
             "{\n  \"a\": 1\n}"
         );
+    }
+
+    #[test]
+    fn preview_keeps_small_payloads_intact() {
+        let (text, cut) = preview_payload(b"hello", PayloadFormat::Text, 16);
+        assert!(!cut);
+        assert_eq!(text, "hello");
+    }
+
+    #[test]
+    fn preview_truncates_and_marks_both_binary_formats() {
+        let bytes = vec![0xAB; 64];
+        let (hex, cut) = preview_payload(&bytes, PayloadFormat::Hex, 4);
+        assert!(cut);
+        assert!(hex.starts_with("ABABABAB"));
+        assert!(hex.ends_with('…'));
+        let (b64, cut) = preview_payload(&bytes, PayloadFormat::Base64, 3);
+        assert!(cut);
+        assert_eq!(b64.chars().count(), 6); // 4 base64 chars + newline + ellipsis
+        assert!(b64.ends_with('…'));
+    }
+
+    #[test]
+    fn preview_does_not_parse_truncated_json() {
+        let bytes = br#"{"key":"value","list":[1,2,3]}"#;
+        let (text, cut) = preview_payload(bytes, PayloadFormat::Json, 10);
+        assert!(cut);
+        // Invalid fragment is shown verbatim (plus the ellipsis marker).
+        assert!(text.starts_with("{\"key\":\"va"));
+        assert!(text.ends_with('…'));
     }
 }

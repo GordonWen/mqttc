@@ -175,6 +175,9 @@ pub struct AppConfig {
     pub log_filter: String,
     #[serde(default)]
     pub log_kind_filter: i32,
+    /// Rows kept per connection. Clamped to `[LOG_LIMIT_MIN, LOG_LIMIT_MAX]`.
+    #[serde(default = "default_log_limit")]
+    pub log_limit: usize,
     #[serde(default = "default_skin")]
     pub skin: String,
     #[serde(default = "default_language")]
@@ -207,6 +210,10 @@ fn default_payload_format() -> String {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_log_limit() -> usize {
+    crate::model::MAX_LOGS
 }
 
 fn default_keep_alive() -> u16 {
@@ -284,6 +291,7 @@ impl Default for AppConfig {
             show_advanced: false,
             log_filter: String::new(),
             log_kind_filter: 0,
+            log_limit: default_log_limit(),
             skin: default_skin(),
             language: default_language(),
         }
@@ -384,6 +392,7 @@ pub fn load_from(path: &Path) -> Result<Option<AppConfig>, String> {
             &format!("Failed to parse config: {err}"),
         )
     })?;
+    config.log_limit = crate::model::clamp_log_limit(config.log_limit);
 
     if config.connections.is_empty() {
         if let Some(conn) = legacy_connection(&value) {

@@ -4,10 +4,12 @@
 //! widget messages onto runtime actions. The sidebar holds connection/settings
 //! pages; subscription, auto-reply and preset panels live in the session tabs.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::fmt;
 use std::time::{Duration, Instant};
 
+use iced::widget::text::Wrapping;
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_editor,
     text_input, Space,
@@ -153,6 +155,11 @@ pub enum Msg {
     Timed,
     GenId,
     SaveLogs,
+    SaveVisibleLogs,
+    TogglePause,
+    LogLimit(i32),
+    OpenLog(u64),
+    CloseLog,
     ClearLogs,
     Skin(i32),
     Language(i32),
@@ -206,24 +213,29 @@ pub enum SessionTab {
 
 // ---------------------------------------------------------------- options
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// A pick-list option. Labels are built per frame so switching language
+/// re-localizes every dropdown instead of freezing the startup strings.
+#[derive(Clone, PartialEq, Eq)]
 struct Opt {
     value: i32,
-    label: &'static str,
+    label: String,
 }
 
 impl fmt::Display for Opt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.label)
+        f.write_str(&self.label)
+    }
+}
+
+fn opt(value: i32, label: impl Into<String>) -> Opt {
+    Opt {
+        value,
+        label: label.into(),
     }
 }
 
 fn qos_opts() -> Vec<Opt> {
-    vec![
-        Opt { value: 0, label: "QoS 0" },
-        Opt { value: 1, label: "QoS 1" },
-        Opt { value: 2, label: "QoS 2" },
-    ]
+    vec![opt(0, "QoS 0"), opt(1, "QoS 1"), opt(2, "QoS 2")]
 }
 
 fn format_opts() -> Vec<Opt> {
@@ -236,65 +248,67 @@ fn format_opts() -> Vec<Opt> {
                 PayloadFormat::Base64 => "Base64",
                 PayloadFormat::Hex => "Hex",
             };
-            Opt { value: f.to_index(), label }
+            opt(f.to_index(), label)
         })
         .collect()
 }
 
 fn proto_opts() -> Vec<Opt> {
-    vec![
-        Opt { value: 0, label: "3.1.1" },
-        Opt { value: 1, label: "5.0" },
-    ]
+    vec![opt(0, "3.1.1"), opt(1, "5.0")]
 }
 
 fn skin_opts() -> Vec<Opt> {
     Skin::ALL
         .iter()
-        .map(|s| Opt {
-            value: s.to_index(),
-            label: match s {
-                Skin::System => "跟随系统",
-                Skin::Black => "黑",
-                Skin::White => "白",
-                Skin::Blue => "蓝",
-                Skin::Green => "绿",
-                Skin::Purple => "紫",
-            },
+        .map(|s| {
+            let label = match s {
+                Skin::System => t("跟随系统", "System"),
+                Skin::Black => t("黑", "Black"),
+                Skin::White => t("白", "White"),
+                Skin::Blue => t("蓝", "Blue"),
+                Skin::Green => t("绿", "Green"),
+                Skin::Purple => t("紫", "Purple"),
+            };
+            opt(s.to_index(), label)
         })
         .collect()
 }
 
+/// Native language names stay untranslated on purpose.
 fn lang_opts() -> Vec<Opt> {
-    vec![
-        Opt { value: 0, label: "中文" },
-        Opt { value: 1, label: "English" },
-    ]
+    vec![opt(0, "中文"), opt(1, "English")]
 }
 
 fn kind_opts() -> Vec<Opt> {
     vec![
-        Opt { value: 0, label: "全部" },
-        Opt { value: 1, label: "收" },
-        Opt { value: 2, label: "发" },
-        Opt { value: 3, label: "系统" },
-        Opt { value: 4, label: "错误" },
+        opt(0, t("全部", "All")),
+        opt(1, t("收", "Recv")),
+        opt(2, t("发", "Send")),
+        opt(3, t("系统", "System")),
+        opt(4, t("错误", "Errors")),
     ]
 }
 
 fn echo_opts() -> Vec<Opt> {
     vec![
-        Opt { value: 0, label: "显示" },
-        Opt { value: 1, label: "隐藏" },
-        Opt { value: 2, label: "跳过" },
+        opt(0, t("显示", "Show")),
+        opt(1, t("隐藏", "Hide")),
+        opt(2, t("跳过", "Skip")),
     ]
+}
+
+fn log_limit_opts() -> Vec<Opt> {
+    vec![opt(200, "200"), opt(500, "500"), opt(1000, "1000"), opt(2000, "2000")]
 }
 
 fn pick<'a, F>(c: &Colors, options: &[Opt], current: i32, on: F) -> El<'a>
 where
     F: Fn(i32) -> Msg + 'a,
 {
-    let selected = options.iter().copied().find(|o| o.value == current);
+    let selected = options
+        .iter()
+        .find(|o| o.value == current)
+        .cloned();
     pick_list(options.to_vec(), selected, move |o: Opt| on(o.value))
         .text_size(13.0)
         .padding([6, 8])
@@ -322,6 +336,11 @@ pub struct App {
     bench: Option<Bench>,
     /// UI-side debounce; set on every edit so we only tick briefly after typing.
     dirty_at: Option<Instant>,
+    /// Inline previews keyed by `LogRecord::seq` (format tag, rendered text).
+    /// Cleared on connection switch / clear / format change.
+    preview_cache: RefCell<HashMap<u64, (i32, String)>>,
+    /// Expanded row shown instead of the log list. Cleared on tab / connection change.
+    detail_seq: Option<u64>,
 }
 
 impl App {
@@ -348,6 +367,8 @@ impl App {
             first_frame_ms: Cell::new(None),
             bench,
             dirty_at: None,
+            preview_cache: RefCell::new(HashMap::new()),
+            detail_seq: None,
         }
     }
 
@@ -394,18 +415,24 @@ impl App {
                 if self.rt.select_connection(&id) {
                     self.page = 1;
                     self.session_tab = SessionTab::Logs;
+                    self.detail_seq = None;
+                    self.preview_cache.borrow_mut().clear();
                     self.reload_form();
                 }
             }
             Msg::New => {
                 self.rt.new_connection();
                 self.page = 0;
+                self.detail_seq = None;
+                self.preview_cache.borrow_mut().clear();
                 self.rt.persist();
                 self.reload_form();
             }
             Msg::Delete(id) => {
                 self.rt.delete_connection(&id);
                 self.page = 0;
+                self.detail_seq = None;
+                self.preview_cache.borrow_mut().clear();
                 self.rt.persist();
                 self.reload_form();
             }
@@ -416,12 +443,16 @@ impl App {
                 }
                 self.page = p;
             }
-            Msg::SessionTab(tab) => self.session_tab = tab,
+            Msg::SessionTab(tab) => {
+                self.session_tab = tab;
+                self.detail_seq = None;
+            }
             Msg::Connect => {
                 self.rt.apply_form();
                 if self.rt.connect() {
                     self.page = 1;
                     self.session_tab = SessionTab::Logs;
+                    self.detail_seq = None;
                 }
             }
             Msg::Disconnect => self.rt.disconnect(),
@@ -451,7 +482,25 @@ impl App {
             Msg::SaveLogs => {
                 let _ = self.rt.save_logs();
             }
-            Msg::ClearLogs => self.rt.clear_logs(),
+            Msg::SaveVisibleLogs => {
+                let _ = self.rt.save_visible_logs();
+            }
+            Msg::TogglePause => {
+                self.rt.toggle_logs_pause();
+            }
+            Msg::LogLimit(value) => {
+                if value > 0 {
+                    self.rt.set_log_limit(value as usize);
+                    self.preview_cache.borrow_mut().clear();
+                }
+            }
+            Msg::OpenLog(seq) => self.detail_seq = Some(seq),
+            Msg::CloseLog => self.detail_seq = None,
+            Msg::ClearLogs => {
+                self.detail_seq = None;
+                self.preview_cache.borrow_mut().clear();
+                self.rt.clear_logs();
+            }
             Msg::Skin(choice) => self.rt.set_skin_choice(choice),
             Msg::Language(index) => self.rt.set_language(index),
             Msg::AddRule => {
@@ -539,7 +588,10 @@ impl App {
             }
             Msg::LogFilter(value) => self.rt.set_log_filter(value),
             Msg::LogKind(value) => self.rt.set_log_kind_filter(value),
-            Msg::LogFormat(value) => self.rt.set_log_format(value),
+            Msg::LogFormat(value) => {
+                self.rt.set_log_format(value);
+                self.preview_cache.borrow_mut().clear();
+            }
             Msg::AutoScroll(on) => self.rt.set_auto_scroll(on),
             Msg::Field(field, value) => {
                 field.set(&mut self.rt.form, value);
@@ -838,7 +890,7 @@ impl App {
                 column![
                     text(t("Clean session", "Clean session")).size(11.0).color(c.text_faint),
                     checkbox(f.clean_session)
-                        .size(16.0)
+                        .size(15.0)
                         .style(c.checkbox_style())
                         .on_toggle(|v| Msg::Flag(Flag::CleanSession, v)),
                 ]
@@ -864,12 +916,14 @@ impl App {
             row![
                 checkbox(f.ssl)
                     .label(t("启用 SSL", "Enable SSL"))
-                    .size(16.0)
+                    .size(15.0)
+                    .text_size(12.0)
                     .style(c.checkbox_style())
                     .on_toggle(|v| Msg::Flag(Flag::Ssl, v)),
                 checkbox(f.ssl_verify)
                     .label(t("校验服务器证书", "Verify certificate"))
-                    .size(16.0)
+                    .size(15.0)
+                    .text_size(12.0)
                     .style(c.checkbox_style())
                     .on_toggle(|v| Msg::Flag(Flag::SslVerify, v)),
             ]
@@ -898,7 +952,8 @@ impl App {
             .spacing(10),
             checkbox(f.will_retain)
                 .label(t("Retain", "Retain"))
-                .size(16.0)
+                .size(15.0)
+                .text_size(12.0)
                 .style(c.checkbox_style())
                 .on_toggle(|v| Msg::Flag(Flag::WillRetain, v)),
         ]
@@ -925,18 +980,31 @@ impl App {
         .spacing(10)
         .align_y(Alignment::Center);
 
-        scrollable(
-            column![general, advanced, ssl, will, actions]
-                .spacing(14)
-                .padding(14),
+        container(
+            scrollable(
+                column![general, advanced, ssl, will, actions]
+                    .spacing(14)
+                    .padding(14),
+            )
+            .height(Length::Fill),
         )
+        .width(Length::Fill)
         .height(Length::Fill)
+        .style(c.card())
         .into()
     }
 
     fn page_session(&self, c: &Colors) -> El<'_> {
         let Some(conn) = self.rt.active() else {
-            return self.hint(c, t("还没有连接，请先新建", "No connection yet — create one first"));
+            return container(self.hint(
+                c,
+                t("还没有连接，请先新建", "No connection yet — create one first"),
+            ))
+            .padding(16)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(c.card())
+            .into();
         };
         let status = self.rt.status();
         let connected = status == ConnStatus::Connected;
@@ -997,10 +1065,16 @@ impl App {
         .spacing(4);
 
         let body: El<'_> = match self.session_tab {
-            SessionTab::Logs => column![self.logs_card(c), self.publish_card(c)]
-                .spacing(10)
-                .height(Length::Fill)
-                .into(),
+            SessionTab::Logs => {
+                if self.detail_seq.is_some() {
+                    self.log_detail(c)
+                } else {
+                    column![self.logs_card(c), self.publish_card(c)]
+                        .spacing(10)
+                        .height(Length::Fill)
+                        .into()
+                }
+            }
             SessionTab::Subs => self.subs_panel(c),
             SessionTab::Rules => self.page_rules(c),
             SessionTab::Presets => self.page_presets(c),
@@ -1120,12 +1194,25 @@ impl App {
 
     fn logs_card(&self, c: &Colors) -> El<'_> {
         let prefs = &self.rt.prefs;
+        let paused = self.rt.logs_paused();
+        let pause_label: El<'_> = if paused {
+            text(t(
+                &format!("已暂停 · 丢弃 {} 条", self.rt.paused_dropped()),
+                &format!("Paused · {} dropped", self.rt.paused_dropped()),
+            ))
+            .size(11.0)
+            .color(c.err_text)
+            .into()
+        } else {
+            Space::new().width(0).into()
+        };
+
         let toolbar = row![
             text_input(
                 l("搜索 Topic / Payload", "Search topic / payload"),
                 &prefs.log_filter
             )
-            .size(12.0)
+            .size(13.0)
             .padding([5, 7])
             .width(180)
             .style(c.input_style())
@@ -1139,10 +1226,28 @@ impl App {
                 .style(c.checkbox_style())
                 .on_toggle(Msg::AutoScroll),
             Space::new().width(Length::Fill),
+            pause_label,
+            button(text(if paused {
+                t("继续", "Resume")
+            } else {
+                t("暂停", "Pause")
+            })
+            .size(12.0))
+            .padding([5, 10])
+            .style(c.button_kind(if paused {
+                ButtonKind::Selected
+            } else {
+                ButtonKind::Ghost
+            }))
+            .on_press(Msg::TogglePause),
             button(text(t("保存", "Save")).size(12.0))
                 .padding([5, 10])
                 .style(c.ghost_button())
                 .on_press(Msg::SaveLogs),
+            button(text(t("存筛选", "Save view")).size(12.0))
+                .padding([5, 10])
+                .style(c.ghost_button())
+                .on_press(Msg::SaveVisibleLogs),
             button(text(t("清空", "Clear")).size(12.0))
                 .padding([5, 10])
                 .style(c.ghost_button())
@@ -1171,7 +1276,7 @@ impl App {
                 scrollable(list)
                     .height(Length::Fill)
                     .anchor_bottom()
-                    .auto_scroll(prefs.auto_scroll),
+                    .auto_scroll(prefs.auto_scroll && !paused),
             ]
             .spacing(6)
             .height(Length::Fill),
@@ -1182,6 +1287,30 @@ impl App {
         .into()
     }
 
+    /// Inline preview with a per-row cache; JSON parsing and hex encoding are
+    /// far too expensive to repeat for 200 bubbles on every 100 ms tick.
+    fn preview_body(&self, log: &LogRecord, fmt: PayloadFormat) -> (String, bool) {
+        let fmt_index = fmt.to_index();
+        if let Some((cached_fmt, body)) = self.preview_cache.borrow().get(&log.seq) {
+            if *cached_fmt == fmt_index {
+                let truncated = log.is_payload_kind()
+                    && log.payload.len() > payload::preview_limit(fmt);
+                return (body.clone(), truncated);
+            }
+        }
+        let (body, truncated) = if log.is_payload_kind() {
+            payload::preview_payload(&log.payload, fmt, payload::preview_limit(fmt))
+        } else {
+            (String::from_utf8_lossy(&log.payload).into_owned(), false)
+        };
+        let mut cache = self.preview_cache.borrow_mut();
+        if cache.len() >= 1024 {
+            cache.clear();
+        }
+        cache.insert(log.seq, (fmt_index, body.clone()));
+        (body, truncated)
+    }
+
     fn log_bubble(&self, c: &Colors, log: &LogRecord) -> El<'_> {
         let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
         let (bg, topic_color, body_color, right) = match log.kind.as_str() {
@@ -1190,20 +1319,37 @@ impl App {
             "ERR" => (c.err_bg, c.err_label, c.err_text, false),
             _ => (c.sys_bg, c.sys_text, c.sys_text, false),
         };
-        let body = if log.is_payload_kind() {
-            payload::render_payload(&log.payload, fmt)
-        } else {
-            String::from_utf8_lossy(&log.payload).into_owned()
-        };
+        let (body, truncated) = self.preview_body(log, fmt);
         let topic_line = if log.topic.is_empty() {
             format!("{} · {}", log.time, log.kind)
         } else {
             format!("{} · {} · {}", log.time, log.kind, log.topic)
         };
+        let mut header = row![text(topic_line)
+            .size(10.5)
+            .color(topic_color)
+            .wrapping(Wrapping::WordOrGlyph)]
+        .spacing(6)
+        .align_y(Alignment::Center);
+        if truncated {
+            header = header
+                .push(Space::new().width(Length::Fill))
+                .push(text(human_bytes(log.payload.len())).size(10.0).color(c.text_faint))
+                .push(
+                    button(text(t("展开", "Open")).size(10.0))
+                        .padding([1, 6])
+                        .style(c.ghost_button())
+                        .on_press(Msg::OpenLog(log.seq)),
+                );
+        }
         let bubble = container(
             column![
-                text(topic_line).size(10.5).color(topic_color),
-                text(body).size(12.5).font(mono_font()).color(body_color),
+                header,
+                text(body)
+                    .size(12.5)
+                    .font(mono_font())
+                    .color(body_color)
+                    .wrapping(Wrapping::WordOrGlyph),
             ]
             .spacing(2),
         )
@@ -1222,6 +1368,88 @@ impl App {
         row(row_children).width(Length::Fill).into()
     }
 
+    fn detail_back(&self, c: &Colors) -> El<'static> {
+        button(text(t("← 返回日志", "← Back to logs")).size(12.0))
+            .padding([4, 8])
+            .style(c.ghost_button())
+            .on_press(Msg::CloseLog)
+            .into()
+    }
+
+    /// Full-ish payload view. Huge payloads are capped here too; `Save` exports
+    /// the complete bytes, so the cap only affects on-screen text shaping.
+    fn log_detail(&self, c: &Colors) -> El<'_> {
+        let seq = self.detail_seq.unwrap_or(0);
+        let Some(log) = self.rt.active_log(seq) else {
+            return container(
+                column![
+                    self.detail_back(c),
+                    self.hint(
+                        c,
+                        t("该条日志已滚出缓冲区", "This entry is no longer buffered").to_string()
+                    ),
+                ]
+                .spacing(10),
+            )
+            .padding(12)
+            .height(Length::Fill)
+            .style(c.card())
+            .into();
+        };
+
+        let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
+        let (body, cut) = if log.is_payload_kind() {
+            payload::preview_payload(&log.payload, fmt, payload::LOG_DETAIL_BYTES)
+        } else {
+            (String::from_utf8_lossy(&log.payload).into_owned(), false)
+        };
+        let header = row![
+            self.detail_back(c),
+            text(format!("{} · {}", log.time, log.kind))
+                .size(11.0)
+                .color(c.text_faint),
+            text(log.topic.as_str()).size(12.0).color(c.text_body),
+            Space::new().width(Length::Fill),
+            text(human_bytes(log.payload.len()))
+                .size(11.0)
+                .color(c.text_faint),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let mut panel = column![
+            header,
+            scrollable(
+                container(
+                    text(body)
+                        .size(12.5)
+                        .font(mono_font())
+                        .color(c.text_body)
+                        .wrapping(Wrapping::WordOrGlyph),
+                )
+                .padding([2, 4])
+            )
+            .height(Length::Fill),
+        ]
+        .spacing(8)
+        .height(Length::Fill);
+        if cut {
+            panel = panel.push(self.hint(
+                c,
+                t(
+                    "内容较大，仅显示前 16 KB；完整内容可用“保存”导出",
+                    "Large payload: showing the first 16 KB; use Save to export the full log",
+                )
+                .to_string(),
+            ));
+        }
+        container(panel)
+            .padding(12)
+            .height(Length::Fill)
+            .style(c.card())
+            .into()
+    }
+
     fn publish_card(&self, c: &Colors) -> El<'_> {
         let f = &self.rt.form;
         let timed = self.rt.timed_running();
@@ -1233,7 +1461,7 @@ impl App {
             .enumerate()
             .fold(row![].spacing(4), |acc, (i, p)| {
                 acc.push(
-                    button(text(p.name.as_str()).size(11.0))
+                    button(text(p.name.as_str()).size(12.0))
                         .padding([4, 8])
                         .style(c.ghost_button())
                         .on_press(Msg::PublishPreset(i)),
@@ -1242,7 +1470,7 @@ impl App {
 
         let topic_row = row![
             text_input("mqttc/mvp/hello", &f.pub_topic)
-                .size(12.0)
+                .size(13.0)
                 .padding([5, 7])
                 .width(Length::Fill)
                 .style(c.input_style())
@@ -1255,7 +1483,7 @@ impl App {
                 .style(c.checkbox_style())
                 .on_toggle(|v| Msg::Flag(Flag::PubRetain, v)),
             pick(c, &format_opts(), f.pub_format, |v| Msg::Num(Num::PubFormat, v)),
-            button(text(t("美化", "Pretty")).size(11.0))
+            button(text(t("美化", "Pretty")).size(12.0))
                 .padding([4, 8])
                 .style(c.ghost_button())
                 .on_press(Msg::Format),
@@ -1265,7 +1493,7 @@ impl App {
 
         let timed_row = row![
             text_input("5", &f.timed_interval)
-                .size(12.0)
+                .size(13.0)
                 .padding([5, 7])
                 .width(70)
                 .style(c.input_style())
@@ -1347,6 +1575,37 @@ impl App {
                     )
                 ),
                 Space::new().height(8),
+                self.section(c, &t("日志", "Logs")),
+                row![
+                    text(t("历史上限", "History limit"))
+                        .size(13.0)
+                        .color(c.text_body),
+                    pick(
+                        c,
+                        &log_limit_opts(),
+                        self.rt.config.log_limit as i32,
+                        Msg::LogLimit
+                    ),
+                    self.hint(
+                        c,
+                        t(
+                            "每条连接单独计数；上限越高，列表重绘越慢",
+                            "Counted per connection; a larger limit redraws more slowly"
+                        )
+                        .to_string()
+                    ),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+                self.hint(
+                    c,
+                    t(
+                        "大报文在气泡内自动截断，点“展开”查看；单连接原始数据另有 16 MB 内存上限",
+                        "Large payloads are truncated inline — use Open to expand; raw data is capped at 16 MB per connection"
+                    )
+                    .to_string()
+                ),
+                Space::new().height(8),
                 self.section(c, &t("配置文件", "Configuration")),
                 self.hint(
                     c,
@@ -1359,6 +1618,8 @@ impl App {
             .spacing(12)
             .padding(14),
         )
+        .width(Length::Fill)
+        .height(Length::Fill)
         .style(c.card())
         .into()
     }
@@ -1377,7 +1638,7 @@ impl App {
                             .on_toggle(move |v| Msg::RuleEnabled(index, v)),
                         text(t("匹配 Topic", "Match topic")).size(11.0).color(c.text_faint),
                         text_input("mqttc/in/#", &rule.match_topic)
-                            .size(12.0)
+                            .size(13.0)
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
@@ -1392,14 +1653,14 @@ impl App {
                     row![
                         text(t("包含文本", "Contains")).size(11.0).color(c.text_faint),
                         text_input("", &rule.payload_contains)
-                            .size(12.0)
+                            .size(13.0)
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
                             .on_input(move |v| Msg::RuleText(index, RuleTextField::Contains, v)),
                         text(t("回复 Topic", "Reply topic")).size(11.0).color(c.text_faint),
                         text_input("", &rule.reply_topic)
-                            .size(12.0)
+                            .size(13.0)
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
@@ -1410,7 +1671,7 @@ impl App {
                     row![
                         text(t("回复内容", "Reply payload")).size(11.0).color(c.text_faint),
                         text_input("", &rule.reply_payload)
-                            .size(12.0)
+                            .size(13.0)
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
@@ -1479,13 +1740,13 @@ impl App {
                 column![
                     row![
                         text_input(l("名称", "Name"), &preset.name)
-                            .size(12.0)
+                            .size(13.0)
                             .padding([5, 7])
                             .width(140)
                             .style(c.input_style())
                             .on_input(move |v| Msg::PresetText(index, PresetTextField::Name, v)),
                         text_input("mqttc/mvp/hello", &preset.topic)
-                            .size(12.0)
+                            .size(13.0)
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
@@ -1498,7 +1759,7 @@ impl App {
                             .style(c.checkbox_style())
                             .on_toggle(move |v| Msg::PresetRetain(index, v)),
                         pick(c, &format_opts(), preset.format, move |v| Msg::PresetFormat(index, v)),
-                        button(text(t("发送", "Send")).size(11.0))
+                        button(text(t("发送", "Send")).size(12.0))
                             .padding([4, 8])
                             .style(c.primary_button())
                             .on_press(Msg::PublishPreset(index)),
@@ -1510,7 +1771,7 @@ impl App {
                     .spacing(5)
                     .align_y(Alignment::Center),
                     text_input(l("内容", "Payload"), &preset.payload)
-                        .size(12.0)
+                        .size(13.0)
                         .padding([5, 7])
                         .width(Length::Fill)
                         .style(c.input_style())
@@ -1584,8 +1845,20 @@ impl App {
             .spacing(8)
             .padding(16),
         )
+        .width(Length::Fill)
+        .height(Length::Fill)
         .style(c.card())
         .into()
+    }
+}
+
+fn human_bytes(size: usize) -> String {
+    if size < 1024 {
+        format!("{size} B")
+    } else if size < 1024 * 1024 {
+        format!("{:.1} KB", size as f64 / 1024.0)
+    } else {
+        format!("{:.2} MB", size as f64 / (1024.0 * 1024.0))
     }
 }
 
@@ -1663,6 +1936,65 @@ mod tests {
             SessionTab::Presets,
         ] {
             app.session_tab = tab;
+            let _page = app.view();
+        }
+    }
+
+    /// Pick-list labels are rebuilt from the active language, so switching
+    /// language must not leave "全部 / 黑" frozen in the dropdowns.
+    #[test]
+    fn option_labels_follow_language() {
+        use mqttc_core::i18n::{set_lang, Lang};
+
+        set_lang(Lang::Zh);
+        assert_eq!(skin_opts()[1].label, "黑");
+        assert_eq!(kind_opts()[0].label, "全部");
+        assert_eq!(echo_opts()[0].label, "显示");
+
+        set_lang(Lang::En);
+        assert_eq!(skin_opts()[1].label, "Black");
+        assert_eq!(kind_opts()[0].label, "All");
+        assert_eq!(kind_opts()[4].label, "Errors");
+        assert_eq!(echo_opts()[0].label, "Show");
+
+        set_lang(Lang::Zh);
+    }
+
+    /// Exercise the truncation path, the expanded detail panel, and the paused
+    /// toolbar state without needing a broker.
+    #[test]
+    fn big_payload_detail_and_pause_build() {
+        let mut app = App::new();
+        let id = app.rt.active_id().unwrap();
+        app.rt
+            .push_log(&id, "RECV", "demo/large", vec![b'x'; 4096]);
+        app.rt.push_log(&id, "SYS", "", b"system".to_vec());
+        app.page = 1;
+        app.session_tab = SessionTab::Logs;
+
+        {
+            let _page = app.view();
+        }
+        let seq = app.rt.visible_logs().last().unwrap().seq;
+
+        app.detail_seq = Some(seq);
+        {
+            let _page = app.view();
+        }
+
+        // A row that was evicted / belongs to another connection.
+        app.detail_seq = Some(u64::MAX);
+        {
+            let _page = app.view();
+        }
+
+        app.detail_seq = None;
+        app.rt.toggle_logs_pause();
+        {
+            let _page = app.view();
+        }
+        app.rt.toggle_logs_pause();
+        {
             let _page = app.view();
         }
     }

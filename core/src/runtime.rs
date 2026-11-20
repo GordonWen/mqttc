@@ -22,7 +22,8 @@ use crate::form::FormState;
 use crate::i18n::{self, Lang};
 use crate::logs::LogStore;
 use crate::model::{
-    default_client_id, parse_timed_interval, ConnStatus, LogRecord, PayloadFormat, Skin,
+    clamp_log_limit, default_client_id, parse_timed_interval, ConnStatus, LogRecord,
+    PayloadFormat, Skin,
 };
 use crate::mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, UiEvent};
 use crate::payload;
@@ -112,6 +113,10 @@ pub struct ConnRuntime {
     pub active_sub_topic: String,
     /// Last auto reply used to detect own echo. Manual / preset / timed publish leave this alone.
     pub last_auto_reply: Option<(String, Vec<u8>)>,
+    /// Transient "freeze the log list" switch. SYS/ERR rows are still recorded.
+    pub logs_paused: bool,
+    /// Data rows dropped while paused, shown in the UI and reported on resume.
+    pub paused_dropped: u64,
 }
 
 impl Default for ConnRuntime {
@@ -130,6 +135,8 @@ impl ConnRuntime {
             timed_running: false,
             active_sub_topic: String::new(),
             last_auto_reply: None,
+            logs_paused: false,
+            paused_dropped: 0,
         }
     }
 }
@@ -177,6 +184,7 @@ impl AppRuntime {
         wake: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> Self {
         let mut config = config.unwrap_or_default();
+        config.log_limit = clamp_log_limit(config.log_limit);
 
         // Language first: `local_broker_name` is localized.
         i18n::set_lang(Lang::from_key(&config.language));
@@ -261,9 +269,12 @@ impl AppRuntime {
     }
 
     pub fn runtime_mut(&mut self, id: &str) -> &mut ConnRuntime {
-        self.runtimes
-            .entry(id.to_string())
-            .or_insert_with(ConnRuntime::new)
+        let limit = self.config.log_limit;
+        self.runtimes.entry(id.to_string()).or_insert_with(|| {
+            let mut runtime = ConnRuntime::new();
+            runtime.logs.set_limit(limit);
+            runtime
+        })
     }
 
     pub fn status_of(&self, id: &str) -> ConnStatus {
@@ -1167,7 +1178,73 @@ impl AppRuntime {
     // ---------------------------------------------------------------- logs
 
     pub fn push_log(&mut self, conn_id: &str, kind: &str, topic: &str, payload: Vec<u8>) {
-        self.runtime_mut(conn_id).logs.push(kind, topic, payload);
+        let runtime = self.runtime_mut(conn_id);
+        if runtime.logs_paused && (kind == "RECV" || kind == "SEND") {
+            runtime.paused_dropped = runtime.paused_dropped.saturating_add(1);
+            return;
+        }
+        runtime.logs.push(kind, topic, payload);
+    }
+
+    /// Whether the active connection is freezing data rows. Transient (not persisted).
+    pub fn logs_paused(&self) -> bool {
+        self.active_id()
+            .and_then(|id| self.runtimes.get(&id).map(|rt| rt.logs_paused))
+            .unwrap_or(false)
+    }
+
+    pub fn paused_dropped(&self) -> u64 {
+        self.active_id()
+            .and_then(|id| self.runtimes.get(&id).map(|rt| rt.paused_dropped))
+            .unwrap_or(0)
+    }
+
+    /// Freeze / resume RECV+SEND capture. SYS and ERR rows are always recorded.
+    pub fn toggle_logs_pause(&mut self) -> bool {
+        let Some(id) = self.active_id() else { return false };
+        let (paused, dropped) = {
+            let runtime = self.runtime_mut(&id);
+            runtime.logs_paused = !runtime.logs_paused;
+            let dropped = runtime.paused_dropped;
+            if !runtime.logs_paused {
+                runtime.paused_dropped = 0;
+            }
+            (runtime.logs_paused, dropped)
+        };
+        let message = if paused {
+            i18n::t(
+                "日志已暂停：数据报文不再记录，连接与自动回复不受影响",
+                "Log capture paused: data messages are dropped; connection and auto reply keep running",
+            )
+        } else if dropped > 0 {
+            i18n::t(
+                &format!("日志已恢复，暂停期间丢弃 {dropped} 条"),
+                &format!("Log capture resumed; {dropped} messages were dropped while paused"),
+            )
+        } else {
+            i18n::t("日志已恢复", "Log capture resumed")
+        };
+        self.push_log(&id, "SYS", "", message.into_bytes());
+        paused
+    }
+
+    /// Apply a new row cap to every live connection and persist the choice.
+    pub fn set_log_limit(&mut self, limit: usize) {
+        let limit = clamp_log_limit(limit);
+        if self.config.log_limit == limit {
+            return;
+        }
+        self.config.log_limit = limit;
+        for runtime in self.runtimes.values_mut() {
+            runtime.logs.set_limit(limit);
+        }
+        self.persist();
+    }
+
+    /// One row from the active connection, by its stable sequence number.
+    pub fn active_log(&self, seq: u64) -> Option<&LogRecord> {
+        let id = self.active_id()?;
+        self.runtimes.get(&id)?.logs.find(seq)
     }
 
     fn push_log_active(&mut self, kind: &str, topic: &str, payload: Vec<u8>) {
@@ -1200,22 +1277,43 @@ impl AppRuntime {
         }
     }
 
+    /// Save every buffered row of the active connection.
     pub fn save_logs(&mut self) -> Result<PathBuf, String> {
+        self.save_logs_scoped(false)
+    }
+
+    /// Save only the rows that pass the current keyword / kind / topic filters.
+    pub fn save_visible_logs(&mut self) -> Result<PathBuf, String> {
+        self.save_logs_scoped(true)
+    }
+
+    fn save_logs_scoped(&mut self, only_visible: bool) -> Result<PathBuf, String> {
         let Some(id) = self.active_id() else {
             return Err(i18n::t("当前没有可保存的日志", "No logs to save"));
         };
-        let logs = self
-            .runtimes
-            .get(&id)
-            .map(|rt| rt.logs.to_vec())
-            .unwrap_or_default();
+        let name = self.active().map(|conn| conn.name.clone()).unwrap_or_default();
+        let logs: Vec<LogRecord> = if only_visible {
+            self.visible_logs().into_iter().cloned().collect()
+        } else {
+            self.runtimes
+                .get(&id)
+                .map(|rt| rt.logs.to_vec())
+                .unwrap_or_default()
+        };
         if logs.is_empty() {
-            let err = i18n::t("当前没有可保存的日志", "No logs to save");
+            let err = if only_visible {
+                i18n::t(
+                    "当前筛选没有日志，清空搜索或切换筛选后再试",
+                    "No logs match the filter; clear the search or switch filters",
+                )
+            } else {
+                i18n::t("当前没有可保存的日志", "No logs to save")
+            };
             self.push_log(&id, "ERR", "", err.clone().into_bytes());
             return Err(err);
         }
         let format = PayloadFormat::from_index(self.prefs.log_format);
-        match export::save_logs_to_file(&logs, format) {
+        match export::save_logs_to_file_named(&logs, format, &name) {
             Ok(path) => {
                 self.push_log(
                     &id,
@@ -1407,5 +1505,64 @@ mod tests {
     fn save_logs_requires_entries() {
         let mut rt = runtime_with_conn();
         assert!(rt.save_logs().is_err());
+        // The failed attempt appended an ERR row; clear it before checking the
+        // filtered export path (otherwise that row is visible and gets saved).
+        rt.clear_logs();
+        assert!(rt.save_visible_logs().is_err());
+    }
+
+    #[test]
+    fn pause_drops_data_rows_but_keeps_system_rows() {
+        let mut rt = runtime_with_conn();
+        let id = rt.active_id().unwrap();
+        assert!(!rt.logs_paused());
+
+        assert!(rt.toggle_logs_pause());
+        assert!(rt.logs_paused());
+        rt.push_log(&id, "RECV", "a/b", b"recv".to_vec());
+        rt.push_log(&id, "SEND", "a/b", b"send".to_vec());
+        rt.push_log(&id, "SYS", "", b"system".to_vec());
+        assert_eq!(rt.paused_dropped(), 2);
+        assert!(rt
+            .visible_logs()
+            .iter()
+            .all(|log| log.kind == "SYS"));
+
+        assert!(!rt.toggle_logs_pause());
+        assert!(!rt.logs_paused());
+        assert_eq!(rt.paused_dropped(), 0);
+        rt.push_log(&id, "RECV", "a/b", b"after".to_vec());
+        assert_eq!(
+            rt.visible_logs().iter().filter(|log| log.kind == "RECV").count(),
+            1
+        );
+    }
+
+    #[test]
+    fn log_limit_resizes_existing_buffers() {
+        let mut rt = runtime_with_conn();
+        let id = rt.active_id().unwrap();
+        for i in 0..300 {
+            rt.push_log(&id, "SYS", "", format!("{i}").into_bytes());
+        }
+        assert_eq!(rt.visible_logs().len(), crate::model::MAX_LOGS);
+        rt.set_log_limit(100);
+        assert_eq!(rt.config.log_limit, 100);
+        assert_eq!(rt.visible_logs().len(), 100);
+        assert_eq!(
+            rt.visible_logs().last().unwrap().payload.as_ref(),
+            b"299"
+        );
+    }
+
+    #[test]
+    fn active_log_lookup_is_scoped_to_the_active_connection() {
+        let mut rt = runtime_with_conn();
+        let first = rt.active_id().unwrap();
+        rt.push_log(&first, "RECV", "a", b"one".to_vec());
+        let seq = rt.visible_logs()[0].seq;
+        assert_eq!(rt.active_log(seq).unwrap().topic, "a");
+        rt.new_connection();
+        assert!(rt.active_log(seq).is_none());
     }
 }

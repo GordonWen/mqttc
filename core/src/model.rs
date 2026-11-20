@@ -8,8 +8,17 @@ use chrono::Local;
 use crate::i18n;
 use crate::platform;
 
-/// Hard cap per connection. Only raw bytes are kept; display text is rendered on demand.
+/// Default ring-buffer size per connection (users can raise it in Settings).
+/// Only raw bytes are kept; display text is rendered on demand.
 pub const MAX_LOGS: usize = 200;
+
+/// Bounds accepted from `mqttc.json` / the settings picker.
+pub const LOG_LIMIT_MIN: usize = 50;
+pub const LOG_LIMIT_MAX: usize = 2000;
+
+pub fn clamp_log_limit(limit: usize) -> usize {
+    limit.clamp(LOG_LIMIT_MIN, LOG_LIMIT_MAX)
+}
 
 /// How a payload (or the whole log list) is displayed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
