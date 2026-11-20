@@ -41,7 +41,7 @@ fn load_icon() -> Option<window::Icon> {
 fn main() -> iced::Result {
     let mut settings = window::Settings {
         size: Size::new(1360.0, 860.0),
-        min_size: Some(Size::new(1180.0, 720.0)),
+        min_size: Some(Size::new(980.0, 640.0)),
         ..window::Settings::default()
     };
     if let Some(icon) = load_icon() {

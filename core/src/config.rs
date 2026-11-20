@@ -21,6 +21,12 @@ pub struct SubscriptionConfig {
     pub topic: String,
     #[serde(default)]
     pub qos: u8,
+    /// MQTT 5 "No Local": do not receive our own publications. Ignored on 3.1.1.
+    #[serde(default)]
+    pub no_local: bool,
+    /// MQTT 5 "Retain As Published": keep the publisher's retain flag. Ignored on 3.1.1.
+    #[serde(default)]
+    pub retain_as_published: bool,
 }
 
 /// One-click publish row. Missing `format` becomes `"text"` on load.
@@ -84,10 +90,19 @@ pub struct ConnectionConfig {
     pub pub_retain: bool,
     #[serde(default = "default_payload_format")]
     pub pub_format: String,
+    /// MQTT 5 publish user properties, written as `key=value;key2=value2`.
+    #[serde(default)]
+    pub pub_props: String,
+    /// MQTT 5 message expiry interval in seconds; 0 leaves it unset.
+    #[serde(default)]
+    pub pub_expiry: u32,
     #[serde(default = "default_keep_alive")]
     pub keep_alive: u16,
     #[serde(default = "default_clean_session")]
     pub clean_session: bool,
+    /// Retry with exponential backoff after an unexpected disconnect.
+    #[serde(default = "default_true")]
+    pub auto_reconnect: bool,
     #[serde(default = "default_connect_timeout")]
     pub connect_timeout: u16,
     #[serde(default)]
@@ -141,6 +156,9 @@ pub struct AutoReplyRule {
     pub retain: bool,
     #[serde(default = "default_payload_format")]
     pub format: String,
+    /// Minimum seconds between two replies from this rule; 0 replies to every match.
+    #[serde(default)]
+    pub min_interval_secs: u32,
 }
 
 impl Default for AutoReplyRule {
@@ -154,6 +172,7 @@ impl Default for AutoReplyRule {
             qos: 0,
             retain: false,
             format: default_payload_format(),
+            min_interval_secs: 0,
         }
     }
 }
@@ -315,8 +334,11 @@ impl ConnectionConfig {
             pub_qos: 0,
             pub_retain: false,
             pub_format: default_payload_format(),
+            pub_props: String::new(),
+            pub_expiry: 0,
             keep_alive: default_keep_alive(),
             clean_session: default_clean_session(),
+            auto_reconnect: default_true(),
             connect_timeout: default_connect_timeout(),
             will_topic: String::new(),
             will_payload: String::new(),
@@ -459,6 +481,7 @@ fn legacy_connection(value: &serde_json::Value) -> Option<ConnectionConfig> {
                 conn.subscriptions.push(SubscriptionConfig {
                     topic: topic.to_string(),
                     qos: 0,
+                    ..SubscriptionConfig::default()
                 });
             }
         }
@@ -550,6 +573,8 @@ mod tests {
         conn.subscriptions.push(SubscriptionConfig {
             topic: "a/#".to_string(),
             qos: 2,
+            no_local: true,
+            retain_as_published: true,
         });
         conn.publish_presets.push(PublishPreset {
             name: "heartbeat".to_string(),
@@ -569,6 +594,7 @@ mod tests {
             qos: 1,
             retain: false,
             format: "text".to_string(),
+            min_interval_secs: 3,
         });
         config.active_id = conn.id.clone();
         config.connections.push(conn);

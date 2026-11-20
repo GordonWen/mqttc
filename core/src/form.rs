@@ -11,6 +11,10 @@ use crate::config::{
 use crate::model::{parse_timed_interval, parse_u16_clamped, PayloadFormat};
 use crate::mqtt::ProtocolVersion;
 
+fn parse_interval_secs(text: &str) -> u32 {
+    text.trim().parse::<u32>().unwrap_or(0).min(86_400)
+}
+
 /// One publish-preset row bound to the presets page.
 #[derive(Clone, Debug)]
 pub struct PresetRow {
@@ -57,6 +61,8 @@ pub struct RuleRow {
     pub qos: i32,
     pub retain: bool,
     pub format: i32,
+    /// Minimum seconds between replies; empty / 0 replies to every match.
+    pub min_interval_secs: String,
 }
 
 impl Default for RuleRow {
@@ -70,6 +76,7 @@ impl Default for RuleRow {
             qos: 0,
             retain: false,
             format: 0,
+            min_interval_secs: String::new(),
         }
     }
 }
@@ -84,6 +91,7 @@ impl RuleRow {
         rule.qos = self.qos.clamp(0, 2) as u8;
         rule.retain = self.retain;
         rule.format = PayloadFormat::from_index(self.format).to_key().to_string();
+        rule.min_interval_secs = parse_interval_secs(&self.min_interval_secs);
     }
 }
 
@@ -98,6 +106,7 @@ pub struct FormState {
     pub protocol: i32,
     pub keep_alive: String,
     pub clean_session: bool,
+    pub auto_reconnect: bool,
     pub connect_timeout: String,
     pub will_topic: String,
     pub will_payload: String,
@@ -110,11 +119,17 @@ pub struct FormState {
     pub ssl_key: String,
     pub sub_topic: String,
     pub sub_qos: i32,
+    /// MQTT 5 subscription options for the next `subscribe()` call.
+    pub sub_no_local: bool,
+    pub sub_retain_as_published: bool,
     pub pub_topic: String,
     pub pub_payload: String,
     pub pub_qos: i32,
     pub pub_retain: bool,
     pub pub_format: i32,
+    /// MQTT 5 publish user properties (`k=v;k2=v2`) and expiry seconds.
+    pub pub_props: String,
+    pub pub_expiry: String,
     pub timed_interval: String,
     pub presets: Vec<PresetRow>,
     pub rules: Vec<RuleRow>,
@@ -139,6 +154,7 @@ impl FormState {
         self.protocol = ProtocolVersion::from_key(&cfg.protocol).to_index();
         self.keep_alive = cfg.keep_alive.to_string();
         self.clean_session = cfg.clean_session;
+        self.auto_reconnect = cfg.auto_reconnect;
         self.connect_timeout = cfg.connect_timeout.to_string();
         self.will_topic = cfg.will_topic.clone();
         self.will_payload = cfg.will_payload.clone();
@@ -151,11 +167,19 @@ impl FormState {
         self.ssl_key = cfg.ssl_key.clone();
         self.sub_topic = cfg.sub_topic.clone();
         self.sub_qos = cfg.sub_qos.min(2) as i32;
+        self.sub_no_local = false;
+        self.sub_retain_as_published = false;
         self.pub_topic = cfg.pub_topic.clone();
         self.pub_payload = cfg.pub_payload.clone();
         self.pub_qos = cfg.pub_qos.min(2) as i32;
         self.pub_retain = cfg.pub_retain;
         self.pub_format = PayloadFormat::from_key(&cfg.pub_format).to_index();
+        self.pub_props = cfg.pub_props.clone();
+        self.pub_expiry = if cfg.pub_expiry == 0 {
+            String::new()
+        } else {
+            cfg.pub_expiry.to_string()
+        };
         self.timed_interval = cfg.timed_interval.max(1).to_string();
         self.presets = cfg
             .publish_presets
@@ -181,6 +205,11 @@ impl FormState {
                 qos: rule.qos.min(2) as i32,
                 retain: rule.retain,
                 format: PayloadFormat::from_key(&rule.format).to_index(),
+                min_interval_secs: if rule.min_interval_secs == 0 {
+                    String::new()
+                } else {
+                    rule.min_interval_secs.to_string()
+                },
             })
             .collect();
         self.auto_reply_echo = if normalize_auto_reply_echo(&cfg.auto_reply_echo) == "rematch" {
@@ -202,6 +231,7 @@ impl FormState {
             protocol: 0,
             keep_alive: String::new(),
             clean_session: true,
+            auto_reconnect: true,
             connect_timeout: String::new(),
             will_topic: String::new(),
             will_payload: String::new(),
@@ -214,11 +244,15 @@ impl FormState {
             ssl_key: String::new(),
             sub_topic: String::new(),
             sub_qos: 0,
+            sub_no_local: false,
+            sub_retain_as_published: false,
             pub_topic: String::new(),
             pub_payload: String::new(),
             pub_qos: 0,
             pub_retain: false,
             pub_format: 0,
+            pub_props: String::new(),
+            pub_expiry: String::new(),
             timed_interval: String::new(),
             presets: Vec::new(),
             rules: Vec::new(),
@@ -239,6 +273,7 @@ impl FormState {
         cfg.protocol = ProtocolVersion::from_index(self.protocol).to_key().to_string();
         cfg.keep_alive = parse_u16_clamped(&self.keep_alive, 1, 65535, 60);
         cfg.clean_session = self.clean_session;
+        cfg.auto_reconnect = self.auto_reconnect;
         cfg.connect_timeout = parse_u16_clamped(&self.connect_timeout, 1, 300, 10);
         cfg.will_topic = self.will_topic.clone();
         cfg.will_payload = self.will_payload.clone();
@@ -259,6 +294,8 @@ impl FormState {
         cfg.pub_qos = self.pub_qos.clamp(0, 2) as u8;
         cfg.pub_retain = self.pub_retain;
         cfg.pub_format = PayloadFormat::from_index(self.pub_format).to_key().to_string();
+        cfg.pub_props = self.pub_props.trim().to_string();
+        cfg.pub_expiry = parse_interval_secs(&self.pub_expiry);
 
         cfg.publish_presets = self
             .presets
@@ -313,6 +350,17 @@ impl FormState {
             self.rules.remove(index);
         }
     }
+
+    /// Move a rule one slot up (-1) or down (+1). First match wins, so order matters.
+    pub fn move_rule(&mut self, index: usize, delta: isize) -> bool {
+        let len = self.rules.len();
+        let target = index as isize + delta;
+        if index >= len || target < 0 || target >= len as isize {
+            return false;
+        }
+        self.rules.swap(index, target as usize);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -333,6 +381,7 @@ mod tests {
         cfg.subscriptions.push(crate::config::SubscriptionConfig {
             topic: "a/#".into(),
             qos: 2,
+            ..Default::default()
         });
         cfg.publish_presets.push(PublishPreset {
             name: "p".into(),
@@ -351,6 +400,7 @@ mod tests {
             qos: 2,
             retain: false,
             format: "text".into(),
+            min_interval_secs: 5,
         });
         cfg.auto_reply_echo = "rematch".into();
 
@@ -370,8 +420,10 @@ mod tests {
         assert!(back.publish_presets[0].retain);
         assert_eq!(back.auto_reply_rules.len(), 1);
         assert_eq!(back.auto_reply_rules[0].match_topic, "in/#");
+        assert_eq!(back.auto_reply_rules[0].min_interval_secs, 5);
         assert_eq!(back.auto_reply_echo, "rematch");
         assert_eq!(back.subscriptions.len(), 1);
+        assert!(!back.subscriptions[0].no_local);
     }
 
     #[test]

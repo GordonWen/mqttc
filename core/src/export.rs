@@ -8,19 +8,31 @@ use crate::i18n;
 use crate::model::{LogRecord, PayloadFormat};
 use crate::payload;
 
-fn line_for(log: &LogRecord, format: PayloadFormat) -> String {
+/// One display line for a record, without a trailing newline. Shared by the
+/// file exporter and the UI's "copy row" action so both read identically.
+pub fn log_line(log: &LogRecord, format: PayloadFormat) -> String {
     let body = if log.is_payload_kind() {
         payload::render_payload(&log.payload, format)
     } else {
         String::from_utf8_lossy(&log.payload).into_owned()
     };
-    if log.topic.is_empty() {
-        format!("[{}] [{}] {}\n", log.timestamp, log.kind, body)
+    let flags = log.flags();
+    let props = log.props_text();
+    let meta = match (flags.is_empty(), props.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => format!("({flags})"),
+        (true, false) => format!("<{props}>"),
+        (false, false) => format!("({flags}) <{props}>"),
+    };
+    let head = if log.topic.is_empty() {
+        format!("[{}] [{}]", log.timestamp, log.kind)
     } else {
-        format!(
-            "[{}] [{}] {} {}\n",
-            log.timestamp, log.kind, log.topic, body
-        )
+        format!("[{}] [{}] {}", log.timestamp, log.kind, log.topic)
+    };
+    if meta.is_empty() {
+        format!("{head} {body}")
+    } else {
+        format!("{head} {meta} {body}")
     }
 }
 
@@ -70,7 +82,8 @@ fn save_logs_to_dir_named(
 
     let mut content = String::new();
     for log in logs {
-        content.push_str(&line_for(log, format));
+        content.push_str(&log_line(log, format));
+        content.push('\n');
     }
 
     std::fs::write(&path, content).map_err(|err| {
@@ -131,6 +144,11 @@ mod tests {
             kind: "SEND".into(),
             topic: "a/b".into(),
             payload: Arc::from(&b"hi"[..]),
+            qos: None,
+            retain: false,
+            dup: false,
+            props: Vec::new(),
+            expiry: None,
         }
     }
 
@@ -197,5 +215,20 @@ mod tests {
         let text = std::fs::read_to_string(&path).expect("read");
         assert_eq!(text, "[2026-01-01 12:00:00] [SYS] hi\n");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Copying a row uses the same formatter as the saved log, including MQTT 5 props.
+    #[test]
+    fn row_line_has_flags_and_properties() {
+        let mut log = sample();
+        log.qos = Some(1);
+        log.retain = true;
+        log.expiry = Some(30);
+        log.props = vec![("k".into(), "v".into()), ("k2".into(), "v2".into())];
+        let line = log_line(&log, PayloadFormat::Text);
+        assert!(line.starts_with("[2026-01-01 12:00:00] [SEND] a/b (QoS1"), "{line}");
+        assert!(line.contains("<k=v, k2=v2>"), "{line}");
+        assert!(line.ends_with(" hi"), "{line}");
+        assert!(!line.contains('\n'));
     }
 }

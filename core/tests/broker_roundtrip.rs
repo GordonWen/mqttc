@@ -36,6 +36,7 @@ fn app(port: u16, protocol: &str) -> AppRuntime {
     conn.subscriptions = vec![SubscriptionConfig {
         topic: "mqttc/it/#".into(),
         qos: 0,
+        ..Default::default()
     }];
     conn.auto_reply_rules = vec![AutoReplyRule {
         enabled: true,
@@ -46,6 +47,7 @@ fn app(port: u16, protocol: &str) -> AppRuntime {
         qos: 0,
         retain: false,
         format: "text".into(),
+        min_interval_secs: 0,
     }];
 
     let mut cfg = AppConfig::default();

@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::model::{
-    clamp_log_limit, now_hms, now_timestamp, LogRecord, PayloadFormat, MAX_LOGS,
+    clamp_log_limit, now_hms, now_timestamp, LogMeta, LogRecord, PayloadFormat, MAX_LOGS,
 };
 use crate::payload;
 
@@ -43,6 +43,11 @@ impl LogStore {
     }
 
     pub fn push(&mut self, kind: &str, topic: &str, payload: Vec<u8>) {
+        self.push_meta(kind, topic, payload, LogMeta::default());
+    }
+
+    /// Push with MQTT metadata (QoS / retain / dup / MQTT 5 properties).
+    pub fn push_meta(&mut self, kind: &str, topic: &str, payload: Vec<u8>, meta: LogMeta) {
         let seq = self.next_seq;
         self.next_seq += 1;
         self.bytes += payload.len();
@@ -53,6 +58,11 @@ impl LogStore {
             kind: kind.to_string(),
             topic: topic.to_string(),
             payload: Arc::from(payload),
+            qos: meta.qos,
+            retain: meta.retain,
+            dup: meta.dup,
+            props: meta.props,
+            expiry: meta.expiry,
         });
         self.trim();
     }

@@ -7,12 +7,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use iced::widget::text::Wrapping;
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_editor,
-    text_input, Space,
+    text_input, Space, Stack,
 };
 use iced::{Alignment, Length, Task};
 use mqttc_core::cli::BenchOptions;
@@ -44,6 +45,8 @@ pub enum Field {
     WillPayload,
     PubTopic,
     TimedInterval,
+    PubProps,
+    PubExpiry,
     Ca,
     Cert,
     Key,
@@ -65,6 +68,8 @@ impl Field {
             Self::WillPayload => &f.will_payload,
             Self::PubTopic => &f.pub_topic,
             Self::TimedInterval => &f.timed_interval,
+            Self::PubProps => &f.pub_props,
+            Self::PubExpiry => &f.pub_expiry,
             Self::Ca => &f.ssl_ca,
             Self::Cert => &f.ssl_cert,
             Self::Key => &f.ssl_key,
@@ -86,6 +91,8 @@ impl Field {
             Self::WillPayload => f.will_payload = value,
             Self::PubTopic => f.pub_topic = value,
             Self::TimedInterval => f.timed_interval = value,
+            Self::PubProps => f.pub_props = value,
+            Self::PubExpiry => f.pub_expiry = value,
             Self::Ca => f.ssl_ca = value,
             Self::Cert => f.ssl_cert = value,
             Self::Key => f.ssl_key = value,
@@ -119,20 +126,26 @@ impl Num {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flag {
     CleanSession,
+    AutoReconnect,
     Ssl,
     SslVerify,
     WillRetain,
     PubRetain,
+    SubNoLocal,
+    SubRap,
 }
 
 impl Flag {
     fn set(self, f: &mut FormState, value: bool) {
         match self {
             Self::CleanSession => f.clean_session = value,
+            Self::AutoReconnect => f.auto_reconnect = value,
             Self::Ssl => f.ssl = value,
             Self::SslVerify => f.ssl_verify = value,
             Self::WillRetain => f.will_retain = value,
             Self::PubRetain => f.pub_retain = value,
+            Self::SubNoLocal => f.sub_no_local = value,
+            Self::SubRap => f.sub_retain_as_published = value,
         }
     }
 }
@@ -141,13 +154,17 @@ impl Flag {
 pub enum Msg {
     Select(String),
     New,
+    /// Asks for confirmation instead of deleting immediately.
     Delete(String),
+    ConfirmDelete,
+    CancelDelete,
     Page(i32),
     SessionTab(SessionTab),
     Connect,
     Disconnect,
     Subscribe,
     Unsubscribe(usize),
+    FlipSubOption(usize, bool),
     ToggleSub(String),
     Publish,
     PublishPreset(usize),
@@ -161,15 +178,23 @@ pub enum Msg {
     OpenLog(u64),
     CloseLog,
     ClearLogs,
+    Copy(String),
+    CopyRow,
+    FocusSearch,
+    RecallLastSend,
+    DroppedFile(PathBuf),
     Skin(i32),
     Language(i32),
     AddRule,
     DelRule(usize),
+    MoveRule(usize, isize),
     RuleEnabled(usize, bool),
     RuleRetain(usize, bool),
     RuleNum(usize, i32),
     RuleFormat(usize, i32),
     RuleText(usize, RuleTextField, String),
+    RuleInterval(usize, String),
+    ResetRuleStats,
     AddPreset,
     DelPreset(usize),
     PresetRetain(usize, bool),
@@ -341,6 +366,8 @@ pub struct App {
     preview_cache: RefCell<HashMap<u64, (i32, String)>>,
     /// Expanded row shown instead of the log list. Cleared on tab / connection change.
     detail_seq: Option<u64>,
+    /// Connection id waiting for a delete confirmation.
+    pending_delete: Option<String>,
 }
 
 impl App {
@@ -369,6 +396,7 @@ impl App {
             dirty_at: None,
             preview_cache: RefCell::new(HashMap::new()),
             detail_seq: None,
+            pending_delete: None,
         }
     }
 
@@ -379,6 +407,7 @@ impl App {
     pub fn subscription(&self) -> iced::Subscription<Msg> {
         let busy = self.bench.is_some()
             || self.rt.timed_running()
+            || self.rt.reconnect_pending()
             || self
                 .rt
                 .active_id()
@@ -391,10 +420,11 @@ impl App {
         } else {
             None
         };
-        match every {
+        let timer = match every {
             Some(period) => iced::time::every(period).map(|_| Msg::Tick),
             None => iced::Subscription::none(),
-        }
+        };
+        iced::Subscription::batch([timer, iced::event::listen_with(event_message)])
     }
 
     fn touched(&mut self) -> Task<Msg> {
@@ -406,6 +436,65 @@ impl App {
     fn reload_form(&mut self) {
         self.rt.apply_form();
         self.editor = text_editor::Content::with_text(&self.rt.form.pub_payload);
+    }
+
+    /// One row in the same shape as the exported log, for the clipboard.
+    fn row_text(&self, log: &LogRecord) -> String {
+        let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
+        mqttc_core::export::log_line(log, fmt)
+    }
+
+    /// Ctrl+Shift+C: the open detail row, else the newest visible row.
+    fn current_row_text(&self) -> Option<String> {
+        if let Some(seq) = self.detail_seq {
+            if let Some(log) = self.rt.active_log(seq) {
+                return Some(self.row_text(log));
+            }
+        }
+        self.rt
+            .visible_logs()
+            .last()
+            .map(|log| self.row_text(log))
+            .or_else(|| self.rt.last_log().map(|log| self.row_text(&log)))
+    }
+
+    /// Dropped certificate file → first empty TLS slot (then CA), enabling SSL.
+    fn fill_cert_path(&mut self, path: &std::path::Path) -> bool {
+        let value = path.to_string_lossy().into_owned();
+        if value.trim().is_empty() {
+            return false;
+        }
+        let lower = value.to_ascii_lowercase();
+        let f = &mut self.rt.form;
+        if lower.ends_with(".key") {
+            f.ssl_key = value;
+        } else if f.ssl_ca.trim().is_empty() {
+            f.ssl_ca = value;
+        } else if f.ssl_cert.trim().is_empty() {
+            f.ssl_cert = value;
+        } else if f.ssl_key.trim().is_empty() {
+            f.ssl_key = value;
+        } else {
+            f.ssl_ca = value;
+        }
+        f.ssl = true;
+        if let Some(id) = self.rt.active_id() {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            self.rt.push_log(
+                &id,
+                "SYS",
+                "",
+                t(
+                    &format!("已填入证书文件: {name}"),
+                    &format!("Certificate file added: {name}"),
+                )
+                .into_bytes(),
+            );
+        }
+        true
     }
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
@@ -429,12 +518,44 @@ impl App {
                 self.reload_form();
             }
             Msg::Delete(id) => {
-                self.rt.delete_connection(&id);
-                self.page = 0;
+                self.pending_delete = Some(id);
+            }
+            Msg::ConfirmDelete => {
+                if let Some(id) = self.pending_delete.take() {
+                    self.rt.delete_connection(&id);
+                    self.page = 0;
+                    self.detail_seq = None;
+                    self.preview_cache.borrow_mut().clear();
+                    self.rt.persist();
+                    self.reload_form();
+                }
+            }
+            Msg::CancelDelete => self.pending_delete = None,
+            Msg::Copy(text) => return iced::clipboard::write(text),
+            Msg::CopyRow => {
+                if let Some(text) = self.current_row_text() {
+                    return iced::clipboard::write(text);
+                }
+            }
+            Msg::FocusSearch => {
+                self.page = 1;
+                self.session_tab = SessionTab::Logs;
                 self.detail_seq = None;
-                self.preview_cache.borrow_mut().clear();
-                self.rt.persist();
-                self.reload_form();
+                return iced::widget::operation::focus(iced::widget::Id::new("log-search"));
+            }
+            Msg::RecallLastSend => {
+                if let Some(log) = self.rt.last_sent() {
+                    self.rt.form.pub_topic = log.topic.clone();
+                    self.rt.form.pub_payload = String::from_utf8_lossy(&log.payload).into_owned();
+                    self.editor = text_editor::Content::with_text(&self.rt.form.pub_payload);
+                    self.rt.apply_form();
+                    return self.touched();
+                }
+            }
+            Msg::DroppedFile(path) => {
+                if self.fill_cert_path(&path) {
+                    return self.touched();
+                }
             }
             Msg::Page(p) => {
                 if p == 1 {
@@ -461,6 +582,9 @@ impl App {
                 self.rt.subscribe();
             }
             Msg::Unsubscribe(index) => self.rt.unsubscribe(index),
+            Msg::FlipSubOption(index, no_local) => {
+                self.rt.flip_sub_option(index, no_local);
+            }
             Msg::ToggleSub(topic) => self.rt.toggle_sub_filter(&topic),
             Msg::Publish => {
                 self.rt.apply_form();
@@ -512,6 +636,16 @@ impl App {
                 self.rt.form.remove_rule(index);
                 self.rt.apply_form();
                 self.rt.persist();
+            }
+            Msg::MoveRule(index, delta) => {
+                self.rt.move_rule(index, delta);
+            }
+            Msg::ResetRuleStats => self.rt.reset_rule_stats(),
+            Msg::RuleInterval(index, value) => {
+                if let Some(rule) = self.rt.form.rules.get_mut(index) {
+                    rule.min_interval_secs = value;
+                }
+                self.rt.apply_form();
             }
             Msg::RuleEnabled(index, on) => {
                 if let Some(rule) = self.rt.form.rules.get_mut(index) {
@@ -702,9 +836,63 @@ impl App {
             println!("FIRST_FRAME_MS {ms:.1}");
         }
         let c = Colors::from_palette(self.rt.palette());
-        row![self.sidebar(&c), self.main_area(&c)]
+        let base: El<'_> = row![self.sidebar(&c), self.main_area(&c)]
             .spacing(12)
             .padding(12)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into();
+        let Some(pending) = self.pending_delete.as_deref() else {
+            return base;
+        };
+        let name = self
+            .rt
+            .config
+            .connections
+            .iter()
+            .find(|conn| conn.id == pending)
+            .map(|conn| conn.name.clone())
+            .unwrap_or_default();
+        let dialog = container(
+            column![
+                text(t("删除连接？", "Delete connection?")).size(16.0).color(c.text_title),
+                text(t(
+                    &format!("“{name}”及其订阅、规则和预设将从 mqttc.json 中移除。"),
+                    &format!("“{name}” and its subscriptions, rules and presets will be removed from mqttc.json."),
+                ))
+                .size(12.0)
+                .color(c.text_body)
+                .wrapping(Wrapping::WordOrGlyph),
+                row![
+                    button(text(t("取消", "Cancel")).size(12.0))
+                        .padding([6, 14])
+                        .style(c.ghost_button())
+                        .on_press(Msg::CancelDelete),
+                    button(text(t("删除", "Delete")).size(12.0))
+                        .padding([6, 14])
+                        .style(c.danger_button())
+                        .on_press(Msg::ConfirmDelete),
+                ]
+                .spacing(8),
+            ]
+            .spacing(12),
+        )
+        .padding(18)
+        .width(380)
+        .style(c.card());
+        let backdrop = container(dialog)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(|_| container::Style {
+                background: Some(iced::Background::Color(iced::Color {
+                    a: 0.55,
+                    ..iced::Color::BLACK
+                })),
+                ..container::Style::default()
+            });
+        Stack::with_children([base, backdrop.into()])
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -895,6 +1083,14 @@ impl App {
                         .on_toggle(|v| Msg::Flag(Flag::CleanSession, v)),
                 ]
                 .spacing(3),
+                column![
+                    text(t("自动重连", "Auto reconnect")).size(11.0).color(c.text_faint),
+                    checkbox(f.auto_reconnect)
+                        .size(15.0)
+                        .style(c.checkbox_style())
+                        .on_toggle(|v| Msg::Flag(Flag::AutoReconnect, v)),
+                ]
+                .spacing(3),
             ]
             .spacing(10),
             row![
@@ -934,6 +1130,14 @@ impl App {
                 self.labelled(c, &t("客户端私钥", "Client key"), self.input(c, Field::Key, "path/to/key.pem")),
             ]
             .spacing(10),
+            self.hint(
+                c,
+                t(
+                    "可把 .pem / .crt / .key 文件拖到窗口自动填入；连接前会检查文件是否存在",
+                    "Drop a .pem / .crt / .key file anywhere to fill a slot; paths are checked before connecting",
+                )
+                .to_string(),
+            ),
         ]
         .spacing(10);
 
@@ -1009,16 +1213,30 @@ impl App {
         let status = self.rt.status();
         let connected = status == ConnStatus::Connected;
         let connecting = status == ConnStatus::Connecting;
+        let retry_note: El<'_> = match self.rt.reconnect_state() {
+            Some((attempt, left)) => text(t(
+                &format!("重连 {attempt}/8 · {}s 后", left.as_secs().max(1)),
+                &format!("Retry {attempt}/8 · in {}s", left.as_secs().max(1)),
+            ))
+            .size(11.0)
+            .color(c.text_muted)
+            .into(),
+            None => Space::new().width(0).into(),
+        };
 
         let header = container(
             row![
-                text(conn.name.as_str()).size(18.0).color(c.text_title),
+                text(conn.name.as_str())
+                    .size(18.0)
+                    .color(c.text_title)
+                    .width(Length::Fill)
+                    .wrapping(Wrapping::WordOrGlyph),
                 text("●").size(10.0).color(rgb(status.rgb())),
                 text(status.text()).size(12.0).color(c.text_muted),
                 text(format!("{}:{}", conn.host, conn.port))
                     .size(12.0)
                     .color(c.text_faint),
-                Space::new().width(Length::Fill),
+                retry_note,
                 button(text(t("编辑", "Edit")).size(12.0))
                     .padding([6, 12])
                     .style(c.ghost_button())
@@ -1131,11 +1349,31 @@ impl App {
             let qos = text(format!("QoS {}", sub.qos))
                 .size(11.0)
                 .color(c.text_faint);
+            let nl = button(text("NL").size(10.0))
+                .padding([2, 6])
+                .style(c.button_kind(if sub.no_local {
+                    ButtonKind::Selected
+                } else {
+                    ButtonKind::Ghost
+                }))
+                .on_press(Msg::FlipSubOption(index, true));
+            let rap = button(text("RAP").size(10.0))
+                .padding([2, 6])
+                .style(c.button_kind(if sub.retain_as_published {
+                    ButtonKind::Selected
+                } else {
+                    ButtonKind::Ghost
+                }))
+                .on_press(Msg::FlipSubOption(index, false));
             let del = button(text("×").size(14.0))
                 .padding([4, 8])
                 .style(c.danger_button())
                 .on_press(Msg::Unsubscribe(index));
-            list = list.push(row![pick, qos, del].spacing(8).align_y(Alignment::Center));
+            list = list.push(
+                row![pick, qos, nl, rap, del]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+            );
         }
         if subs.is_empty() {
             list = list.push(self.hint(c, t("尚未订阅", "No subscriptions yet")));
@@ -1174,6 +1412,29 @@ impl App {
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center),
+                row![
+                    checkbox(self.rt.form.sub_no_local)
+                        .label("No Local")
+                        .size(14.0)
+                        .text_size(11.0)
+                        .style(c.checkbox_style())
+                        .on_toggle(|v| Msg::Flag(Flag::SubNoLocal, v)),
+                    checkbox(self.rt.form.sub_retain_as_published)
+                        .label(t("保留发布标志", "Retain as published"))
+                        .size(14.0)
+                        .text_size(11.0)
+                        .style(c.checkbox_style())
+                        .on_toggle(|v| Msg::Flag(Flag::SubRap, v)),
+                    self.hint(
+                        c,
+                        t(
+                            "仅 MQTT 5 生效；3.1.1 会忽略。列表中 NL / RAP 可随时切换",
+                            "MQTT 5 only (ignored on 3.1.1); toggle NL / RAP on any saved row"
+                        ),
+                    ),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
                 scrollable(list).height(Length::Fill),
                 self.hint(
                     c,
@@ -1207,54 +1468,66 @@ impl App {
             Space::new().width(0).into()
         };
 
-        let toolbar = row![
-            text_input(
-                l("搜索 Topic / Payload", "Search topic / payload"),
-                &prefs.log_filter
-            )
-            .size(13.0)
-            .padding([5, 7])
-            .width(180)
-            .style(c.input_style())
-            .on_input(Msg::LogFilter),
-            pick(c, &kind_opts(), prefs.log_kind_filter, Msg::LogKind),
-            pick(c, &format_opts(), prefs.log_format, Msg::LogFormat),
-            checkbox(prefs.auto_scroll)
-                .label(t("自动滚动", "Auto-scroll"))
-                .size(15.0)
-                .text_size(12.0)
-                .style(c.checkbox_style())
-                .on_toggle(Msg::AutoScroll),
-            Space::new().width(Length::Fill),
-            pause_label,
-            button(text(if paused {
-                t("继续", "Resume")
-            } else {
-                t("暂停", "Pause")
-            })
-            .size(12.0))
-            .padding([5, 10])
-            .style(c.button_kind(if paused {
-                ButtonKind::Selected
-            } else {
-                ButtonKind::Ghost
-            }))
-            .on_press(Msg::TogglePause),
-            button(text(t("保存", "Save")).size(12.0))
+        let toolbar = column![
+            row![
+                text_input(
+                    l("搜索 Topic / Payload  (Ctrl+F)", "Search topic / payload  (Ctrl+F)"),
+                    &prefs.log_filter
+                )
+                .id(iced::widget::Id::new("log-search"))
+                .size(13.0)
+                .padding([5, 7])
+                .width(Length::Fill)
+                .style(c.input_style())
+                .on_input(Msg::LogFilter),
+                pick(c, &kind_opts(), prefs.log_kind_filter, Msg::LogKind),
+                pick(c, &format_opts(), prefs.log_format, Msg::LogFormat),
+                checkbox(prefs.auto_scroll)
+                    .label(t("自动滚动", "Auto-scroll"))
+                    .size(15.0)
+                    .text_size(12.0)
+                    .style(c.checkbox_style())
+                    .on_toggle(Msg::AutoScroll),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+            row![
+                pause_label,
+                Space::new().width(Length::Fill),
+                button(text(t("复制末行", "Copy last")).size(11.0))
+                    .padding([4, 9])
+                    .style(c.ghost_button())
+                    .on_press(Msg::CopyRow),
+                button(text(if paused {
+                    t("继续", "Resume")
+                } else {
+                    t("暂停", "Pause")
+                })
+                .size(12.0))
                 .padding([5, 10])
-                .style(c.ghost_button())
-                .on_press(Msg::SaveLogs),
-            button(text(t("存筛选", "Save view")).size(12.0))
-                .padding([5, 10])
-                .style(c.ghost_button())
-                .on_press(Msg::SaveVisibleLogs),
-            button(text(t("清空", "Clear")).size(12.0))
-                .padding([5, 10])
-                .style(c.ghost_button())
-                .on_press(Msg::ClearLogs),
+                .style(c.button_kind(if paused {
+                    ButtonKind::Selected
+                } else {
+                    ButtonKind::Ghost
+                }))
+                .on_press(Msg::TogglePause),
+                button(text(t("保存", "Save")).size(12.0))
+                    .padding([5, 10])
+                    .style(c.ghost_button())
+                    .on_press(Msg::SaveLogs),
+                button(text(t("存筛选", "Save view")).size(12.0))
+                    .padding([5, 10])
+                    .style(c.ghost_button())
+                    .on_press(Msg::SaveVisibleLogs),
+                button(text(t("清空", "Clear")).size(12.0))
+                    .padding([5, 10])
+                    .style(c.ghost_button())
+                    .on_press(Msg::ClearLogs),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
         ]
-        .spacing(6)
-        .align_y(Alignment::Center);
+        .spacing(5);
 
         let logs = self.rt.visible_logs();
         let mut list = column![].spacing(5);
@@ -1311,6 +1584,16 @@ impl App {
         (body, truncated)
     }
 
+    /// Full display text of one row's payload (no preview cap).
+    fn log_body_text(&self, log: &LogRecord) -> String {
+        let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
+        if log.is_payload_kind() {
+            payload::render_payload(&log.payload, fmt)
+        } else {
+            String::from_utf8_lossy(&log.payload).into_owned()
+        }
+    }
+
     fn log_bubble(&self, c: &Colors, log: &LogRecord) -> El<'_> {
         let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
         let (bg, topic_color, body_color, right) = match log.kind.as_str() {
@@ -1331,31 +1614,52 @@ impl App {
             .wrapping(Wrapping::WordOrGlyph)]
         .spacing(6)
         .align_y(Alignment::Center);
-        if truncated {
-            header = header
-                .push(Space::new().width(Length::Fill))
-                .push(text(human_bytes(log.payload.len())).size(10.0).color(c.text_faint))
-                .push(
-                    button(text(t("展开", "Open")).size(10.0))
-                        .padding([1, 6])
-                        .style(c.ghost_button())
-                        .on_press(Msg::OpenLog(log.seq)),
-                );
+        header = header
+            .push(Space::new().width(Length::Fill))
+            .push(text(human_bytes(log.payload.len())).size(10.0).color(c.text_faint))
+            .push(
+                button(text(t("复制", "Copy")).size(10.0))
+                    .padding([1, 6])
+                    .style(c.ghost_button())
+                    .on_press(Msg::Copy(self.log_body_text(log))),
+            )
+            .push(
+                button(text(t("详情", "Detail")).size(10.0))
+                    .padding([1, 6])
+                    .style(c.ghost_button())
+                    .on_press(Msg::OpenLog(log.seq)),
+            );
+
+        let flags = log.flags();
+        let props = log.props_text();
+        let mut content = column![header].spacing(2);
+        if !flags.is_empty() || !props.is_empty() || truncated {
+            let mut meta = flags;
+            if !props.is_empty() {
+                if !meta.is_empty() {
+                    meta.push_str(" · ");
+                }
+                meta.push_str(&props);
+            }
+            if truncated {
+                if !meta.is_empty() {
+                    meta.push_str(" · ");
+                }
+                meta.push_str(&t("预览已截断", "preview truncated"));
+            }
+            content = content.push(text(meta).size(10.0).color(c.text_faint));
         }
-        let bubble = container(
-            column![
-                header,
-                text(body)
-                    .size(12.5)
-                    .font(mono_font())
-                    .color(body_color)
-                    .wrapping(Wrapping::WordOrGlyph),
-            ]
-            .spacing(2),
-        )
-        .padding([7, 9])
-        .max_width(520)
-        .style(c.bubble(bg));
+        content = content.push(
+            text(body)
+                .size(12.5)
+                .font(mono_font())
+                .color(body_color)
+                .wrapping(Wrapping::WordOrGlyph),
+        );
+        let bubble = container(content)
+            .padding([7, 9])
+            .max_width(520)
+            .style(c.bubble(bg));
 
         let mut row_children: Vec<El> = Vec::new();
         if right {
@@ -1408,17 +1712,44 @@ impl App {
             text(format!("{} · {}", log.time, log.kind))
                 .size(11.0)
                 .color(c.text_faint),
-            text(log.topic.as_str()).size(12.0).color(c.text_body),
-            Space::new().width(Length::Fill),
+            text(log.topic.as_str())
+                .size(12.0)
+                .color(c.text_body)
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph),
             text(human_bytes(log.payload.len()))
                 .size(11.0)
                 .color(c.text_faint),
+            button(text(t("复制内容", "Copy payload")).size(11.0))
+                .padding([3, 8])
+                .style(c.ghost_button())
+                .on_press(Msg::Copy(self.log_body_text(log))),
+            button(text(t("复制整行", "Copy row")).size(11.0))
+                .padding([3, 8])
+                .style(c.ghost_button())
+                .on_press(Msg::Copy(self.row_text(log))),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
 
+        let flags = log.flags();
+        let props = log.props_text();
+        let meta_line: El<'_> = if flags.is_empty() && props.is_empty() {
+            Space::new().width(0).into()
+        } else {
+            let mut meta = flags;
+            if !props.is_empty() {
+                if !meta.is_empty() {
+                    meta.push_str(" · ");
+                }
+                meta.push_str(&props);
+            }
+            text(meta).size(11.0).color(c.text_faint).into()
+        };
+
         let mut panel = column![
             header,
+            meta_line,
             scrollable(
                 container(
                     text(body)
@@ -1491,6 +1822,26 @@ impl App {
         .spacing(5)
         .align_y(Alignment::Center);
 
+        let props_row = row![
+            text(t("用户属性", "User props")).size(11.0).color(c.text_faint),
+            text_input("k=v;k2=v2", &f.pub_props)
+                .size(12.0)
+                .padding([4, 7])
+                .width(Length::Fill)
+                .style(c.input_style())
+                .on_input(|v| Msg::Field(Field::PubProps, v)),
+            text(t("过期 (s)", "Expiry (s)")).size(11.0).color(c.text_faint),
+            text_input("0", &f.pub_expiry)
+                .size(12.0)
+                .padding([4, 7])
+                .width(70)
+                .style(c.input_style())
+                .on_input(|v| Msg::Field(Field::PubExpiry, v)),
+            self.hint(c, t("仅 MQTT 5", "MQTT 5 only")),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center);
+
         let timed_row = row![
             text_input("5", &f.timed_interval)
                 .size(13.0)
@@ -1535,6 +1886,7 @@ impl App {
                 ]
                 .align_y(Alignment::Center),
                 topic_row,
+                props_row,
                 text_editor(&self.editor)
                     .height(84)
                     .padding(8)
@@ -1543,6 +1895,14 @@ impl App {
                     .style(c.editor_style())
                     .on_action(Msg::PubEdit),
                 timed_row,
+                self.hint(
+                    c,
+                    t(
+                        "Enter 或 Ctrl+Enter 发布；↑ 取回上一条 SEND",
+                        "Enter or Ctrl+Enter publishes; ↑ recalls the last SEND",
+                    )
+                    .to_string(),
+                ),
             ]
             .spacing(6),
         )
@@ -1626,7 +1986,10 @@ impl App {
 
     fn page_rules(&self, c: &Colors) -> El<'_> {
         let mut list = column![].spacing(8);
+        let hits = self.rt.active_rule_hits();
+        let total = self.rt.form.rules.len();
         for (index, rule) in self.rt.form.rules.iter().enumerate() {
+            let hit_count = hits.get(index).copied().unwrap_or(0);
             let card = container(
                 column![
                     row![
@@ -1643,6 +2006,29 @@ impl App {
                             .width(Length::Fill)
                             .style(c.input_style())
                             .on_input(move |v| Msg::RuleText(index, RuleTextField::MatchTopic, v)),
+                        text(t("间隔 s", "Every s")).size(10.0).color(c.text_faint),
+                        text_input("0", &rule.min_interval_secs)
+                            .size(12.0)
+                            .padding([4, 6])
+                            .width(56)
+                            .style(c.input_style())
+                            .on_input(move |v| Msg::RuleInterval(index, v)),
+                        text(t(
+                            &format!("命中 {hit_count}"),
+                            &format!("{hit_count} hits"),
+                        ))
+                        .size(10.0)
+                        .color(c.text_faint),
+                        button(text("↑").size(12.0))
+                            .padding([2, 5])
+                            .style(c.ghost_button())
+                            .on_press_maybe((index > 0).then_some(Msg::MoveRule(index, -1))),
+                        button(text("↓").size(12.0))
+                            .padding([2, 5])
+                            .style(c.ghost_button())
+                            .on_press_maybe(
+                                (index + 1 < total).then_some(Msg::MoveRule(index, 1)),
+                            ),
                         button(text("×").size(13.0))
                             .padding([3, 7])
                             .style(c.danger_button())
@@ -1710,6 +2096,10 @@ impl App {
                     pick(c, &echo_opts(), self.rt.form.auto_reply_echo, |v| {
                         Msg::Num(Num::Echo, v)
                     }),
+                    button(text(t("重置计数", "Reset hits")).size(11.0))
+                        .padding([5, 9])
+                        .style(c.ghost_button())
+                        .on_press(Msg::ResetRuleStats),
                     button(text(t("新增规则", "Add rule")).size(12.0))
                         .padding([5, 10])
                         .style(c.primary_button())
@@ -1721,8 +2111,8 @@ impl App {
                 self.hint(
                     c,
                     t(
-                        "收到消息后按规则顺序匹配，首条命中的规则回复一次",
-                        "Rules are evaluated in order; the first match replies once"
+                        "按顺序匹配，首条可回复的规则生效；间隔秒数内同一规则不会重复回复，↑↓ 调整优先级",
+                        "Rules run in order; a rule inside its interval is skipped so later rules can answer. ↑↓ reorders",
                     )
                 ),
             ]
@@ -1852,6 +2242,51 @@ impl App {
     }
 }
 
+/// Global shortcuts + window file drops. Ctrl-modified keys are handled even
+/// while an input has focus; bare Enter / ↑ only when no widget consumed them.
+fn event_message(
+    event: iced::Event,
+    status: iced::event::Status,
+    _window: iced::window::Id,
+) -> Option<Msg> {
+    use iced::keyboard::{key::Named, Event as KeyEvent, Key};
+
+    if let iced::Event::Window(iced::window::Event::FileDropped(path)) = event {
+        return Some(Msg::DroppedFile(path));
+    }
+    let iced::Event::Keyboard(KeyEvent::KeyPressed { key, modifiers, .. }) = event else {
+        return None;
+    };
+
+    if key == Key::Named(Named::Escape) {
+        return Some(Msg::CancelDelete);
+    }
+    if modifiers.command() {
+        if modifiers.shift()
+            && matches!(&key, Key::Character(c) if c.eq_ignore_ascii_case("c"))
+        {
+            return Some(Msg::CopyRow);
+        }
+        if matches!(&key, Key::Character(c) if c.eq_ignore_ascii_case("f")) {
+            return Some(Msg::FocusSearch);
+        }
+        if matches!(&key, Key::Character(c) if c.eq_ignore_ascii_case("l")) {
+            return Some(Msg::ClearLogs);
+        }
+        if key == Key::Named(Named::Enter) {
+            return Some(Msg::Publish);
+        }
+    }
+    if status == iced::event::Status::Ignored {
+        match key {
+            Key::Named(Named::Enter) => return Some(Msg::Publish),
+            Key::Named(Named::ArrowUp) => return Some(Msg::RecallLastSend),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn human_bytes(size: usize) -> String {
     if size < 1024 {
         format!("{size} B")
@@ -1922,6 +2357,7 @@ mod tests {
         conn.subscriptions.push(SubscriptionConfig {
             topic: "mqttc/test/#".into(),
             qos: 1,
+            ..Default::default()
         });
         conn.publish_presets.push(Default::default());
         conn.auto_reply_rules.push(AutoReplyRule::default());
@@ -1997,5 +2433,26 @@ mod tests {
         {
             let _page = app.view();
         }
+    }
+
+    /// Deleting a connection must go through a confirmation dialog; the modal
+    /// must build for both an existing and an already-removed id.
+    #[test]
+    fn delete_confirmation_builds() {
+        let mut app = App::new();
+        let id = app.rt.active_id().unwrap();
+
+        app.pending_delete = Some(id);
+        {
+            let _page = app.view();
+        }
+
+        app.pending_delete = Some("does-not-exist".into());
+        {
+            let _page = app.view();
+        }
+
+        let _ = app.update(Msg::CancelDelete);
+        assert!(app.pending_delete.is_none());
     }
 }

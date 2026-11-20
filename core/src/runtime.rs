@@ -5,7 +5,7 @@
 //! on the UI thread and behaviour is identical across the egui / Iced / GPUI ports.
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -22,14 +22,22 @@ use crate::form::FormState;
 use crate::i18n::{self, Lang};
 use crate::logs::LogStore;
 use crate::model::{
-    clamp_log_limit, default_client_id, parse_timed_interval, ConnStatus, LogRecord,
+    clamp_log_limit, default_client_id, parse_timed_interval, ConnStatus, LogMeta, LogRecord,
     PayloadFormat, Skin,
 };
-use crate::mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, UiEvent};
+use crate::mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, PublishOptions, UiEvent};
 use crate::payload;
 use crate::theme::{self, Palette};
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(400);
+/// Give up after this many consecutive failures; the user can always click Connect.
+const RECONNECT_MAX_ATTEMPTS: u32 = 8;
+
+/// 1s, 2s, 4s … capped at 30s. Exposed for tests and status hints.
+pub fn reconnect_delay(attempt: u32) -> Duration {
+    let shift = attempt.saturating_sub(1).min(5);
+    Duration::from_secs((1u64 << shift).min(30))
+}
 
 /// Worker → UI messages. `conn_id` is carried so one queue can serve every session.
 #[derive(Clone, Debug)]
@@ -117,6 +125,16 @@ pub struct ConnRuntime {
     pub logs_paused: bool,
     /// Data rows dropped while paused, shown in the UI and reported on resume.
     pub paused_dropped: u64,
+    /// User clicked Disconnect: suppress auto reconnect until the next manual Connect.
+    pub manual_stop: bool,
+    /// Consecutive automatic reconnect attempts; reset on a successful handshake.
+    pub reconnect_attempt: u32,
+    /// When the next attempt is due (UI thread time).
+    pub next_reconnect: Option<Instant>,
+    /// Auto-reply hit counter per rule index (transient, reset on connect / reorder).
+    pub rule_hits: Vec<u64>,
+    /// Last reply time per rule index, for `min_interval_secs`.
+    pub rule_last: Vec<Option<Instant>>,
 }
 
 impl Default for ConnRuntime {
@@ -137,6 +155,11 @@ impl ConnRuntime {
             last_auto_reply: None,
             logs_paused: false,
             paused_dropped: 0,
+            manual_stop: false,
+            reconnect_attempt: 0,
+            next_reconnect: None,
+            rule_hits: Vec::new(),
+            rule_last: Vec::new(),
         }
     }
 }
@@ -476,21 +499,37 @@ impl AppRuntime {
     // ------------------------------------------------------------- connect
 
     pub fn connect(&mut self) -> bool {
-        self.apply_form();
         let Some(idx) = self.active_index() else {
             return false;
         };
+        self.connect_at(idx, true, true)
+    }
+
+    /// Connect one saved connection. `apply_form` mirrors the editor into the
+    /// active connection first; background reconnects pass `false` so they never
+    /// touch whatever the user is editing.
+    fn connect_at(&mut self, idx: usize, apply_form: bool, reset_backoff: bool) -> bool {
+        if apply_form && self.active_index() == Some(idx) {
+            self.apply_form();
+        }
         let mut cfg = self.config.connections[idx].clone();
+        let id = cfg.id.clone();
 
         let host = cfg.host.trim().to_string();
         if host.is_empty() {
-            self.push_log_active("ERR", "", i18n::t("主机不能为空", "Host is required").into_bytes());
+            self.push_log(
+                &id,
+                "ERR",
+                "",
+                i18n::t("主机不能为空", "Host is required").into_bytes(),
+            );
             return false;
         }
         let port = match cfg.port.trim().parse::<u16>() {
             Ok(port) if port > 0 => port,
             _ => {
-                self.push_log_active(
+                self.push_log(
+                    &id,
                     "ERR",
                     "",
                     i18n::t(
@@ -502,9 +541,15 @@ impl AppRuntime {
                 return false;
             }
         };
+        if let Err(err) = validate_tls_paths(&cfg) {
+            self.push_log(&id, "ERR", "", err.into_bytes());
+            return false;
+        }
         if cfg.client_id.trim().is_empty() {
             cfg.client_id = default_client_id();
-            self.form.client_id = cfg.client_id.clone();
+            if self.active_index() == Some(idx) {
+                self.form.client_id = cfg.client_id.clone();
+            }
         }
         cfg.host = host;
         cfg.username = cfg.username.trim().to_string();
@@ -517,12 +562,16 @@ impl AppRuntime {
         } else {
             format!("用户 {}", cfg.username)
         };
-        let id = cfg.id.clone();
         self.stop_timed(&id);
         {
             let runtime = self.runtime_mut(&id);
             runtime.status = ConnStatus::Connecting;
             runtime.last_auto_reply = None;
+            runtime.manual_stop = false;
+            if reset_backoff {
+                runtime.reconnect_attempt = 0;
+                runtime.next_reconnect = None;
+            }
         }
 
         let will_hint = if cfg.will_topic.trim().is_empty() {
@@ -618,6 +667,9 @@ impl AppRuntime {
             runtime.mqtt.disconnect();
             runtime.status = ConnStatus::Disconnected;
             runtime.last_auto_reply = None;
+            runtime.manual_stop = true;
+            runtime.reconnect_attempt = 0;
+            runtime.next_reconnect = None;
         }
         self.push_log(&id, "SYS", "", i18n::t("已断开连接", "Disconnected").into_bytes());
         self.persist();
@@ -643,8 +695,10 @@ impl AppRuntime {
             return;
         }
         let qos = self.form.sub_qos.clamp(0, 2) as u8;
+        let no_local = self.form.sub_no_local;
+        let rap = self.form.sub_retain_as_published;
         let mqtt = self.runtime_mut(&id).mqtt.clone();
-        match mqtt.subscribe(&topic, qos_from_u8(qos)) {
+        match mqtt.subscribe_with_options(&topic, qos_from_u8(qos), no_local, rap) {
             Ok(()) => {
                 let Some(idx) = self.active_index() else { return };
                 let exists = self.config.connections[idx]
@@ -664,6 +718,8 @@ impl AppRuntime {
                         .push(SubscriptionConfig {
                             topic: topic.clone(),
                             qos,
+                            no_local,
+                            retain_as_published: rap,
                         });
                     self.push_log(
                         &id,
@@ -680,6 +736,37 @@ impl AppRuntime {
             }
             Err(err) => self.push_log(&id, "ERR", &topic, err.into_bytes()),
         }
+    }
+
+    /// Flip one MQTT 5 option on a saved subscription. Re-subscribes when connected
+    /// so the broker applies the new option immediately.
+    pub fn flip_sub_option(&mut self, index: usize, no_local: bool) -> bool {
+        let Some(id) = self.active_id() else { return false };
+        let Some(idx) = self.active_index() else { return false };
+        let Some(sub) = self.config.connections[idx].subscriptions.get_mut(index) else {
+            return false;
+        };
+        if no_local {
+            sub.no_local = !sub.no_local;
+        } else {
+            sub.retain_as_published = !sub.retain_as_published;
+        }
+        let sub = sub.clone();
+        let connected = self.is_connected(&id);
+        if connected {
+            let mqtt = self.runtime_mut(&id).mqtt.clone();
+            if let Err(err) = mqtt.subscribe_with_options(
+                &sub.topic,
+                qos_from_u8(sub.qos),
+                sub.no_local,
+                sub.retain_as_published,
+            ) {
+                self.push_log(&id, "ERR", &sub.topic, err.into_bytes());
+                return false;
+            }
+        }
+        self.persist();
+        true
     }
 
     pub fn unsubscribe(&mut self, index: usize) {
@@ -708,6 +795,38 @@ impl AppRuntime {
             self.runtime_mut(&id).active_sub_topic.clear();
         }
         self.persist();
+    }
+
+    /// Reorder an auto-reply rule. Matching stops at the first hit, so order is significant.
+    pub fn move_rule(&mut self, index: usize, delta: isize) -> bool {
+        self.apply_form();
+        if !self.form.move_rule(index, delta) {
+            return false;
+        }
+        self.apply_form();
+        if let Some(id) = self.active_id() {
+            let runtime = self.runtime_mut(&id);
+            runtime.rule_hits.clear();
+            runtime.rule_last.clear();
+        }
+        self.persist();
+        true
+    }
+
+    /// Reply count per rule for the active connection, indexed like `form.rules`.
+    pub fn active_rule_hits(&self) -> Vec<u64> {
+        self.active_id()
+            .and_then(|id| self.runtimes.get(&id))
+            .map(|rt| rt.rule_hits.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn reset_rule_stats(&mut self) {
+        if let Some(id) = self.active_id() {
+            let runtime = self.runtime_mut(&id);
+            runtime.rule_hits.clear();
+            runtime.rule_last.clear();
+        }
     }
 
     /// Click a subscription row: toggle the log filter for that topic.
@@ -777,7 +896,17 @@ impl AppRuntime {
             payload.clone(),
         ) {
             Ok(()) => {
-                self.push_log(&id, "SEND", &topic, payload);
+                self.push_log_meta(
+                    &id,
+                    "SEND",
+                    &topic,
+                    payload,
+                    LogMeta {
+                        qos: Some(preset.qos.min(2)),
+                        retain: preset.retain,
+                        ..LogMeta::default()
+                    },
+                );
                 self.persist();
                 true
             }
@@ -854,10 +983,32 @@ impl AppRuntime {
         } else {
             cfg.pub_retain
         };
+        let (props_text, expiry) = if from_form {
+            (
+                self.form.pub_props.clone(),
+                self.form.pub_expiry.trim().parse::<u32>().unwrap_or(0),
+            )
+        } else {
+            (cfg.pub_props.clone(), cfg.pub_expiry)
+        };
+        let options = publish_options(&props_text, expiry);
         let mqtt = self.runtime_mut(conn_id).mqtt.clone();
-        match mqtt.publish(&topic, qos_from_u8(qos), retain, payload.clone()) {
+        match mqtt.publish_with_options(&topic, qos_from_u8(qos), retain, payload.clone(), &options)
+        {
             Ok(()) => {
-                self.push_log(conn_id, "SEND", &topic, payload);
+                self.push_log_meta(
+                    conn_id,
+                    "SEND",
+                    &topic,
+                    payload,
+                    LogMeta {
+                        qos: Some(qos),
+                        retain,
+                        props: options.user_properties.clone(),
+                        expiry: options.expiry,
+                        ..LogMeta::default()
+                    },
+                );
                 if persist_on_ok {
                     self.persist();
                 }
@@ -993,13 +1144,130 @@ impl AppRuntime {
             }
         }
         self.maybe_persist();
+        self.reconnect_tick();
         summary
+    }
+
+    /// Queue an exponential-backoff retry after an unexpected disconnect.
+    fn schedule_reconnect(&mut self, conn_id: &str, previous: ConnStatus) {
+        if previous == ConnStatus::Disconnected {
+            return;
+        }
+        let Some(cfg) = self
+            .config
+            .connections
+            .iter()
+            .find(|conn| conn.id == conn_id)
+        else {
+            return;
+        };
+        if !cfg.auto_reconnect {
+            return;
+        }
+        let Some(runtime) = self.runtimes.get(conn_id) else {
+            return;
+        };
+        if runtime.manual_stop {
+            return;
+        }
+        if runtime.reconnect_attempt >= RECONNECT_MAX_ATTEMPTS {
+            self.push_log(
+                conn_id,
+                "SYS",
+                "",
+                i18n::t(
+                    &format!("已连续重试 {} 次，停止自动重连", RECONNECT_MAX_ATTEMPTS),
+                    &format!(
+                        "Auto reconnect stopped after {} attempts",
+                        RECONNECT_MAX_ATTEMPTS
+                    ),
+                )
+                .into_bytes(),
+            );
+            return;
+        }
+        let attempt = runtime.reconnect_attempt + 1;
+        let delay = reconnect_delay(attempt);
+        let runtime = self.runtime_mut(conn_id);
+        runtime.reconnect_attempt = attempt;
+        runtime.next_reconnect = Some(Instant::now() + delay);
+        self.push_log(
+            conn_id,
+            "SYS",
+            "",
+            i18n::t(
+                &format!(
+                    "{} 秒后自动重连（第 {} 次）",
+                    delay.as_secs(),
+                    attempt
+                ),
+                &format!(
+                    "Reconnecting in {}s (attempt {})",
+                    delay.as_secs(),
+                    attempt
+                ),
+            )
+            .into_bytes(),
+        );
+    }
+
+    /// Called from `poll()`: start the next attempt once its backoff has elapsed.
+    /// Runs for every connection, not just the active one, so background
+    /// sessions recover while the user is editing another connection.
+    fn reconnect_tick(&mut self) {
+        let now = Instant::now();
+        let due: Vec<String> = self
+            .runtimes
+            .iter()
+            .filter(|(_, rt)| rt.status == ConnStatus::Disconnected)
+            .filter(|(_, rt)| matches!(rt.next_reconnect, Some(at) if at <= now))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in due {
+            let Some(idx) = self.config.connections.iter().position(|c| c.id == id) else {
+                let runtime = self.runtime_mut(&id);
+                runtime.next_reconnect = None;
+                runtime.reconnect_attempt = 0;
+                continue;
+            };
+            if !self.config.connections[idx].auto_reconnect {
+                let runtime = self.runtime_mut(&id);
+                runtime.next_reconnect = None;
+                runtime.reconnect_attempt = 0;
+                continue;
+            }
+            self.runtime_mut(&id).next_reconnect = None;
+            let _ = self.connect_at(idx, false, false);
+        }
+    }
+
+    /// `(attempt, remaining delay)` while an automatic retry is queued.
+    pub fn reconnect_state(&self) -> Option<(u32, Duration)> {
+        let id = self.active_id()?;
+        let runtime = self.runtimes.get(&id)?;
+        let at = runtime.next_reconnect?;
+        Some((
+            runtime.reconnect_attempt,
+            at.saturating_duration_since(Instant::now()),
+        ))
+    }
+
+    pub fn reconnect_pending(&self) -> bool {
+        self.reconnect_state().is_some()
     }
 
     fn handle_mqtt_event(&mut self, conn_id: &str, event: UiEvent) -> Option<i32> {
         match event {
             UiEvent::Connected => {
-                self.runtime_mut(conn_id).status = ConnStatus::Connected;
+                {
+                    let runtime = self.runtime_mut(conn_id);
+                    runtime.status = ConnStatus::Connected;
+                    runtime.reconnect_attempt = 0;
+                    runtime.next_reconnect = None;
+                    runtime.manual_stop = false;
+                    runtime.rule_hits.clear();
+                    runtime.rule_last.clear();
+                }
                 self.push_log(
                     conn_id,
                     "SYS",
@@ -1019,8 +1287,11 @@ impl AppRuntime {
                     .unwrap_or(false);
                 self.stop_timed(conn_id);
                 let previous = self.runtime_mut(conn_id).status;
-                self.runtime_mut(conn_id).status = ConnStatus::Disconnected;
-                self.runtime_mut(conn_id).last_auto_reply = None;
+                {
+                    let runtime = self.runtime_mut(conn_id);
+                    runtime.status = ConnStatus::Disconnected;
+                    runtime.last_auto_reply = None;
+                }
                 if previous != ConnStatus::Disconnected && !reason.is_empty() {
                     self.push_log(
                         conn_id,
@@ -1045,10 +1316,44 @@ impl AppRuntime {
                         .into_bytes(),
                     );
                 }
+                self.schedule_reconnect(conn_id, previous);
             }
-            UiEvent::Recv { topic, payload } => {
-                self.push_log(conn_id, "RECV", &topic, payload.clone());
+            UiEvent::Recv {
+                topic,
+                payload,
+                qos,
+                retain,
+                dup,
+                props,
+                expiry,
+            } => {
+                self.push_log_meta(
+                    conn_id,
+                    "RECV",
+                    &topic,
+                    payload.clone(),
+                    LogMeta {
+                        qos: Some(qos),
+                        retain,
+                        dup,
+                        props,
+                        expiry,
+                    },
+                );
                 self.maybe_auto_reply(conn_id, &topic, &payload);
+            }
+            UiEvent::Reason {
+                name,
+                pkid,
+                code,
+                ok,
+            } => {
+                let message = if ok {
+                    format!("{name} #{pkid}: {code}")
+                } else {
+                    format!("{name} #{pkid} failed: {code}")
+                };
+                self.push_log(conn_id, if ok { "SYS" } else { "ERR" }, "", message.into_bytes());
             }
             UiEvent::Error { message } => {
                 self.push_log(conn_id, "ERR", "", message.into_bytes());
@@ -1094,7 +1399,12 @@ impl AppRuntime {
         }
         let mqtt = self.runtime_mut(conn_id).mqtt.clone();
         for sub in subs {
-            match mqtt.subscribe(&sub.topic, qos_from_u8(sub.qos)) {
+            match mqtt.subscribe_with_options(
+                &sub.topic,
+                qos_from_u8(sub.qos),
+                sub.no_local,
+                sub.retain_as_published,
+            ) {
                 Ok(()) => self.push_log(
                     conn_id,
                     "SYS",
@@ -1133,11 +1443,28 @@ impl AppRuntime {
             }
         }
         let payload_text = String::from_utf8_lossy(payload).into_owned();
-        let Some(rule_idx) = select_auto_reply_rule(
-            &self.config.connections[idx].auto_reply_rules,
-            topic,
-            &payload_text,
-        ) else {
+        let rules = self.config.connections[idx].auto_reply_rules.clone();
+        let now = Instant::now();
+        let mut rule_idx = None;
+        for (i, rule) in rules.iter().enumerate() {
+            if !rule_matches(rule, topic, &payload_text) {
+                continue;
+            }
+            // A throttled rule lets the next matching rule take the message.
+            let ready = rule.min_interval_secs == 0
+                || self
+                    .runtime(conn_id)
+                    .and_then(|rt| rt.rule_last.get(i).copied().flatten())
+                    .map(|last| {
+                        now.duration_since(last).as_secs() >= rule.min_interval_secs as u64
+                    })
+                    .unwrap_or(true);
+            if ready {
+                rule_idx = Some(i);
+                break;
+            }
+        }
+        let Some(rule_idx) = rule_idx else {
             return;
         };
         let rule = self.config.connections[idx].auto_reply_rules[rule_idx].clone();
@@ -1167,9 +1494,29 @@ impl AppRuntime {
             reply_bytes.clone(),
         ) {
             Ok(()) => {
-                self.runtime_mut(conn_id).last_auto_reply =
-                    Some((reply_topic.clone(), reply_bytes.clone()));
-                self.push_log(conn_id, "SEND", &reply_topic, reply_bytes);
+                {
+                    let runtime = self.runtime_mut(conn_id);
+                    runtime.last_auto_reply = Some((reply_topic.clone(), reply_bytes.clone()));
+                    if runtime.rule_hits.len() <= rule_idx {
+                        runtime.rule_hits.resize(rule_idx + 1, 0);
+                    }
+                    if runtime.rule_last.len() <= rule_idx {
+                        runtime.rule_last.resize(rule_idx + 1, None);
+                    }
+                    runtime.rule_hits[rule_idx] = runtime.rule_hits[rule_idx].saturating_add(1);
+                    runtime.rule_last[rule_idx] = Some(now);
+                }
+                self.push_log_meta(
+                    conn_id,
+                    "SEND",
+                    &reply_topic,
+                    reply_bytes,
+                    LogMeta {
+                        qos: Some(rule.qos.min(2)),
+                        retain: rule.retain,
+                        ..LogMeta::default()
+                    },
+                );
             }
             Err(err) => self.push_log(conn_id, "ERR", &reply_topic, err.into_bytes()),
         }
@@ -1178,12 +1525,24 @@ impl AppRuntime {
     // ---------------------------------------------------------------- logs
 
     pub fn push_log(&mut self, conn_id: &str, kind: &str, topic: &str, payload: Vec<u8>) {
+        self.push_log_meta(conn_id, kind, topic, payload, LogMeta::default());
+    }
+
+    /// Variant carrying MQTT metadata; paused capture still drops only RECV/SEND.
+    pub fn push_log_meta(
+        &mut self,
+        conn_id: &str,
+        kind: &str,
+        topic: &str,
+        payload: Vec<u8>,
+        meta: LogMeta,
+    ) {
         let runtime = self.runtime_mut(conn_id);
         if runtime.logs_paused && (kind == "RECV" || kind == "SEND") {
             runtime.paused_dropped = runtime.paused_dropped.saturating_add(1);
             return;
         }
-        runtime.logs.push(kind, topic, payload);
+        runtime.logs.push_meta(kind, topic, payload, meta);
     }
 
     /// Whether the active connection is freezing data rows. Transient (not persisted).
@@ -1245,6 +1604,24 @@ impl AppRuntime {
     pub fn active_log(&self, seq: u64) -> Option<&LogRecord> {
         let id = self.active_id()?;
         self.runtimes.get(&id)?.logs.find(seq)
+    }
+
+    /// Most recent SEND row of the active connection (↑ recall, copy last row).
+    pub fn last_sent(&self) -> Option<LogRecord> {
+        let id = self.active_id()?;
+        self.runtimes
+            .get(&id)?
+            .logs
+            .iter()
+            .rev()
+            .find(|log| log.kind == "SEND")
+            .cloned()
+    }
+
+    /// Most recent row of any kind, for "copy whole row" without a selection.
+    pub fn last_log(&self) -> Option<LogRecord> {
+        let id = self.active_id()?;
+        self.runtimes.get(&id)?.logs.iter().rev().next().cloned()
     }
 
     fn push_log_active(&mut self, kind: &str, topic: &str, payload: Vec<u8>) {
@@ -1335,6 +1712,54 @@ impl AppRuntime {
     }
 }
 
+/// Reject obviously wrong cert paths before spawning the worker. The TLS builder
+/// still parses contents; this only catches typos / removed files.
+fn validate_tls_paths(cfg: &ConnectionConfig) -> Result<(), String> {
+    if !cfg.ssl {
+        return Ok(());
+    }
+    for (label, path) in [
+        (i18n::t("CA 证书", "CA certificate"), &cfg.ssl_ca),
+        (i18n::t("客户端证书", "Client certificate"), &cfg.ssl_cert),
+        (i18n::t("客户端私钥", "Client key"), &cfg.ssl_key),
+    ] {
+        let path = path.trim();
+        if !path.is_empty() && !Path::new(path).is_file() {
+            return Err(i18n::t(
+                &format!("{label}文件不存在: {path}"),
+                &format!("{label} file not found: {path}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// `key=value;key2=value2` → MQTT 5 user properties. Bare keys get an empty value.
+fn parse_user_properties(text: &str) -> Vec<(String, String)> {
+    text.split([';', '\n'])
+        .filter_map(|pair| {
+            let pair = pair.trim();
+            if pair.is_empty() {
+                return None;
+            }
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            let key = key.trim();
+            if key.is_empty() {
+                None
+            } else {
+                Some((key.to_string(), value.trim().to_string()))
+            }
+        })
+        .collect()
+}
+
+fn publish_options(props: &str, expiry: u32) -> PublishOptions {
+    PublishOptions {
+        user_properties: parse_user_properties(props),
+        expiry: (expiry > 0).then_some(expiry),
+    }
+}
+
 /// First matching enabled rule wins.
 pub fn select_auto_reply_rule(
     rules: &[AutoReplyRule],
@@ -1398,6 +1823,33 @@ mod tests {
         assert_eq!(select_auto_reply_rule(&rules, "dev/other", "ping"), Some(2));
         assert_eq!(select_auto_reply_rule(&rules, "dev/other", "nope"), None);
         assert_eq!(select_auto_reply_rule(&[], "a", "b"), None);
+    }
+
+    #[test]
+    fn reconnect_backoff_doubles_then_caps() {
+        assert_eq!(reconnect_delay(0), Duration::from_secs(1));
+        assert_eq!(reconnect_delay(1), Duration::from_secs(1));
+        assert_eq!(reconnect_delay(2), Duration::from_secs(2));
+        assert_eq!(reconnect_delay(3), Duration::from_secs(4));
+        assert_eq!(reconnect_delay(4), Duration::from_secs(8));
+        assert_eq!(reconnect_delay(5), Duration::from_secs(16));
+        assert_eq!(reconnect_delay(6), Duration::from_secs(30));
+        assert_eq!(reconnect_delay(64), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn user_properties_parse_repeated_and_blank_keys() {
+        assert_eq!(parse_user_properties(""), Vec::new());
+        assert_eq!(parse_user_properties("a=1;;b=2;flag"), vec![
+            ("a".into(), "1".into()),
+            ("b".into(), "2".into()),
+            ("flag".into(), String::new()),
+        ]);
+        let opts = publish_options("k=v", 0);
+        assert!(!opts.is_empty());
+        assert_eq!(opts.expiry, None);
+        assert_eq!(publish_options("", 60).expiry, Some(60));
+        assert!(publish_options("", 0).is_empty());
     }
 
     #[test]

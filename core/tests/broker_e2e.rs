@@ -39,6 +39,7 @@ fn config_for(port: u16, protocol: &str) -> AppConfig {
     conn.subscriptions.push(SubscriptionConfig {
         topic: "mqttc/mvp/#".into(),
         qos: 0,
+        ..Default::default()
     });
     let mut config = AppConfig::default();
     config.active_id = conn.id.clone();
@@ -136,6 +137,7 @@ fn auto_reply_and_timed_publish() {
     conn.subscriptions = vec![SubscriptionConfig {
         topic: "mqttc/in/#".into(),
         qos: 1,
+        ..Default::default()
     }];
     conn.pub_topic = "mqttc/timed".into();
     conn.pub_payload = "tick".into();

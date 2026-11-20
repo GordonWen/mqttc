@@ -79,6 +79,11 @@ mod tests {
             kind: kind.to_string(),
             topic: topic.to_string(),
             payload: Arc::from(payload),
+            qos: None,
+            retain: false,
+            dup: false,
+            props: Vec::new(),
+            expiry: None,
         }
     }
 

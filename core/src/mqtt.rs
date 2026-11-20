@@ -92,12 +92,40 @@ pub struct ConnectParams {
     pub protocol: ProtocolVersion,
 }
 
+/// MQTT 5-only PUBLISH properties. An empty struct sends a plain PUBLISH.
+#[derive(Clone, Debug, Default)]
+pub struct PublishOptions {
+    pub user_properties: Vec<(String, String)>,
+    pub expiry: Option<u32>,
+}
+
+impl PublishOptions {
+    pub fn is_empty(&self) -> bool {
+        self.user_properties.is_empty() && self.expiry.is_none()
+    }
+}
+
 /// Worker → runtime. Payload is raw bytes; the runtime decides how to display it.
 #[derive(Clone, Debug)]
 pub enum UiEvent {
     Connected,
     Disconnected { reason: String },
-    Recv { topic: String, payload: Vec<u8> },
+    Recv {
+        topic: String,
+        payload: Vec<u8>,
+        qos: u8,
+        retain: bool,
+        dup: bool,
+        props: Vec<(String, String)>,
+        expiry: Option<u32>,
+    },
+    /// MQTT 5 acknowledgement with a reason code (PUBACK / SUBACK / UNSUBACK).
+    Reason {
+        name: &'static str,
+        pkid: u16,
+        code: String,
+        ok: bool,
+    },
     Error { message: String },
 }
 
@@ -131,11 +159,25 @@ impl LiveClient {
         }
     }
 
-    fn subscribe(&self, topic: &str, qos: QoS) -> Result<(), String> {
+    /// MQTT 5 subscription options; the 3.1.1 client cannot express them, so it
+    /// sends a plain SUBSCRIBE (the UI labels the toggles as MQTT 5-only).
+    fn subscribe_with_options(
+        &self,
+        topic: &str,
+        qos: QoS,
+        no_local: bool,
+        retain_as_published: bool,
+    ) -> Result<(), String> {
         match self {
             Self::V311(client) => client.subscribe(topic, qos).map_err(|err| err.to_string()),
             Self::V5(client) => client
-                .subscribe(topic, qos_v5(qos))
+                .subscribe_many([rumqttc::v5::mqttbytes::v5::Filter {
+                    path: topic.to_string(),
+                    qos: qos_v5(qos),
+                    nolocal: no_local,
+                    preserve_retain: retain_as_published,
+                    retain_forward_rule: Default::default(),
+                }])
                 .map_err(|err| err.to_string()),
         }
     }
@@ -147,14 +189,34 @@ impl LiveClient {
         }
     }
 
-    fn publish(&self, topic: &str, qos: QoS, retain: bool, payload: Vec<u8>) -> Result<(), String> {
+    fn publish_with_options(
+        &self,
+        topic: &str,
+        qos: QoS,
+        retain: bool,
+        payload: Vec<u8>,
+        options: &PublishOptions,
+    ) -> Result<(), String> {
         match self {
             Self::V311(client) => client
                 .publish(topic, qos, retain, payload)
                 .map_err(|err| err.to_string()),
-            Self::V5(client) => client
-                .publish(topic, qos_v5(qos), retain, payload)
-                .map_err(|err| err.to_string()),
+            Self::V5(client) => {
+                if options.is_empty() {
+                    client
+                        .publish(topic, qos_v5(qos), retain, payload)
+                        .map_err(|err| err.to_string())
+                } else {
+                    let properties = rumqttc::v5::mqttbytes::v5::PublishProperties {
+                        user_properties: options.user_properties.clone(),
+                        message_expiry_interval: options.expiry,
+                        ..Default::default()
+                    };
+                    client
+                        .publish_with_properties(topic, qos_v5(qos), retain, payload, properties)
+                        .map_err(|err| err.to_string())
+                }
+            }
         }
     }
 }
@@ -264,12 +326,23 @@ impl MqttHandle {
     }
 
     pub fn subscribe(&self, topic: &str, qos: QoS) -> Result<(), String> {
+        self.subscribe_with_options(topic, qos, false, false)
+    }
+
+    /// Subscribe with MQTT 5 options. The 3.1.1 client silently ignores the flags.
+    pub fn subscribe_with_options(
+        &self,
+        topic: &str,
+        qos: QoS,
+        no_local: bool,
+        retain_as_published: bool,
+    ) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
         let client = inner
             .client
             .as_ref()
             .ok_or_else(|| i18n::t("未连接", "Not connected"))?;
-        client.subscribe(topic, qos)
+        client.subscribe_with_options(topic, qos, no_local, retain_as_published)
     }
 
     pub fn unsubscribe(&self, topic: &str) -> Result<(), String> {
@@ -288,12 +361,24 @@ impl MqttHandle {
         retain: bool,
         payload: Vec<u8>,
     ) -> Result<(), String> {
+        self.publish_with_options(topic, qos, retain, payload, &PublishOptions::default())
+    }
+
+    /// Publish with MQTT 5 user properties / expiry. The 3.1.1 client ignores them.
+    pub fn publish_with_options(
+        &self,
+        topic: &str,
+        qos: QoS,
+        retain: bool,
+        payload: Vec<u8>,
+        options: &PublishOptions,
+    ) -> Result<(), String> {
         let inner = self.inner.lock().expect("mqtt lock");
         let client = inner
             .client
             .as_ref()
             .ok_or_else(|| i18n::t("未连接", "Not connected"))?;
-        client.publish(topic, qos, retain, payload)
+        client.publish_with_options(topic, qos, retain, payload, options)
     }
 }
 
@@ -372,6 +457,11 @@ fn start_v311<F>(
                     on_event(UiEvent::Recv {
                         topic: packet.topic,
                         payload: packet.payload.to_vec(),
+                        qos: qos_index(packet.qos),
+                        retain: packet.retain,
+                        dup: packet.dup,
+                        props: Vec::new(),
+                        expiry: None,
                     });
                 }
                 Err(err) => {
@@ -408,6 +498,49 @@ fn qos_v5(qos: QoS) -> rumqttc::v5::mqttbytes::QoS {
         QoS::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
         _ => rumqttc::v5::mqttbytes::QoS::AtMostOnce,
     }
+}
+
+fn qos_index(qos: QoS) -> u8 {
+    match qos {
+        QoS::AtLeastOnce => 1,
+        QoS::ExactlyOnce => 2,
+        _ => 0,
+    }
+}
+
+fn qos_v5_index(qos: rumqttc::v5::mqttbytes::QoS) -> u8 {
+    use rumqttc::v5::mqttbytes::QoS as V5QoS;
+    match qos {
+        V5QoS::AtLeastOnce => 1,
+        V5QoS::ExactlyOnce => 2,
+        _ => 0,
+    }
+}
+
+/// Flatten the Publish properties the log panel can show without extra UI.
+fn v5_publish_meta(
+    props: Option<&rumqttc::v5::mqttbytes::v5::PublishProperties>,
+) -> (Vec<(String, String)>, Option<u32>) {
+    let Some(props) = props else {
+        return (Vec::new(), None);
+    };
+    let mut out = props.user_properties.clone();
+    if let Some(topic) = &props.response_topic {
+        out.push(("response-topic".into(), topic.clone()));
+    }
+    if let Some(kind) = &props.content_type {
+        out.push(("content-type".into(), kind.clone()));
+    }
+    if let Some(alias) = props.topic_alias {
+        out.push(("topic-alias".into(), alias.to_string()));
+    }
+    if let Some(data) = &props.correlation_data {
+        out.push((
+            "correlation-data".into(),
+            String::from_utf8_lossy(data).into_owned(),
+        ));
+    }
+    (out, props.message_expiry_interval)
 }
 
 /// Same shape as [`start_v311`], using rumqttc's MQTT 5 client (`clean_start` instead of `clean_session`).
@@ -480,9 +613,69 @@ fn start_v5<F>(
                     rumqttc::v5::mqttbytes::v5::Packet::Publish(packet),
                 )) => {
                     let topic = String::from_utf8_lossy(&packet.topic).into_owned();
+                    let (props, expiry) = v5_publish_meta(packet.properties.as_ref());
                     on_event(UiEvent::Recv {
                         topic,
                         payload: packet.payload.to_vec(),
+                        qos: qos_v5_index(packet.qos),
+                        retain: packet.retain,
+                        dup: packet.dup,
+                        props,
+                        expiry,
+                    });
+                }
+                Ok(rumqttc::v5::Event::Incoming(
+                    rumqttc::v5::mqttbytes::v5::Packet::PubAck(ack),
+                )) => {
+                    if ack.reason != rumqttc::v5::mqttbytes::v5::PubAckReason::Success {
+                        on_event(UiEvent::Reason {
+                            name: "PUBACK",
+                            pkid: ack.pkid,
+                            code: format!("{:?}", ack.reason),
+                            ok: false,
+                        });
+                    }
+                }
+                Ok(rumqttc::v5::Event::Incoming(
+                    rumqttc::v5::mqttbytes::v5::Packet::SubAck(ack),
+                )) => {
+                    use rumqttc::v5::mqttbytes::v5::SubscribeReasonCode;
+                    let ok = ack
+                        .return_codes
+                        .iter()
+                        .all(|code| matches!(code, SubscribeReasonCode::Success(_)));
+                    let code = ack
+                        .return_codes
+                        .iter()
+                        .map(|code| format!("{code:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    on_event(UiEvent::Reason {
+                        name: "SUBACK",
+                        pkid: ack.pkid,
+                        code,
+                        ok,
+                    });
+                }
+                Ok(rumqttc::v5::Event::Incoming(
+                    rumqttc::v5::mqttbytes::v5::Packet::UnsubAck(ack),
+                )) => {
+                    use rumqttc::v5::mqttbytes::v5::UnsubAckReason;
+                    let ok = ack
+                        .reasons
+                        .iter()
+                        .all(|code| matches!(code, UnsubAckReason::Success));
+                    let code = ack
+                        .reasons
+                        .iter()
+                        .map(|code| format!("{code:?}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    on_event(UiEvent::Reason {
+                        name: "UNSUBACK",
+                        pkid: ack.pkid,
+                        code,
+                        ok,
                     });
                 }
                 Err(err) => {

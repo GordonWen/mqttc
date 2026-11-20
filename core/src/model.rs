@@ -235,31 +235,80 @@ impl ConnStatus {
     }
 }
 
+/// MQTT metadata attached to one RECV/SEND row. Empty/default for SYS/ERR.
+#[derive(Clone, Debug, Default)]
+pub struct LogMeta {
+    pub qos: Option<u8>,
+    pub retain: bool,
+    pub dup: bool,
+    /// MQTT 5 user properties (and a few well-known ones) in display order.
+    pub props: Vec<(String, String)>,
+    /// MQTT 5 message expiry interval, seconds.
+    pub expiry: Option<u32>,
+}
+
 /// One log row. Payload stays as raw bytes so switching display format is lossless.
 #[derive(Clone, Debug)]
 pub struct LogRecord {
     /// Monotonic per-connection sequence, useful as a stable list key.
     pub seq: u64,
+    /// `HH:MM:SS.mmm` — milliseconds keep bursts ordered.
     pub time: String,
+    /// `YYYY-MM-DD HH:MM:SS.mmm` for exports.
     pub timestamp: String,
     /// `RECV` / `SEND` / `SYS` / `ERR`. Payload encoding applies only to RECV/SEND.
     pub kind: String,
     pub topic: String,
     pub payload: Arc<[u8]>,
+    pub qos: Option<u8>,
+    pub retain: bool,
+    pub dup: bool,
+    pub props: Vec<(String, String)>,
+    pub expiry: Option<u32>,
 }
 
 impl LogRecord {
     pub fn is_payload_kind(&self) -> bool {
         self.kind == "RECV" || self.kind == "SEND"
     }
+
+    /// Compact flag text for bubble headers / exports, e.g. `QoS1 · R · DUP`.
+    pub fn flags(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(qos) = self.qos {
+            parts.push(format!("QoS{qos}"));
+        }
+        if self.retain {
+            parts.push(i18n::t("保留", "retain").to_string());
+        }
+        if self.dup {
+            parts.push("DUP".to_string());
+        }
+        if let Some(expiry) = self.expiry {
+            parts.push(i18n::t(
+                &format!("过期 {expiry}s"),
+                &format!("expiry {expiry}s"),
+            ));
+        }
+        parts.join(" · ")
+    }
+
+    /// `k=v, k2=v2` for MQTT 5 user properties; empty when none.
+    pub fn props_text(&self) -> String {
+        self.props
+            .iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 pub fn now_hms() -> String {
-    Local::now().format("%H:%M:%S").to_string()
+    Local::now().format("%H:%M:%S%.3f").to_string()
 }
 
 pub fn now_timestamp() -> String {
-    Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+    Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }
 
 /// Unique-enough Client ID when the form is left blank (`mqttc-` + unix millis in hex).
