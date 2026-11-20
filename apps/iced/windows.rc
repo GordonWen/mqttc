@@ -1,0 +1,2 @@
+/* Explorer / taskbar icon for mqttc.exe (runtime window icon is set in main.rs). */
+1 ICON "../../assets/icon.ico"

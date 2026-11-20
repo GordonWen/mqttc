@@ -9,6 +9,9 @@ license.workspace = true
 name = "mqttc-iced"
 path = "src/main.rs"
 
+[build-dependencies]
+embed-resource = "3"
+
 [dependencies]
 mqttc-core = { workspace = true }
 iced = { version = "0.14", default-features = false, features = [

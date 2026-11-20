@@ -1,7 +1,8 @@
 //! mqttc · Iced shell.
 //!
 //! All business state lives in `mqttc-core`'s `AppRuntime`; this module maps
-//! widget messages onto runtime actions and renders the six reference pages.
+//! widget messages onto runtime actions. The sidebar holds connection/settings
+//! pages; subscription, auto-reply and preset panels live in the session tabs.
 
 use std::cell::Cell;
 use std::fmt;
@@ -140,6 +141,7 @@ pub enum Msg {
     New,
     Delete(String),
     Page(i32),
+    SessionTab(SessionTab),
     Connect,
     Disconnect,
     Subscribe,
@@ -191,6 +193,15 @@ pub enum PresetTextField {
     Name,
     Topic,
     Payload,
+}
+
+/// Connection-scoped panels shown below the session header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionTab {
+    Logs,
+    Subs,
+    Rules,
+    Presets,
 }
 
 // ---------------------------------------------------------------- options
@@ -304,6 +315,7 @@ struct Bench {
 pub struct App {
     rt: AppRuntime,
     page: i32,
+    session_tab: SessionTab,
     editor: text_editor::Content,
     started: Instant,
     first_frame_ms: Cell<Option<f64>>,
@@ -330,6 +342,7 @@ impl App {
         Self {
             rt,
             page: 0,
+            session_tab: SessionTab::Logs,
             editor,
             started,
             first_frame_ms: Cell::new(None),
@@ -380,6 +393,7 @@ impl App {
             Msg::Select(id) => {
                 if self.rt.select_connection(&id) {
                     self.page = 1;
+                    self.session_tab = SessionTab::Logs;
                     self.reload_form();
                 }
             }
@@ -402,10 +416,12 @@ impl App {
                 }
                 self.page = p;
             }
+            Msg::SessionTab(tab) => self.session_tab = tab,
             Msg::Connect => {
                 self.rt.apply_form();
                 if self.rt.connect() {
                     self.page = 1;
+                    self.session_tab = SessionTab::Logs;
                 }
             }
             Msg::Disconnect => self.rt.disconnect(),
@@ -635,6 +651,8 @@ impl App {
         }
         let c = Colors::from_palette(self.rt.palette());
         row![self.sidebar(&c), self.main_area(&c)]
+            .spacing(12)
+            .padding(12)
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
@@ -674,8 +692,6 @@ impl App {
             (0, t("连接编辑", "Connection")),
             (1, t("会话", "Session")),
             (2, t("设置", "Settings")),
-            (3, t("自动回复", "Auto reply")),
-            (4, t("预设", "Presets")),
             (5, t("关于", "About")),
         ];
         let mut links = column![].spacing(2);
@@ -726,14 +742,11 @@ impl App {
             0 => self.page_editor(c),
             1 => self.page_session(c),
             2 => self.page_settings(c),
-            3 => self.page_rules(c),
-            4 => self.page_presets(c),
             _ => self.page_about(c),
         };
         container(body)
             .width(Length::Fill)
             .height(Length::Fill)
-            .padding(12)
             .into()
     }
 
@@ -957,78 +970,149 @@ impl App {
             .spacing(10)
             .align_y(Alignment::Center),
         )
-        .padding([10, 12])
+        .padding([12, 12])
         .style(c.card());
 
-        let subscribe = self.subscribe_card(c);
-        let logs = self.logs_card(c);
-        let publish = self.publish_card(c);
+        let tabs = row![
+            self.tab_button(c, SessionTab::Logs, t("日志", "Logs"), None),
+            self.tab_button(
+                c,
+                SessionTab::Subs,
+                t("订阅", "Subscriptions"),
+                Some(self.rt.subscriptions().len())
+            ),
+            self.tab_button(
+                c,
+                SessionTab::Rules,
+                t("自动回复", "Auto reply"),
+                Some(self.rt.form.rules.len())
+            ),
+            self.tab_button(
+                c,
+                SessionTab::Presets,
+                t("预设", "Presets"),
+                Some(self.rt.form.presets.len())
+            ),
+        ]
+        .spacing(4);
 
-        column![
-            header,
-            row![
-                container(subscribe).width(232),
-                column![logs, publish].spacing(10).width(Length::Fill)
-            ]
+        let body: El<'_> = match self.session_tab {
+            SessionTab::Logs => column![self.logs_card(c), self.publish_card(c)]
+                .spacing(10)
+                .height(Length::Fill)
+                .into(),
+            SessionTab::Subs => self.subs_panel(c),
+            SessionTab::Rules => self.page_rules(c),
+            SessionTab::Presets => self.page_presets(c),
+        };
+
+        column![header, tabs, body]
             .spacing(10)
             .height(Length::Fill)
-        ]
-        .spacing(10)
-        .height(Length::Fill)
-        .into()
+            .into()
     }
 
-    fn subscribe_card(&self, c: &Colors) -> El<'_> {
+    fn tab_button(
+        &self,
+        c: &Colors,
+        tab: SessionTab,
+        label: String,
+        count: Option<usize>,
+    ) -> El<'_> {
+        let caption = match count {
+            Some(n) if n > 0 => format!("{label} · {n}"),
+            _ => label,
+        };
+        button(text(caption).size(12.0))
+            .padding([6, 12])
+            .style(c.button_kind(if self.session_tab == tab {
+                ButtonKind::Selected
+            } else {
+                ButtonKind::Ghost
+            }))
+            .on_press(Msg::SessionTab(tab))
+            .into()
+    }
+
+    fn subs_panel(&self, c: &Colors) -> El<'_> {
+        let connected = self.rt.status() == ConnStatus::Connected;
         let active = self.rt.active_sub_topic();
+        let subs = self.rt.subscriptions();
+
         let mut list = column![].spacing(3);
-        for (index, sub) in self.rt.subscriptions().iter().enumerate() {
+        for (index, sub) in subs.iter().enumerate() {
             let selected = !active.is_empty() && active == sub.topic;
             let label = text(sub.topic.as_str())
-                .size(12.0)
+                .size(13.0)
                 .color(if selected { c.accent } else { c.text_body });
             let pick = button(label)
                 .width(Length::Fill)
-                .padding([5, 6])
+                .padding([7, 8])
                 .style(c.button_kind(if selected {
                     ButtonKind::Selected
                 } else {
                     ButtonKind::Ghost
                 }))
                 .on_press(Msg::ToggleSub(sub.topic.clone()));
-            let del = button(text("×").size(12.0))
-                .padding([2, 5])
+            let qos = text(format!("QoS {}", sub.qos))
+                .size(11.0)
+                .color(c.text_faint);
+            let del = button(text("×").size(14.0))
+                .padding([4, 8])
                 .style(c.danger_button())
                 .on_press(Msg::Unsubscribe(index));
-            list = list.push(row![pick, del].spacing(2));
+            list = list.push(row![pick, qos, del].spacing(8).align_y(Alignment::Center));
         }
-        if self.rt.subscriptions().is_empty() {
+        if subs.is_empty() {
             list = list.push(self.hint(c, t("尚未订阅", "No subscriptions yet")));
         }
 
+        let subscribe = button(text(t("订阅", "Subscribe")).size(12.0))
+            .padding([6, 16])
+            .style(c.primary_button())
+            .on_press_maybe(connected.then_some(Msg::Subscribe));
+
+        let status_hint = if connected {
+            t("点击条目筛选 RECV/SEND", "Click a row to filter RECV/SEND")
+        } else {
+            t("未连接，连接后即可订阅", "Connect first to subscribe")
+        };
+
         container(
             column![
-                self.section(c, &t("订阅", "Subscriptions")),
+                row![
+                    self.section(c, &t("订阅", "Subscriptions")),
+                    text(subs.len().to_string()).size(11.0).color(c.text_faint),
+                    Space::new().width(Length::Fill),
+                    self.hint(c, status_hint),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
                 row![
                     text_input("mqttc/mvp/#", &self.rt.form.sub_topic)
-                        .size(12.0)
-                        .padding([6, 7])
+                        .size(13.0)
+                        .padding([7, 9])
                         .width(Length::Fill)
                         .style(c.input_style())
                         .on_input(|v| Msg::Field(Field::SubTopic, v)),
                     pick(c, &qos_opts(), self.rt.form.sub_qos, |v| Msg::Num(Num::SubQos, v)),
-                    button(text("+").size(14.0))
-                        .padding([4, 9])
-                        .style(c.primary_button())
-                        .on_press(Msg::Subscribe),
+                    subscribe,
                 ]
-                .spacing(4),
+                .spacing(6)
+                .align_y(Alignment::Center),
                 scrollable(list).height(Length::Fill),
-                self.hint(c, t("点击条目筛选 RECV/SEND", "Click a row to filter RECV/SEND")),
+                self.hint(
+                    c,
+                    t(
+                        "点击条目会筛选日志，× 取消订阅",
+                        "Click a row to filter logs; × unsubscribes"
+                    )
+                ),
             ]
-            .spacing(8)
+            .spacing(10)
             .height(Length::Fill),
         )
-        .padding(10)
+        .padding(12)
         .height(Length::Fill)
         .style(c.card())
         .into()
@@ -1349,6 +1433,12 @@ impl App {
             .style(c.inset());
             list = list.push(card);
         }
+        if self.rt.form.rules.is_empty() {
+            list = list.push(self.hint(
+                c,
+                t("尚无规则，点击右上角新增", "No rules yet — use Add rule"),
+            ));
+        }
 
         scrollable(
             column![
@@ -1376,7 +1466,7 @@ impl App {
                 ),
             ]
             .spacing(10)
-            .padding(14),
+            .padding(12),
         )
         .height(Length::Fill)
         .into()
@@ -1432,6 +1522,12 @@ impl App {
             .style(c.inset());
             list = list.push(card);
         }
+        if self.rt.form.presets.is_empty() {
+            list = list.push(self.hint(
+                c,
+                t("尚无预设，点击右上角新增", "No presets yet — use Add preset"),
+            ));
+        }
 
         scrollable(
             column![
@@ -1449,13 +1545,13 @@ impl App {
                 self.hint(
                     c,
                     t(
-                        "会话页底部有预设的一键发送按钮",
-                        "The session page shows one-click buttons for every preset"
+                        "日志页发布框上方也有一键发送按钮",
+                        "The Logs tab also shows one-click buttons for every preset"
                     )
                 ),
             ]
             .spacing(10)
-            .padding(14),
+            .padding(12),
         )
         .height(Length::Fill)
         .into()
@@ -1535,8 +1631,38 @@ mod tests {
     #[test]
     fn every_page_builds() {
         let mut app = App::new();
-        for page in 0..6 {
+        for page in [0, 1, 2, 5] {
             app.page = page;
+            let _page = app.view();
+        }
+    }
+
+    /// Each session tab has its own body builder; exercise all of them with
+    /// non-empty connection-level lists so the list branches are covered.
+    #[test]
+    fn every_session_tab_builds() {
+        use mqttc_core::config::{AutoReplyRule, ConnectionConfig, SubscriptionConfig};
+        use mqttc_core::form::FormState;
+
+        let mut app = App::new();
+        let mut conn = ConnectionConfig::new("test".into());
+        conn.subscriptions.push(SubscriptionConfig {
+            topic: "mqttc/test/#".into(),
+            qos: 1,
+        });
+        conn.publish_presets.push(Default::default());
+        conn.auto_reply_rules.push(AutoReplyRule::default());
+        app.rt.config.active_id = conn.id.clone();
+        app.rt.config.connections.push(conn);
+        app.rt.form = FormState::from_config(app.rt.active().unwrap());
+        app.page = 1;
+        for tab in [
+            SessionTab::Logs,
+            SessionTab::Subs,
+            SessionTab::Rules,
+            SessionTab::Presets,
+        ] {
+            app.session_tab = tab;
             let _page = app.view();
         }
     }

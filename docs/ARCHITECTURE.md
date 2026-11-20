@@ -95,6 +95,7 @@ UI 线程                                  工作线程（每连接 1 个 + 定�
 | 中文字体 | fontique 系统字体回退（不打包 CJK） | cosmic-text 系统回退，默认族按平台选 YaHei / PingFang | 系统字体回退 |
 | 下拉/选择 | `ComboBox` | `pick_list` | 自绘点击循环选择器（无弹出层） |
 | 输入 | `TextEdit`（密码 `password(true)`） | `text_input` / `text_editor` | 从官方 example 移植的 IME `TextInput`（支持密码遮罩） |
+| 页面结构 | 侧栏全局页 + 会话内订阅卡 | 侧栏 4 页 + 会话标签（日志 / 订阅 / 自动回复 / 预设） | 侧栏全局页 |
 | 标题栏 | 原生标题栏 | 原生标题栏 | 自绘 `TitlebarOptions` |
 
 GPUI 的取舍（规则/预设编辑页只读等）在 [PARITY.md](PARITY.md) 中逐条记录。
