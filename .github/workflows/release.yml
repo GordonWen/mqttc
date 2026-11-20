@@ -47,13 +47,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-x64
+          name: release-linux-x64
           path: |
             dist/release/*.tar.gz
             dist/release/*.tar.gz.sha256
           if-no-files-found: error
 
-  macos-universal:
+  macos-arm64:
     runs-on: macos-15
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
@@ -63,22 +63,60 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.98.1
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Build arm64
-        run: cargo build --release -p mqttc-iced --target aarch64-apple-darwin
+        run: cargo build --release -p mqttc-iced
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-bin
+          path: target/release/mqttc-iced
+          if-no-files-found: error
+
+  macos-x64:
+    runs-on: macos-15-intel
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Build x86_64
-        run: cargo build --release -p mqttc-iced --target x86_64-apple-darwin
+        run: cargo build --release -p mqttc-iced
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-x64-bin
+          path: target/release/mqttc-iced
+          if-no-files-found: error
+
+  macos-universal:
+    needs: [macos-arm64, macos-x64]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64-bin
+          path: artifacts/arm64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-x64-bin
+          path: artifacts/x64
 
       - name: Create universal binary
         run: |
           mkdir -p target/release
-          lipo -create \
-            target/aarch64-apple-darwin/release/mqttc-iced \
-            target/x86_64-apple-darwin/release/mqttc-iced \
+          lipo -create artifacts/arm64/mqttc-iced artifacts/x64/mqttc-iced \
             -output target/release/mqttc-universal
           lipo -info target/release/mqttc-universal
           file target/release/mqttc-universal
@@ -88,7 +126,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-universal
+          name: release-macos-universal
           path: |
             dist/release/*.zip
             dist/release/*.zip.sha256
@@ -102,6 +140,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
+          pattern: release-*
           path: artifacts
           merge-multiple: true
 
