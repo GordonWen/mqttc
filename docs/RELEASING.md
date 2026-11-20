@@ -26,11 +26,14 @@ GitHub 仓库 `GordonWen/mqttc`：
 
 ## 2. 清空远端并推送新历史（仅首次）
 
-先备份旧仓库（不改动远端）：
+先尝试备份旧仓库（不改动远端）：
 
 ```powershell
 git clone --mirror https://github.com/GordonWen/mqttc.git D:\QoderProj\mqttc-old-backup.git
 ```
+
+> 2026-11-20 的实际备份因旧仓库约 172 MB、GitHub 下载持续超时未完成。
+> v0.1.1 的源码与二进制仍完整保留在本地 `参考实现/` 目录；旧分支/tag 已在远端删除。
 
 在工作区创建全新历史：
 
@@ -121,4 +124,4 @@ gh release list -R GordonWen/mqttc --json tagName -q '.[].tagName' |
 - 发布错误时可 `gh release delete v<version> -y --cleanup-tag` 后重新打 tag。
 - 工作流失败不会影响已推送的代码；修复后可用
   `gh workflow run release.yml -f tag=v<version>` 重跑。
-- 旧仓库的 mirror 备份在 `D:\QoderProj\mqttc-old-backup.git`，需要时可临时恢复。
+- 旧仓库的完整 mirror 备份未完成；如需旧版本，可从本地 `参考实现/` 或 GitHub 支持恢复。
