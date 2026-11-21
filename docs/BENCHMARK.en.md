@@ -10,6 +10,12 @@ the pre-release performance baseline. Raw CSV files and full details live in the
 `tools/bench/run-all.ps1`; published Releases do not include benchmark tools or baseline
 programs.
 
+> **Version note**: the memory, CPU and size figures in this report were collected on iced
+> builds from the v0.2.x–v1.0.0 stage. Since v1.1.0 the log list uses windowed rendering,
+> cutting S3 (10 msg/s streaming receive) from ~34% of one core to under 1%; see the
+> [v1.1.0 release notes](release-notes-v1.1.0.md). For the current version, take the
+> exe / zip sizes from the Release assets.
+
 ## 1. Test environment
 
 | Item | Value |

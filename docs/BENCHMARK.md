@@ -7,6 +7,10 @@
 原始 CSV 与完整明细在本地 `bench/out/`（已被 `.gitignore` 忽略），可用
 `tools/bench/run-all.ps1` 一键复现；发布的 Release 不含基准工具与基线程序。
 
+> **版本说明**：本报告的内存、CPU 与体积数据采集于 v0.2.x–v1.0.0 阶段的 iced 构建。
+> v1.1.0 起日志列表改为窗口化渲染，S3（10 msg/s 流式接收）单核 CPU 从约 34% 降至 1% 以下，
+> 见 [v1.1.0 发布说明](release-notes-v1.1.0.md)；当前版本的 exe / zip 体积以 Release 资产为准。
+
 ## 1. 测试环境
 
 | 项 | 值 |

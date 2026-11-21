@@ -29,7 +29,7 @@ built from source.
 | Preset send and edit | ✓ | ✓ | ✓ | send ✓ / edit ✗ (read-only) |
 | Auto-reply rules (topic, keyword, reply, QoS, Retain, format) | ✓ | ✓ | ✓ | enable/delete/add/QoS/format/Retain ✓; text read-only |
 | Log search / type filter / format switch / auto-scroll / save / clear | ✓ | ✓ | ✓ | ✓ |
-| 200 log lines per connection | ✓ | ✓ | ✓ | ✓ |
+| 200 log lines retained per connection by default (adjustable up to 2000 in settings) | ✓ | ✓ | ✓ | ✓ |
 | Chinese/English switch | ✓ | ✓ | ✓ | ✓ |
 | 7 skins (including follow system / custom palette) | ✓ | ✓ | ✓ | ✓ |
 | Config persistence (`mqttc.json`, backward compatible) | ✓ | ✓ | ✓ | ✓ |
@@ -41,16 +41,18 @@ built from source.
 Both builds are feature-complete; the differences are implementation-level:
 
 - **Log rendering**: the early Slint build used a Slint list; egui uses
-  `ScrollArea::show_rows` to lay out only visible rows, while Iced renders up to 200 rows
-  directly and uses `snap_to` for auto-scroll. Scrollbar styles differ (egui has thin
-  scrollbars; Iced uses `Scrollbar::new()`).
+  `ScrollArea::show_rows` to lay out only visible rows, while Iced lays out only the
+  newest 80 rows and freezes the current page when scrolled up, with "Show older" to
+  page backwards and "Jump to latest" when new messages arrive. Bubble width follows
+  content (85% cap). Scrollbar styles differ (egui has thin scrollbars; Iced uses
+  `Scrollbar::new()`).
 - **Fonts**: no CJK font is bundled; both use system font fallback (egui: fontique; Iced:
   cosmic-text, with the default family chosen per platform as Microsoft YaHei UI /
   PingFang SC). The early Slint build bundled glyph files, which is why it was larger.
 - **Title bar**: egui uses a native title bar; Iced uses a frameless window with a
-  custom-drawn title bar (brand, minimize / maximize / close, double-click to maximize,
-  four-side resize grips), and the theme also applies to the title area. On Windows,
-  maximize uses the monitor work area for high DPI.
+  custom-drawn title bar (brand, minimize / maximize / close, always-on-top pushpin,
+  double-click to maximize, four-side resize grips), and the theme also applies to the
+  title area. On Windows, maximize uses the monitor work area for high DPI.
 - **UI personalization**: Iced provides a 27-slot custom palette editor and 4 global text
   sizes; egui / GPUI read and apply the same `custom_palette`, but have no editor entry
   point and keep the text scale at 1.0.
@@ -59,6 +61,9 @@ Both builds are feature-complete; the differences are implementation-level:
 - **System skin detection**: Windows reads the registry once per second by default;
   macOS / Linux call `defaults` / `gsettings` and cache the result for 30 seconds. The
   early Slint build used Slint's built-in detection.
+- **Session-page additions**: Iced's session header shows received / sent counts for the
+  current connection with a reset button, and names the preset tab "Preset replies";
+  egui / GPUI show no traffic counters. All three share the same log-limit setting.
 - **Multi-line payloads**: both egui and Iced provide multi-line editors; Hex / Base64
   tolerance rules match the early version.
 

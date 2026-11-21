@@ -12,9 +12,9 @@ Get the latest build from [Releases](https://github.com/GordonWen/mqttc/releases
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 x64 | `mqttc-v1.0.0-windows-x64.zip` | Unzip and run `mqttc.exe` |
-| Linux x64 | `mqttc-v1.0.0-linux-x64.tar.gz` | Requires glibc 2.35+, libxkbcommon, Wayland or X11 |
-| macOS 11+ | `mqttc-v1.0.0-macos-universal.zip` | Universal (Apple Silicon + Intel); unsigned |
+| Windows 10/11 x64 | `mqttc-v1.1.0-windows-x64.zip` | Unzip and run `mqttc.exe` |
+| Linux x64 | `mqttc-v1.1.0-linux-x64.tar.gz` | Requires glibc 2.35+, libxkbcommon, Wayland or X11 |
+| macOS 11+ | `mqttc-v1.1.0-macos-universal.zip` | Universal (Apple Silicon + Intel); unsigned |
 
 `mqttc.json` and exported `logs/` live next to the executable. Nothing is written to the
 registry or the user profile, so the whole folder can travel on a USB stick.
@@ -38,7 +38,7 @@ processes; see the [benchmark report](docs/BENCHMARK.en.md)):
 | Streaming receive at 10 msg/s | 30.8 MB | — |
 | Timed publish at 1 Hz | 31.2 MB | — |
 
-- 5.95 MB exe, 2.82 MB portable zip
+- 5.98 MB exe, 2.83 MB portable zip
 - Idle CPU near 0%; at most 0.03% while receiving 10 msg/s (normalized to 16 logical cores)
 - 200 log lines per connection by default, adjustable up to 2000 in settings; each
   connection also has a separate 16 MB byte budget
@@ -50,8 +50,8 @@ processes; see the [benchmark report](docs/BENCHMARK.en.md)):
 - MQTT 3.1.1 and 5.0; QoS 0/1/2, Clean Session, Keep Alive, connect timeout, Last Will
 - TLS: system roots, custom CA (trust that CA only), client certificate / private key,
   skip certificate verification
-- Session tabs: Logs / Subscriptions / Auto-reply / Presets, all scoped to the current
-  connection
+- Session tabs: Logs / Subscriptions / Auto-reply / Preset replies, all scoped to the
+  current connection
 - Subscriptions: `+` / `#` wildcards, per-QoS subscribe, QoS shown in the list, click a
   subscription to use it as a log filter
 - Publish: convert between Text / JSON / Base64 / Hex, pretty-print JSON, QoS and retain
@@ -61,16 +61,18 @@ processes; see the [benchmark report](docs/BENCHMARK.en.md)):
   and the preset bar collapses automatically when names do not fit
 - Auto-reply: match by subscribed topic / keyword / payload content; the first matching
   rule in order replies
-- Chat-style logs: sent/received bubbles, system events, error hints; search, type
-  filters, display-format switch, auto-scroll, export, clear; large payload previews are
-  truncated and can be expanded up to 16 KB
-- Log buffer can pause capture and adjust its history limit in settings; export the
-  current filtered results or all records, with the connection name and a millisecond
-  timestamp in the filename
+- Chat-style logs: sent/received bubbles, system events, error hints; bubble width adapts to
+  content; only the newest 80 rows are laid out, with "Show older" and "Jump to latest";
+  search, type filters, display-format switch, auto-scroll, freeze while scrolled up,
+  export, clear; large payload previews are truncated and can be expanded up to 16 KB
+- The session header shows received / sent counts with a one-click reset; the log buffer can
+  pause capture and adjust its history limit in settings; export the current filtered
+  results or all records, with the connection name and a millisecond timestamp in the
+  filename
 - Chinese and English UI; 7 skins: follow system / dark / light / blue / green / purple /
   custom (27 adjustable color slots)
 - 4 UI text sizes that scale the whole window proportionally; frameless window with a
-  custom title bar and resize grips
+  custom title bar, resize grips and an always-on-top pushpin
 
 ## Building from source
 
@@ -112,7 +114,7 @@ MQTT, logs, filtering, i18n, runtime), so they can be compared side by side:
 
 | App | UI framework | Rendering | Working set | exe | Status |
 |---|---|---|---|---|---|
-| `mqttc-iced` | Iced 0.14 | tiny-skia software | 28.8–31.2 MB | 5.95 MB | **Released** |
+| `mqttc-iced` | Iced 0.14 | tiny-skia software | 28.8–31.2 MB | 5.98 MB | **Released** |
 | `mqttc-egui` | egui / eframe 0.37 | OpenGL | 96–111 MB | 8.22 MB | Development alternative |
 | `mqttc-gpui` | GPUI 0.2.2 | Direct3D 11 | 47–49 MB | 9.38 MB | Exploratory; some edit pages are read-only |
 
@@ -125,7 +127,7 @@ build and test details for all three are in
 
 ```bash
 cargo test -p mqttc-core        # codec, wildcards, filtering, config migration, auto-reply, form clamping
-cargo test -p mqttc-iced        # six page build smoke tests
+cargo test -p mqttc-iced        # 15 page build smoke tests
 cargo test -p mqttc-core --test broker_roundtrip   # end-to-end with embedded rumqttd broker
 ```
 

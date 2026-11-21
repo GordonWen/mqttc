@@ -44,7 +44,7 @@ behavioral differences lives in the core, with a single implementation:
 | `theme` | 7 skins (System resolves to dark/light, Custom resolves from `custom_palette`); a `Palette` of 27 named colors, `#rrggbb` overrides that fall back per slot; each UI converts them to its own color types |
 | `platform` | system dark/light detection: Windows reads the registry (cached for 1s); macOS `defaults` / Linux `gsettings` (result cached for 30s to avoid frequent process spawning) |
 | `mqtt` | `MqttHandle`: rumqttc 0.25.1, dual 3.1.1 and 5.0 clients; generation invalidates old threads; channel capacity 32; Keep Alive / Clean / Timeout / Will; rustls custom CA, client certificate, skip verification |
-| `logs` | one `VecDeque<LogRecord>` per connection, cap `MAX_LOGS = 200`; stores only raw bytes as `Arc<[u8]>` and re-renders when the display format changes |
+| `logs` | one `VecDeque<LogRecord>` per connection, default cap `MAX_LOGS = 200` (adjustable 50–2000 in settings); stores only raw bytes as `Arc<[u8]>` and re-renders when the display format changes |
 | `form` | `FormState`: string/boolean drafts for every field on the edit and session pages, plus preset rows and rule rows; `from_config` / `apply_to` / row add and remove; preset pinning and display ordering |
 | `runtime` | `AppRuntime`: config, forms, per-connection `ConnRuntime`, page state, preferences; action entry points and the auto-reply / timed-publish state machines |
 | `export` | log export to `logs/` next to the exe (CSV / text, timestamped filenames) |
@@ -108,12 +108,12 @@ UI thread                                  worker threads (1 per connection + ti
 |---|---|---|---|
 | Rendering | glow / OpenGL | tiny-skia software raster | GPU (Windows Direct3D 11 / macOS Metal / Linux Vulkan) |
 | Wakeup | `ctx.request_repaint()` (repaint on event arrival) | 100ms `time::every` tick (only while connected or timers are active) | adaptive ticker: 100ms when busy / 1s when idle on system skin / no tick otherwise |
-| Log list | `ScrollArea::show_rows` virtualization + `stick_to_bottom` | renders up to 200 rows directly + `snap_to` auto-scroll | `uniform_list` fixed-row-height virtualization |
+| Log list | `ScrollArea::show_rows` virtualization + `stick_to_bottom` | windowed layout of the newest 80 rows + freeze on scroll-up / show older / jump to latest | `uniform_list` fixed-row-height virtualization |
 | CJK font | fontique system fallback (no bundled CJK) | cosmic-text system fallback, default family per platform (YaHei / PingFang) | system font fallback |
 | Dropdown / selection | `ComboBox` | `pick_list` | custom click-to-cycle selector (no popup) |
 | Input | `TextEdit` (passwords via `password(true)`) | `text_input` / `text_editor` | IME `TextInput` ported from the official example (supports password masking) |
-| Page structure | global sidebar pages + subscription card in the session | 4 sidebar pages + session tabs (logs / subscriptions / auto-reply / presets) | global sidebar pages |
-| Title bar | native title bar | frameless + custom-drawn title bar | custom-drawn `TitlebarOptions` |
+| Page structure | global sidebar pages + subscription card in the session | 4 sidebar pages + session tabs (logs / subscriptions / auto-reply / preset replies) | global sidebar pages |
+| Title bar | native title bar | frameless + custom-drawn title bar (with always-on-top pushpin) | custom-drawn `TitlebarOptions` |
 
 GPUI trade-offs (read-only rule/preset edit pages, etc.) are documented item by item in
 [PARITY.en.md](PARITY.en.md).
@@ -131,21 +131,21 @@ GPUI trade-offs (read-only rule/preset edit pages, etc.) are documented item by 
 - No `+crt-static` (it is larger and conflicts with the TLS/plugin ecosystem); the docs
   note the VC runtime prerequisite.
 - Runtime: 200-entry log ring buffer by default (adjustable to 2000 in settings, with a
-  separate 16MB byte budget), bytes only, virtualized visible rows, debounced config
-  saves, and no fixed-frame-rate animation.
+  separate 16MB byte budget), bytes only, virtualized / windowed visible rows, debounced
+  config saves, and no fixed-frame-rate animation.
 
 ## 6. Tests
 
 ```text
-cargo test -p mqttc-core          # 68 tests: codecs, wildcards, filtering, config migration/round-trip, skins/custom palette, font clamping, auto-reply, form clamping, 200 cap
+cargo test -p mqttc-core          # 70 tests: codecs, wildcards, filtering, config migration/round-trip, skins/custom palette, font clamping, auto-reply, form clamping, 200 cap
 cargo test -p mqttc-core --test broker_e2e        # 3 tests: dual-protocol connect, subscribe, publish, disconnect
 cargo test -p mqttc-core --test broker_roundtrip  # 5 tests + 1 #[ignore] TLS: connect/subscribe/publish/receive/auto-reply/timed/reconnect/200 cap
-cargo test -p mqttc-iced          # 13 tests: page construction, preset collapsing, large font, delete confirmation, etc.
+cargo test -p mqttc-iced          # 15 tests: page construction, preset collapsing, large font, delete confirmation, etc.
 ```
 
 Local integration tests use `start_broker` from `tools/test-broker` (embedded rumqttd
 0.20) and never depend on public services; TLS tests require certificates and are
-`#[ignore]` by default. Most recent run: 68 + 3 + 5 + 13 all passed.
+`#[ignore]` by default. Most recent run: 70 + 3 + 5 + 15 all passed.
 
 ## 7. Portability
 
