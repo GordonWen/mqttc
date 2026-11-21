@@ -39,6 +39,11 @@ const SIDEBAR_WIDTH: f32 = 180.0;
 const MIN_WINDOW_WIDTH: f32 = 980.0;
 const MIN_WINDOW_HEIGHT: f32 = 640.0;
 
+/// How many of the newest log rows are put into the widget tree. The store
+/// still keeps everything (export, filter and search see all rows); building
+/// hundreds of bubbles on every 100 ms tick dominates CPU while streaming.
+const LOG_RENDER_ROWS: usize = 80;
+
 // ------------------------------------------------------------- font scale
 
 thread_local! {
@@ -80,6 +85,8 @@ enum Icon {
     Plus,
     /// Title-strip sidebar toggle (panel outline with a divider).
     Panel,
+    /// Title-strip always-on-top toggle (pushpin).
+    Pin,
 }
 
 struct IconCanvas {
@@ -101,6 +108,7 @@ impl IconCanvas {
             Icon::Gear | Icon::Info => (1.35, 6.0),
             Icon::Plus => (1.25, 6.0),
             Icon::Panel => (1.15, 6.2),
+            Icon::Pin => (1.05, 7.1),
         };
         Self {
             icon,
@@ -203,6 +211,66 @@ impl canvas::Program<Msg> for IconCanvas {
                         Point::new(x, top_left.y + side.height - inset),
                     ),
                     stroke,
+                );
+            }
+            Icon::Pin => {
+                // Diagonal pushpin taken from the 24×24 outline glyph the
+                // user picked: outer silhouette plus an inner cut-out,
+                // filled with the even-odd rule so the cap stays hollow.
+                let k = r / 12.0;
+                let p = |x: f32, y: f32| {
+                    Point::new(cx + (x - 12.147) * k, cy + (y - 11.7735) * k)
+                };
+                let pin = Path::new(|b| {
+                    b.move_to(p(17.1218, 1.87023));
+                    b.bezier_curve_to(p(15.7573, 0.505682), p(13.4779, 0.76575), p(12.4558, 2.40261));
+                    b.line_to(p(9.61062, 6.95916));
+                    b.bezier_curve_to(p(9.61033, 6.95965), p(9.60913, 6.96167), p(9.6038, 6.96549));
+                    b.bezier_curve_to(p(9.59728, 6.97016), p(9.58336, 6.97822), p(9.56001, 6.9848));
+                    b.bezier_curve_to(p(9.50899, 6.99916), p(9.44234, 6.99805), p(9.38281, 6.97599));
+                    b.bezier_curve_to(p(8.41173, 6.61599), p(6.74483, 6.22052), p(5.01389, 6.87251));
+                    b.bezier_curve_to(p(4.08132, 7.22378), p(3.61596, 8.03222), p(3.56525, 8.85243));
+                    b.bezier_curve_to(p(3.51687, 9.63502), p(3.83293, 10.4395), p(4.41425, 11.0208));
+                    b.line_to(p(7.94975, 14.5563));
+                    b.line_to(p(1.26973, 21.2363));
+                    b.bezier_curve_to(p(0.879206, 21.6269), p(0.879206, 22.26), p(1.26973, 22.6506));
+                    b.bezier_curve_to(p(1.66025, 23.0411), p(2.29342, 23.0411), p(2.68394, 22.6506));
+                    b.line_to(p(9.36397, 15.9705));
+                    b.line_to(p(12.8995, 19.5061));
+                    b.bezier_curve_to(p(13.4808, 20.0874), p(14.2853, 20.4035), p(15.0679, 20.3551));
+                    b.bezier_curve_to(p(15.8881, 20.3044), p(16.6966, 19.839), p(17.0478, 18.9065));
+                    b.bezier_curve_to(p(17.6998, 17.1755), p(17.3043, 15.5086), p(16.9444, 14.5375));
+                    b.bezier_curve_to(p(16.9223, 14.478), p(16.9212, 14.4114), p(16.9355, 14.3603));
+                    b.bezier_curve_to(p(16.9421, 14.337), p(16.9502, 14.3231), p(16.9549, 14.3165));
+                    b.bezier_curve_to(p(16.9587, 14.3112), p(16.9606, 14.31), p(16.9611, 14.3098));
+                    b.line_to(p(21.5177, 11.4645));
+                    b.bezier_curve_to(p(23.1546, 10.4424), p(23.4147, 8.16307), p(22.0501, 6.79853));
+                    b.close();
+                    b.move_to(p(14.1523, 3.46191));
+                    b.bezier_curve_to(p(14.493, 2.91629), p(15.2528, 2.8296), p(15.7076, 3.28445));
+                    b.line_to(p(20.6359, 8.21274));
+                    b.bezier_curve_to(p(21.0907, 8.66759), p(21.0041, 9.42737), p(20.4584, 9.76806));
+                    b.line_to(p(15.9019, 12.6133));
+                    b.bezier_curve_to(p(14.9572, 13.2032), p(14.7469, 14.3637), p(15.0691, 15.2327));
+                    b.bezier_curve_to(p(15.3549, 16.0037), p(15.5829, 17.1217), p(15.1762, 18.2015));
+                    b.bezier_curve_to(p(15.1484, 18.2752), p(15.1175, 18.3018), p(15.0985, 18.3149));
+                    b.bezier_curve_to(p(15.0743, 18.3316), p(15.0266, 18.3538), p(14.9445, 18.3589));
+                    b.bezier_curve_to(p(14.767, 18.3699), p(14.5135, 18.2916), p(14.3137, 18.0919));
+                    b.line_to(p(5.82846, 9.6066));
+                    b.bezier_curve_to(p(5.62872, 9.40686), p(5.55046, 9.15333), p(5.56144, 8.97583));
+                    b.bezier_curve_to(p(5.56651, 8.8937), p(5.58877, 8.84605), p(5.60548, 8.82181));
+                    b.bezier_curve_to(p(5.61855, 8.80285), p(5.64516, 8.7719), p(5.71886, 8.74414));
+                    b.bezier_curve_to(p(6.79869, 8.33741), p(7.91661, 8.56545), p(8.68762, 8.85128));
+                    b.bezier_curve_to(p(9.55668, 9.17345), p(10.7171, 8.96318), p(11.3071, 8.01845));
+                    b.line_to(p(14.1523, 3.46191));
+                    b.close();
+                });
+                frame.fill(
+                    &pin,
+                    canvas::Fill {
+                        style: canvas::Style::Solid(self.color),
+                        rule: canvas::fill::Rule::EvenOdd,
+                    },
                 );
             }
         }
@@ -364,6 +432,8 @@ pub enum Msg {
     LogLimit(i32),
     OpenLog(u64),
     CloseLog,
+    /// Widen the rendered tail window by one page (older rows stay in the store).
+    ShowOlderLogs,
     ClearLogs,
     Copy(String),
     CopyRow,
@@ -384,6 +454,8 @@ pub enum Msg {
     FontScale(f32),
     /// Start moving the undecorated window from the title strip.
     DragWindow,
+    /// Pin / unpin the window above other applications.
+    ToggleAlwaysOnTop,
     MinimizeWindow,
     ToggleMaximize,
     /// Result of a custom maximize: the pre-maximize rect to restore later.
@@ -672,6 +744,11 @@ pub struct App {
     preview_cache: RefCell<HashMap<u64, (i32, String)>>,
     /// Expanded row shown instead of the log list. Cleared on tab / connection change.
     detail_seq: Option<u64>,
+    /// Number of newest visible rows currently rendered (see [`LOG_RENDER_ROWS`]).
+    log_window: usize,
+    /// Newest seq remembered when auto-scroll was turned off; the rendered
+    /// window ends here so arriving rows cannot shift what the user is reading.
+    log_freeze_end: Option<u64>,
     /// Connection id waiting for a delete confirmation.
     pending_delete: Option<String>,
     /// “更多颜色” folded open in the custom-palette editor.
@@ -704,15 +781,24 @@ impl App {
     /// lets us apply native chrome that has no iced setting (Windows 11 rounds
     /// the frameless window like any other app).
     pub fn boot() -> (Self, Task<Msg>) {
+        let app = Self::new();
+        let level = if app.rt.prefs.always_on_top {
+            iced::window::Level::AlwaysOnTop
+        } else {
+            iced::window::Level::Normal
+        };
         (
-            Self::new(),
-            window_task(|id| {
-                iced::window::run(id, |window| {
-                    #[cfg(windows)]
-                    win32::round_corners(window);
-                    Msg::WindowReady
-                })
-            }),
+            app,
+            Task::batch([
+                window_task(|id| {
+                    iced::window::run(id, |window| {
+                        #[cfg(windows)]
+                        win32::round_corners(window);
+                        Msg::WindowReady
+                    })
+                }),
+                window_task(move |id| iced::window::set_level::<Msg>(id, level)),
+            ]),
         )
     }
 
@@ -752,6 +838,8 @@ impl App {
             dirty_at: None,
             preview_cache: RefCell::new(HashMap::new()),
             detail_seq: None,
+            log_window: LOG_RENDER_ROWS,
+            log_freeze_end: None,
             pending_delete: None,
             more_colors: false,
             swatch_field: None,
@@ -800,6 +888,17 @@ impl App {
     fn reload_form(&mut self) {
         self.rt.apply_form();
         self.editor = text_editor::Content::with_text(&self.rt.form.pub_payload);
+    }
+
+    /// Back to one page of rows. With auto-scroll off, anchor at the newest row
+    /// so a filter/session switch starts at the end of the current list.
+    fn reset_log_window(&mut self) {
+        self.log_window = LOG_RENDER_ROWS;
+        self.log_freeze_end = if self.rt.prefs.auto_scroll {
+            None
+        } else {
+            self.rt.visible_logs().last().map(|log| log.seq)
+        };
     }
 
     /// One row in the same shape as the exported log, for the clipboard.
@@ -872,6 +971,7 @@ impl App {
                     self.page = 1;
                     self.session_tab = SessionTab::Logs;
                     self.detail_seq = None;
+                    self.reset_log_window();
                     self.presets_open = false;
                     self.preview_cache.borrow_mut().clear();
                     if changed {
@@ -998,8 +1098,13 @@ impl App {
             }
             Msg::OpenLog(seq) => self.detail_seq = Some(seq),
             Msg::CloseLog => self.detail_seq = None,
+            Msg::ShowOlderLogs => {
+                self.log_window = self.log_window.saturating_add(LOG_RENDER_ROWS);
+            }
             Msg::ClearLogs => {
                 self.detail_seq = None;
+                self.log_window = LOG_RENDER_ROWS;
+                self.log_freeze_end = None;
                 self.preview_cache.borrow_mut().clear();
                 self.rt.clear_logs();
             }
@@ -1040,6 +1145,20 @@ impl App {
             Msg::Language(index) => self.rt.set_language(index),
             Msg::FontScale(scale) => self.rt.set_font_scale(scale),
             Msg::DragWindow => return window_task(iced::window::drag),
+            Msg::ToggleAlwaysOnTop => {
+                let on = !self.rt.prefs.always_on_top;
+                self.rt.set_always_on_top(on);
+                return window_task(move |id| {
+                    iced::window::set_level::<Msg>(
+                        id,
+                        if on {
+                            iced::window::Level::AlwaysOnTop
+                        } else {
+                            iced::window::Level::Normal
+                        },
+                    )
+                });
+            }
             Msg::MinimizeWindow => return window_task(|id| iced::window::minimize(id, true)),
             Msg::ToggleMaximize => {
                 #[cfg(windows)]
@@ -1213,13 +1332,27 @@ impl App {
                 }
                 self.rt.apply_form();
             }
-            Msg::LogFilter(value) => self.rt.set_log_filter(value),
-            Msg::LogKind(value) => self.rt.set_log_kind_filter(value),
+            Msg::LogFilter(value) => {
+                self.rt.set_log_filter(value);
+                self.reset_log_window();
+            }
+            Msg::LogKind(value) => {
+                self.rt.set_log_kind_filter(value);
+                self.reset_log_window();
+            }
             Msg::LogFormat(value) => {
                 self.rt.set_log_format(value);
                 self.preview_cache.borrow_mut().clear();
             }
-            Msg::AutoScroll(on) => self.rt.set_auto_scroll(on),
+            Msg::AutoScroll(on) => {
+                if on {
+                    self.log_freeze_end = None;
+                } else if self.log_freeze_end.is_none() {
+                    let newest = self.rt.visible_logs().last().map(|log| log.seq);
+                    self.log_freeze_end = newest;
+                }
+                self.rt.set_auto_scroll(on);
+            }
             Msg::Field(field, value) => {
                 field.set(&mut self.rt.form, value);
                 return self.touched();
@@ -1500,7 +1633,34 @@ impl App {
             tooltip::Position::Bottom,
         )
         .delay(Duration::from_millis(300));
+        let pinned = self.rt.prefs.always_on_top;
+        let pin = tooltip(
+            control(
+                Icon::Pin,
+                if pinned { c.accent } else { c.text_muted },
+                c.caption_button(),
+                Msg::ToggleAlwaysOnTop,
+            ),
+            container(
+                text(t(
+                    if pinned { "取消置顶" } else { "窗口置顶" },
+                    if pinned {
+                        "Stop staying on top"
+                    } else {
+                        "Always on top"
+                    },
+                ))
+                .size(fs(11.0))
+                .color(c.text_primary),
+            )
+            .padding([5, 8])
+            .style(c.inset()),
+            tooltip::Position::Bottom,
+        )
+        .delay(Duration::from_millis(300));
         let controls = row![
+            pin,
+            Space::new().width(4),
             control(
                 Icon::Minus,
                 c.text_muted,
@@ -2275,6 +2435,24 @@ impl App {
         .spacing(5);
 
         let logs = self.rt.visible_logs();
+        let total = logs.len();
+        let end = if prefs.auto_scroll || paused {
+            total
+        } else {
+            match self.log_freeze_end {
+                Some(seq) => logs
+                    .iter()
+                    .rposition(|log| log.seq == seq)
+                    .map_or(total, |index| index + 1),
+                // Auto-scroll was already off when the session opened: keep the
+                // first page where it is instead of sliding with new rows.
+                None => total.min(LOG_RENDER_ROWS),
+            }
+        };
+        let start = end.saturating_sub(self.log_window);
+        let shown = end - start;
+        let hidden_before = start;
+        let hidden_after = total - end;
         let mut list = column![].spacing(5);
         if logs.is_empty() {
             list = list.push(
@@ -2283,8 +2461,46 @@ impl App {
                     .center_x(Length::Fill),
             );
         } else {
-            for log in logs {
+            if hidden_before > 0 {
+                list = list.push(
+                    row![
+                        self.hint(
+                            c,
+                            t(
+                                &format!("仅显示 {shown} 条，共 {total} 条"),
+                                &format!("Showing {shown} of {total}"),
+                            ),
+                        ),
+                        button(text(t("显示更早", "Show older")).size(fs(11.0)))
+                            .padding([3, 8])
+                            .style(c.ghost_button())
+                            .on_press(Msg::ShowOlderLogs),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                );
+            }
+            for log in &logs[start..end] {
                 list = list.push(self.log_bubble(c, log));
+            }
+            if hidden_after > 0 {
+                list = list.push(
+                    row![
+                        self.hint(
+                            c,
+                            t(
+                                &format!("下方还有 {hidden_after} 条新日志"),
+                                &format!("{hidden_after} newer entries below"),
+                            ),
+                        ),
+                        button(text(t("回到最新", "Jump to latest")).size(fs(11.0)))
+                            .padding([3, 8])
+                            .style(c.ghost_button())
+                            .on_press(Msg::AutoScroll(true)),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                );
             }
         }
 
@@ -2321,6 +2537,9 @@ impl App {
         } else {
             (String::from_utf8_lossy(&log.payload).into_owned(), false)
         };
+        // Untrusted broker text must not reach the shaper verbatim, otherwise
+        // RTL content plus a paragraph separator aborts cosmic-text.
+        let body = payload::sanitize_display_text(&body).into_owned();
         let mut cache = self.preview_cache.borrow_mut();
         if cache.len() >= 1024 {
             cache.clear();
@@ -2351,7 +2570,12 @@ impl App {
         let topic_line = if log.topic.is_empty() {
             format!("{} · {}", log.time, log.kind)
         } else {
-            format!("{} · {} · {}", log.time, log.kind, log.topic)
+            format!(
+                "{} · {} · {}",
+                log.time,
+                log.kind,
+                payload::sanitize_display_text(&log.topic)
+            )
         };
         let mut header = row![text(topic_line)
             .size(fs(10.5))
@@ -2392,6 +2616,7 @@ impl App {
                 }
                 meta.push_str(&t("预览已截断", "preview truncated"));
             }
+            let meta = payload::sanitize_display_text(&meta).into_owned();
             content = content.push(text(meta).size(fs(10.0)).color(c.text_faint));
         }
         content = content.push(
@@ -2452,12 +2677,14 @@ impl App {
         } else {
             (String::from_utf8_lossy(&log.payload).into_owned(), false)
         };
+        let body = payload::sanitize_display_text(&body).into_owned();
+        let topic = payload::sanitize_display_text(&log.topic).into_owned();
         let header = row![
             self.detail_back(c),
             text(format!("{} · {}", log.time, log.kind))
                 .size(fs(11.0))
                 .color(c.text_faint),
-            text(log.topic.as_str())
+            text(topic)
                 .size(fs(12.0))
                 .color(c.text_body)
                 .width(Length::Fill)
@@ -2489,7 +2716,10 @@ impl App {
                 }
                 meta.push_str(&props);
             }
-            text(meta).size(fs(11.0)).color(c.text_faint).into()
+            text(payload::sanitize_display_text(&meta).into_owned())
+                .size(fs(11.0))
+                .color(c.text_faint)
+                .into()
         };
 
         let mut panel = column![

@@ -1,5 +1,7 @@
 //! Payload codecs shared by publish, log rendering and auto-reply.
 
+use std::borrow::Cow;
+
 use base64::Engine;
 
 use crate::i18n;
@@ -63,6 +65,36 @@ pub fn preview_limit(format: PayloadFormat) -> usize {
 
 /// Hard cap for the expanded detail view. Export still contains the full payload.
 pub const LOG_DETAIL_BYTES: usize = 16 * 1024;
+
+/// Paragraph separators other than CR/LF, as classified by `unicode-bidi`.
+fn is_bidi_paragraph_separator(ch: char) -> bool {
+    matches!(ch, '\u{1c}' | '\u{1d}' | '\u{1e}' | '\u{85}' | '\u{2029}')
+}
+
+/// Makes untrusted text safe to hand to a text shaper.
+///
+/// cosmic-text 0.15 shapes each `\n`-delimited line with `BidiInfo` and asserts
+/// that every paragraph inside it has the same base direction
+/// (`shape.rs: assert_eq!(line_rtl, rtl)`). A broker payload that combines an
+/// RTL character with a paragraph separator therefore aborts the GUI process.
+/// Such separators are replaced with spaces for on-screen text only; payload
+/// bytes, exports and "Copy" still carry the original data.
+pub fn sanitize_display_text(text: &str) -> Cow<'_, str> {
+    if !text.chars().any(is_bidi_paragraph_separator) {
+        return Cow::Borrowed(text);
+    }
+    Cow::Owned(
+        text.chars()
+            .map(|ch| {
+                if is_bidi_paragraph_separator(ch) {
+                    ' '
+                } else {
+                    ch
+                }
+            })
+            .collect(),
+    )
+}
 
 /// Render at most `limit` source bytes. Truncated JSON is shown as plain text
 /// instead of being parsed, and a trailing ellipsis marks the cut.
@@ -208,6 +240,21 @@ mod tests {
         assert!(cut);
         assert_eq!(b64.chars().count(), 6); // 4 base64 chars + newline + ellipsis
         assert!(b64.ends_with('…'));
+    }
+
+    #[test]
+    fn display_text_neutralizes_bidi_paragraph_separators() {
+        let raw = "abc\u{1e}\u{5d0}def\u{2029}\u{5d0}ghi\u{85}jkl\u{1c}\u{1d}\r\nok";
+        let clean = sanitize_display_text(raw);
+        assert!(clean.starts_with("abc "));
+        assert!(clean.ends_with("\r\nok"));
+        for sep in ['\u{1c}', '\u{1d}', '\u{1e}', '\u{85}', '\u{2029}'] {
+            assert!(!clean.contains(sep));
+        }
+        assert!(matches!(
+            sanitize_display_text("plain"),
+            Cow::Borrowed("plain")
+        ));
     }
 
     #[test]

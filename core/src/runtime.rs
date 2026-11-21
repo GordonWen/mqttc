@@ -96,6 +96,8 @@ pub struct PrefsState {
     pub language: i32,
     /// Multiplier applied to every UI text size; `1.0` is standard.
     pub font_scale: f32,
+    /// Keep the window above other applications.
+    pub always_on_top: bool,
 }
 
 impl PrefsState {
@@ -108,6 +110,7 @@ impl PrefsState {
             skin_choice: Skin::from_key(&config.skin).to_index(),
             language: Lang::from_key(&config.language).to_index(),
             font_scale: clamp_font_scale(config.font_scale),
+            always_on_top: config.always_on_top,
         }
     }
 }
@@ -357,6 +360,7 @@ impl AppRuntime {
             .to_string();
         self.config.language = Lang::from_index(self.prefs.language).to_key().to_string();
         self.config.font_scale = clamp_font_scale(self.prefs.font_scale);
+        self.config.always_on_top = self.prefs.always_on_top;
         i18n::set_lang(Lang::from_index(self.prefs.language));
     }
 
@@ -458,6 +462,16 @@ impl AppRuntime {
             return;
         }
         self.prefs.font_scale = scale;
+        self.apply_prefs();
+        self.persist();
+    }
+
+    /// Toggles the title-bar pin and persists the choice.
+    pub fn set_always_on_top(&mut self, on: bool) {
+        if self.prefs.always_on_top == on {
+            return;
+        }
+        self.prefs.always_on_top = on;
         self.apply_prefs();
         self.persist();
     }

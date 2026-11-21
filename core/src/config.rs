@@ -212,6 +212,9 @@ pub struct AppConfig {
     /// [`FONT_SCALE_MIN`]–[`FONT_SCALE_MAX`] when loaded or set.
     #[serde(default = "default_font_scale")]
     pub font_scale: f32,
+    /// Keep the window above other applications (title-bar pin).
+    #[serde(default)]
+    pub always_on_top: bool,
 }
 
 /// Smallest UI text scale the settings page offers.
@@ -344,6 +347,7 @@ impl Default for AppConfig {
             custom_palette: crate::theme::CustomPalette::default(),
             language: default_language(),
             font_scale: default_font_scale(),
+            always_on_top: false,
         }
     }
 }
@@ -645,6 +649,7 @@ mod tests {
         config.auto_scroll = false;
         config.skin = "green".to_string();
         config.language = "en".to_string();
+        config.always_on_top = true;
 
         let text = serde_json::to_string(&config).expect("serialize");
         let back: AppConfig = serde_json::from_str(&text).expect("deserialize");
@@ -688,6 +693,7 @@ mod tests {
         assert!(!back.auto_scroll);
         assert_eq!(back.skin, "green");
         assert_eq!(back.language, "en");
+        assert!(back.always_on_top);
     }
 
     #[test]
