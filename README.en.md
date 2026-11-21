@@ -2,8 +2,7 @@
 
 [简体中文](README.md) | English
 
-A simple, lightweight, easy-to-use MQTT debugging client. Written in Rust, no installation
-required — unzip and run.
+A lightweight, cross-platform MQTT debugging client for Windows, Linux and macOS.
 
 ![mqttc iced interface](docs/assets/screenshot-iced.png)
 

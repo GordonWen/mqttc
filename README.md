@@ -2,7 +2,7 @@
 
 简体中文 | [English](README.en.md)
 
-一个简单、轻便、易用的 MQTT 调试客户端。Rust 编写，免安装，解压即用。
+轻量级跨平台 MQTT 调试客户端，支持 Windows、Linux 和 macOS。
 
 ![mqttc iced 界面](docs/assets/screenshot-iced.png)
 
