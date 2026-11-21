@@ -22,7 +22,7 @@ GitHub 仓库 `GordonWen/mqttc`：
 2. Settings → General → Default branch 设为 `main`。
 3. 如 `main` 有分支保护，清空历史前临时允许 force-push，完成后恢复。
 4. 删除旧 Release、tag、旧分支（见第 2 节）。
-5. 仓库描述：`A lightweight, cross-platform MQTT debugging client (Rust + Iced, portable, ~29 MB RAM)`。
+5. 仓库描述：`A lightweight, cross-platform MQTT debugging client for Windows, Linux and macOS`。
    Topics：`mqtt`、`mqtt-client`、`rust`、`iced`、`portable`、`desktop`。
 6. 未签名构建不需要任何 secret；后续做 macOS 签名/公证时再加 Apple 相关 secrets。
 

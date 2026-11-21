@@ -25,7 +25,7 @@ GitHub repository `GordonWen/mqttc`:
    restore the protection afterwards.
 4. Delete old releases, tags and old branches (see section 2).
 5. Repository description:
-   `A lightweight, cross-platform MQTT debugging client (Rust + Iced, portable, ~29 MB RAM)`.
+   `A lightweight, cross-platform MQTT debugging client for Windows, Linux and macOS`.
    Topics: `mqtt`, `mqtt-client`, `rust`, `iced`, `portable`, `desktop`.
 6. Unsigned builds need no secrets; add Apple-related secrets later if macOS
    signing/notarization is introduced.
