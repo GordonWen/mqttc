@@ -4673,7 +4673,7 @@ dependencies = [
 
 [[package]]
 name = "mqttc-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -4689,7 +4689,7 @@ dependencies = [
 
 [[package]]
 name = "mqttc-egui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "eframe",
  "mqttc-core",
@@ -4698,7 +4698,7 @@ dependencies = [
 
 [[package]]
 name = "mqttc-gpui"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "gpui",
  "mqttc-core",
@@ -4707,7 +4707,7 @@ dependencies = [
 
 [[package]]
 name = "mqttc-iced"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "embed-resource",
  "iced",
@@ -4719,7 +4719,7 @@ dependencies = [
 
 [[package]]
 name = "mqttc-test-broker"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "rumqttc",
  "rumqttd",
