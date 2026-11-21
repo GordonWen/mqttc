@@ -131,6 +131,10 @@ pub struct ConnRuntime {
     pub logs_paused: bool,
     /// Data rows dropped while paused, shown in the UI and reported on resume.
     pub paused_dropped: u64,
+    /// RECV / SEND messages seen since the counters were last reset. Traffic
+    /// keeps counting while the list is paused; SYS and ERR rows are excluded.
+    pub recv_count: u64,
+    pub send_count: u64,
     /// User clicked Disconnect: suppress auto reconnect until the next manual Connect.
     pub manual_stop: bool,
     /// Consecutive automatic reconnect attempts; reset on a successful handshake.
@@ -161,6 +165,8 @@ impl ConnRuntime {
             last_auto_reply: None,
             logs_paused: false,
             paused_dropped: 0,
+            recv_count: 0,
+            send_count: 0,
             manual_stop: false,
             reconnect_attempt: 0,
             next_reconnect: None,
@@ -1640,6 +1646,11 @@ impl AppRuntime {
         meta: LogMeta,
     ) {
         let runtime = self.runtime_mut(conn_id);
+        match kind {
+            "RECV" => runtime.recv_count = runtime.recv_count.saturating_add(1),
+            "SEND" => runtime.send_count = runtime.send_count.saturating_add(1),
+            _ => {}
+        }
         if runtime.logs_paused && (kind == "RECV" || kind == "SEND") {
             runtime.paused_dropped = runtime.paused_dropped.saturating_add(1);
             return;
@@ -1658,6 +1669,21 @@ impl AppRuntime {
         self.active_id()
             .and_then(|id| self.runtimes.get(&id).map(|rt| rt.paused_dropped))
             .unwrap_or(0)
+    }
+
+    /// `(received, sent)` messages counted for the active connection.
+    pub fn active_counts(&self) -> (u64, u64) {
+        self.active_id()
+            .and_then(|id| self.runtimes.get(&id))
+            .map(|rt| (rt.recv_count, rt.send_count))
+            .unwrap_or((0, 0))
+    }
+
+    pub fn reset_active_counts(&mut self) {
+        let Some(id) = self.active_id() else { return };
+        let runtime = self.runtime_mut(&id);
+        runtime.recv_count = 0;
+        runtime.send_count = 0;
     }
 
     /// Freeze / resume RECV+SEND capture. SYS and ERR rows are always recorded.
@@ -2116,6 +2142,26 @@ mod tests {
             rt.visible_logs().iter().filter(|log| log.kind == "RECV").count(),
             1
         );
+    }
+
+    #[test]
+    fn traffic_counters_keep_counting_while_paused() {
+        let mut rt = runtime_with_conn();
+        let id = rt.active_id().unwrap();
+        rt.push_log(&id, "RECV", "a/b", b"1".to_vec());
+        rt.push_log(&id, "SEND", "a/b", b"2".to_vec());
+        rt.push_log(&id, "RECV", "a/b", b"3".to_vec());
+        rt.push_log(&id, "SYS", "", b"system".to_vec());
+        assert_eq!(rt.active_counts(), (2, 1));
+
+        rt.toggle_logs_pause();
+        rt.push_log(&id, "RECV", "a/b", b"paused".to_vec());
+        rt.push_log(&id, "SEND", "a/b", b"paused".to_vec());
+        assert_eq!(rt.active_counts(), (3, 2));
+        assert_eq!(rt.paused_dropped(), 2);
+
+        rt.reset_active_counts();
+        assert_eq!(rt.active_counts(), (0, 0));
     }
 
     #[test]

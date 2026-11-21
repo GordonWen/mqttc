@@ -308,6 +308,24 @@ impl Colors {
         }
     }
 
+    /// Display-only chip with the same frame as a resting ghost button.
+    /// Used for the traffic counters, which sit in the tab row but do not
+    /// respond to clicks, so they must still read as one of its controls.
+    pub fn chip(&self) -> impl Fn(&Theme) -> container::Style + 'static {
+        let c = *self;
+        move |_| container::Style {
+            text_color: Some(c.text_body),
+            background: None,
+            border: Border {
+                color: c.hover_bg,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            shadow: Shadow::default(),
+            snap: true,
+        }
+    }
+
     /// Inset area inside a card (input wells, log background).
     pub fn inset(&self) -> impl Fn(&Theme) -> container::Style + 'static {
         let c = *self;

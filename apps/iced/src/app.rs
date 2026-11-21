@@ -44,6 +44,10 @@ const MIN_WINDOW_HEIGHT: f32 = 640.0;
 /// hundreds of bubbles on every 100 ms tick dominates CPU while streaming.
 const LOG_RENDER_ROWS: usize = 80;
 
+/// Widget id of the log list: scroll events identify a manual review, and
+/// "回到最新" snaps this list back to the end.
+const LOG_SCROLL_ID: &str = "log-scroll";
+
 // ------------------------------------------------------------- font scale
 
 thread_local! {
@@ -515,6 +519,10 @@ pub enum Msg {
     LogKind(i32),
     LogFormat(i32),
     AutoScroll(bool),
+    /// Vertical offset reported by the log list. Scrolling away from the end
+    /// switches auto-scroll off so the stream stops moving the view.
+    LogScrolled(f32),
+    ResetCounts,
     Field(Field, String),
     Num(Num, i32),
     Flag(Flag, bool),
@@ -777,6 +785,10 @@ pub struct App {
     /// anchoring by seq alone made the view snap back to the newest row once
     /// the anchor had been evicted. New rows wait below until "回到最新".
     log_freeze: Option<Vec<LogRecord>>,
+    /// Last vertical offset of the log list. With `anchor_bottom()` the view
+    /// sits at 0 when it follows the stream, so a growing offset means the
+    /// user scrolled up (wheel or scrollbar) and auto-scroll must stop.
+    log_scroll_y: Option<f32>,
     /// Connection id waiting for a delete confirmation.
     pending_delete: Option<String>,
     /// “更多颜色” folded open in the custom-palette editor.
@@ -868,6 +880,7 @@ impl App {
             detail_seq: None,
             log_window: LOG_RENDER_ROWS,
             log_freeze: None,
+            log_scroll_y: None,
             pending_delete: None,
             more_colors: false,
             swatch_field: None,
@@ -1422,11 +1435,37 @@ impl App {
             Msg::AutoScroll(on) => {
                 if on {
                     self.log_freeze = None;
-                } else if self.log_freeze.is_none() {
+                    self.log_scroll_y = Some(0.0);
+                    self.rt.set_auto_scroll(true);
+                    self.rt.maybe_persist();
+                    return iced::widget::operation::scroll_to(
+                        iced::widget::Id::new(LOG_SCROLL_ID),
+                        iced::widget::operation::AbsoluteOffset {
+                            x: None,
+                            y: Some(0.0),
+                        },
+                    );
+                }
+                if self.log_freeze.is_none() {
                     self.freeze_logs(true);
                 }
-                self.rt.set_auto_scroll(on);
+                self.rt.set_auto_scroll(false);
             }
+            Msg::LogScrolled(y) => {
+                let previous = self.log_scroll_y.replace(y);
+                // The list is anchored to its end, so offset 0 is the newest
+                // row and a growing offset means the user moved up by wheel or
+                // scrollbar. Freeze the page they are reading and stop following.
+                if self.rt.prefs.auto_scroll
+                    && previous.is_some_and(|previous| y > previous + 4.0)
+                {
+                    if self.log_freeze.is_none() {
+                        self.freeze_logs(true);
+                    }
+                    self.rt.set_auto_scroll(false);
+                }
+            }
+            Msg::ResetCounts => self.rt.reset_active_counts(),
             Msg::Field(field, value) => {
                 field.set(&mut self.rt.form, value);
                 return self.touched();
@@ -2246,6 +2285,29 @@ impl App {
         )
         .padding([2, 2]);
 
+        let (recv_count, send_count) = self.rt.active_counts();
+        // Counters and reset share the tab buttons' frame and type size so the
+        // whole strip reads as one control row; only the value colour differs.
+        let recv_chip = container(
+            text(t(
+                &format!("收 · {recv_count}"),
+                &format!("In · {recv_count}")
+            ))
+            .size(fs(12.0))
+            .color(c.recv_topic),
+        )
+        .padding([6, 12])
+        .style(c.chip());
+        let send_chip = container(
+            text(t(
+                &format!("发 · {send_count}"),
+                &format!("Out · {send_count}")
+            ))
+            .size(fs(12.0))
+            .color(c.send_topic),
+        )
+        .padding([6, 12])
+        .style(c.chip());
         let tabs = row![
             self.tab_button(c, SessionTab::Logs, t("日志", "Logs"), None),
             self.tab_button(
@@ -2263,11 +2325,20 @@ impl App {
             self.tab_button(
                 c,
                 SessionTab::Presets,
-                t("预设", "Presets"),
+                t("预设回复", "Preset replies"),
                 Some(self.rt.form.presets.len())
             ),
+            Space::new().width(Length::Fill),
+            recv_chip,
+            send_chip,
+            button(text(t("计数清零", "Reset counts")).size(fs(12.0)))
+                .padding([6, 12])
+                .style(c.ghost_button())
+                .on_press(Msg::ResetCounts),
         ]
-        .spacing(4);
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
 
         let body: El<'_> = match self.session_tab {
             SessionTab::Logs => {
@@ -2575,8 +2646,14 @@ impl App {
                         self.hint(
                             c,
                             t(
-                                &format!("下方还有 {hidden_after} 条新日志"),
-                                &format!("{hidden_after} newer entries below"),
+                                &format!(
+                                    "下方还有 {hidden_after} 条新日志（仅保留最近 {} 条，更早的自动丢弃）",
+                                    self.rt.config.log_limit
+                                ),
+                                &format!(
+                                    "{hidden_after} newer entries below (only the latest {} are kept; older ones are dropped)",
+                                    self.rt.config.log_limit
+                                ),
                             ),
                         ),
                         button(text(t("回到最新", "Jump to latest")).size(fs(11.0)))
@@ -2594,9 +2671,11 @@ impl App {
             column![
                 toolbar,
                 scrollable(list)
+                    .id(iced::widget::Id::new(LOG_SCROLL_ID))
                     .height(Length::Fill)
                     .anchor_bottom()
-                    .auto_scroll(prefs.auto_scroll && !paused),
+                    .auto_scroll(prefs.auto_scroll && !paused)
+                    .on_scroll(|viewport| Msg::LogScrolled(viewport.absolute_offset().y)),
             ]
             .spacing(6)
             .height(Length::Fill),
@@ -3310,8 +3389,14 @@ impl App {
                     self.hint(
                         c,
                         t(
-                            "每条连接单独计数；上限越高，列表重绘越慢",
-                            "Counted per connection; a larger limit redraws more slowly"
+                            &format!(
+                                "每条连接单独保留最近 {} 条；超出后丢弃最旧的",
+                                self.rt.config.log_limit
+                            ),
+                            &format!(
+                                "Keep the latest {} per connection; the oldest entries are dropped when full",
+                                self.rt.config.log_limit
+                            )
                         )
                     ),
                 ]
@@ -4282,6 +4367,32 @@ mod tests {
         let first = frozen[0];
         assert!(app.rt.active_log(first).is_none(), "row should be evicted");
         assert!(app.row_by_seq(first).is_some(), "freeze keeps it reachable");
+        {
+            let _page = app.view();
+        }
+    }
+
+    /// Scrolling up by wheel or scrollbar while following the stream must
+    /// turn auto-scroll off and pin the page the user moved to.
+    #[test]
+    fn scrolling_up_stops_auto_scroll() {
+        let mut app = App::for_test();
+        let id = app.rt.active_id().unwrap();
+        app.rt.set_auto_scroll(true);
+        for n in 0..10 {
+            app.rt
+                .push_log(&id, "RECV", "demo", format!("row {n}").into_bytes());
+        }
+        app.log_freeze = None;
+
+        // Scrolling down to the end (offset 0 with anchor_bottom) keeps following.
+        let _ = app.update(Msg::LogScrolled(0.0));
+        assert!(app.rt.prefs.auto_scroll);
+        assert!(app.log_freeze.is_none());
+
+        let _ = app.update(Msg::LogScrolled(40.0));
+        assert!(!app.rt.prefs.auto_scroll);
+        assert_eq!(app.log_freeze.as_ref().map(Vec::len), Some(10));
         {
             let _page = app.view();
         }
