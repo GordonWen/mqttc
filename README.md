@@ -1,5 +1,7 @@
 # mqttc
 
+简体中文 | [English](README.en.md)
+
 一个简单、轻便、易用的 MQTT 调试客户端。Rust 编写，免安装，解压即用。
 
 ![mqttc iced 界面](docs/assets/screenshot-iced.png)
