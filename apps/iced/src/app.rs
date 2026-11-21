@@ -85,8 +85,11 @@ enum Icon {
     Plus,
     /// Title-strip sidebar toggle (panel outline with a divider).
     Panel,
-    /// Title-strip always-on-top toggle (pushpin).
+    /// Title-strip always-on-top toggle (pushpin), diagonal when released.
     Pin,
+    /// The same pushpin turned needle-down while the window stays on top; the
+    /// changed silhouette reads at a glance next to the colour shift.
+    PinDown,
 }
 
 struct IconCanvas {
@@ -109,6 +112,9 @@ impl IconCanvas {
             Icon::Plus => (1.25, 6.0),
             Icon::Panel => (1.15, 6.2),
             Icon::Pin => (1.05, 7.1),
+            // Rotated to point straight down, the diagonal glyph's tip would
+            // reach past the cell, so the turned variant is drawn smaller.
+            Icon::PinDown => (1.05, 6.15),
         };
         Self {
             icon,
@@ -213,13 +219,27 @@ impl canvas::Program<Msg> for IconCanvas {
                     stroke,
                 );
             }
-            Icon::Pin => {
+            Icon::Pin | Icon::PinDown => {
                 // Diagonal pushpin taken from the 24×24 outline glyph the
                 // user picked: outer silhouette plus an inner cut-out,
                 // filled with the even-odd rule so the cap stays hollow.
+                // Pinned turns the glyph 45° counter-clockwise so the needle
+                // points straight down, drops the cut-out so the whole shape
+                // reads as a solid block, and switches to the accent colour.
+                let angle = if matches!(self.icon, Icon::PinDown) {
+                    -std::f32::consts::FRAC_PI_4
+                } else {
+                    0.0
+                };
+                let (sin, cos) = angle.sin_cos();
                 let k = r / 12.0;
                 let p = |x: f32, y: f32| {
-                    Point::new(cx + (x - 12.147) * k, cy + (y - 11.7735) * k)
+                    let dx = x - 12.147;
+                    let dy = y - 11.7735;
+                    Point::new(
+                        cx + (dx * cos - dy * sin) * k,
+                        cy + (dx * sin + dy * cos) * k,
+                    )
                 };
                 let pin = Path::new(|b| {
                     b.move_to(p(17.1218, 1.87023));
@@ -246,24 +266,29 @@ impl canvas::Program<Msg> for IconCanvas {
                     b.line_to(p(21.5177, 11.4645));
                     b.bezier_curve_to(p(23.1546, 10.4424), p(23.4147, 8.16307), p(22.0501, 6.79853));
                     b.close();
-                    b.move_to(p(14.1523, 3.46191));
-                    b.bezier_curve_to(p(14.493, 2.91629), p(15.2528, 2.8296), p(15.7076, 3.28445));
-                    b.line_to(p(20.6359, 8.21274));
-                    b.bezier_curve_to(p(21.0907, 8.66759), p(21.0041, 9.42737), p(20.4584, 9.76806));
-                    b.line_to(p(15.9019, 12.6133));
-                    b.bezier_curve_to(p(14.9572, 13.2032), p(14.7469, 14.3637), p(15.0691, 15.2327));
-                    b.bezier_curve_to(p(15.3549, 16.0037), p(15.5829, 17.1217), p(15.1762, 18.2015));
-                    b.bezier_curve_to(p(15.1484, 18.2752), p(15.1175, 18.3018), p(15.0985, 18.3149));
-                    b.bezier_curve_to(p(15.0743, 18.3316), p(15.0266, 18.3538), p(14.9445, 18.3589));
-                    b.bezier_curve_to(p(14.767, 18.3699), p(14.5135, 18.2916), p(14.3137, 18.0919));
-                    b.line_to(p(5.82846, 9.6066));
-                    b.bezier_curve_to(p(5.62872, 9.40686), p(5.55046, 9.15333), p(5.56144, 8.97583));
-                    b.bezier_curve_to(p(5.56651, 8.8937), p(5.58877, 8.84605), p(5.60548, 8.82181));
-                    b.bezier_curve_to(p(5.61855, 8.80285), p(5.64516, 8.7719), p(5.71886, 8.74414));
-                    b.bezier_curve_to(p(6.79869, 8.33741), p(7.91661, 8.56545), p(8.68762, 8.85128));
-                    b.bezier_curve_to(p(9.55668, 9.17345), p(10.7171, 8.96318), p(11.3071, 8.01845));
-                    b.line_to(p(14.1523, 3.46191));
-                    b.close();
+                    // Only the released glyph keeps the cap cut-out. Pinned
+                    // fills the outer contour alone, so at 16 px the turned
+                    // pin reads as a solid block instead of a hollow outline.
+                    if matches!(self.icon, Icon::Pin) {
+                        b.move_to(p(14.1523, 3.46191));
+                        b.bezier_curve_to(p(14.493, 2.91629), p(15.2528, 2.8296), p(15.7076, 3.28445));
+                        b.line_to(p(20.6359, 8.21274));
+                        b.bezier_curve_to(p(21.0907, 8.66759), p(21.0041, 9.42737), p(20.4584, 9.76806));
+                        b.line_to(p(15.9019, 12.6133));
+                        b.bezier_curve_to(p(14.9572, 13.2032), p(14.7469, 14.3637), p(15.0691, 15.2327));
+                        b.bezier_curve_to(p(15.3549, 16.0037), p(15.5829, 17.1217), p(15.1762, 18.2015));
+                        b.bezier_curve_to(p(15.1484, 18.2752), p(15.1175, 18.3018), p(15.0985, 18.3149));
+                        b.bezier_curve_to(p(15.0743, 18.3316), p(15.0266, 18.3538), p(14.9445, 18.3589));
+                        b.bezier_curve_to(p(14.767, 18.3699), p(14.5135, 18.2916), p(14.3137, 18.0919));
+                        b.line_to(p(5.82846, 9.6066));
+                        b.bezier_curve_to(p(5.62872, 9.40686), p(5.55046, 9.15333), p(5.56144, 8.97583));
+                        b.bezier_curve_to(p(5.56651, 8.8937), p(5.58877, 8.84605), p(5.60548, 8.82181));
+                        b.bezier_curve_to(p(5.61855, 8.80285), p(5.64516, 8.7719), p(5.71886, 8.74414));
+                        b.bezier_curve_to(p(6.79869, 8.33741), p(7.91661, 8.56545), p(8.68762, 8.85128));
+                        b.bezier_curve_to(p(9.55668, 9.17345), p(10.7171, 8.96318), p(11.3071, 8.01845));
+                        b.line_to(p(14.1523, 3.46191));
+                        b.close();
+                    }
                 });
                 frame.fill(
                     &pin,
@@ -746,9 +771,12 @@ pub struct App {
     detail_seq: Option<u64>,
     /// Number of newest visible rows currently rendered (see [`LOG_RENDER_ROWS`]).
     log_window: usize,
-    /// Newest seq remembered when auto-scroll was turned off; the rendered
-    /// window ends here so arriving rows cannot shift what the user is reading.
-    log_freeze_end: Option<u64>,
+    /// Rows pinned on screen while auto-scroll is off. Copied out of the store
+    /// (payloads are shared `Arc`s, so only the small row structs are cloned)
+    /// because the ring buffer drops old rows while the stream keeps running;
+    /// anchoring by seq alone made the view snap back to the newest row once
+    /// the anchor had been evicted. New rows wait below until "回到最新".
+    log_freeze: Option<Vec<LogRecord>>,
     /// Connection id waiting for a delete confirmation.
     pending_delete: Option<String>,
     /// “更多颜色” folded open in the custom-palette editor.
@@ -839,7 +867,7 @@ impl App {
             preview_cache: RefCell::new(HashMap::new()),
             detail_seq: None,
             log_window: LOG_RENDER_ROWS,
-            log_freeze_end: None,
+            log_freeze: None,
             pending_delete: None,
             more_colors: false,
             swatch_field: None,
@@ -890,15 +918,44 @@ impl App {
         self.editor = text_editor::Content::with_text(&self.rt.form.pub_payload);
     }
 
-    /// Back to one page of rows. With auto-scroll off, anchor at the newest row
-    /// so a filter/session switch starts at the end of the current list.
+    /// Back to one page of rows. With auto-scroll off, pin the newest page so
+    /// a filter or session switch does not slide with the incoming stream.
     fn reset_log_window(&mut self) {
         self.log_window = LOG_RENDER_ROWS;
-        self.log_freeze_end = if self.rt.prefs.auto_scroll {
-            None
+        if self.rt.prefs.auto_scroll {
+            self.log_freeze = None;
         } else {
-            self.rt.visible_logs().last().map(|log| log.seq)
+            self.freeze_logs(true);
+        }
+    }
+
+    /// Copy a page of rows out of the store so later ring-buffer eviction
+    /// cannot move or drop what the user is reading. `tail` picks the newest
+    /// rows (explicitly turning auto-scroll off) instead of the first page
+    /// (a session that starts with auto-scroll already off).
+    fn freeze_logs(&mut self, tail: bool) {
+        let logs = self.rt.visible_logs();
+        let rows: Vec<LogRecord> = if tail {
+            let skip = logs.len().saturating_sub(self.log_window);
+            logs[skip..].iter().map(|log| (*log).clone()).collect()
+        } else {
+            logs.iter()
+                .take(LOG_RENDER_ROWS)
+                .map(|log| (*log).clone())
+                .collect()
         };
+        self.log_freeze = (!rows.is_empty()).then_some(rows);
+    }
+
+    /// Rows shown in the frozen window are no longer guaranteed to be in the
+    /// store, so detail and copy look them up here as a fallback.
+    fn row_by_seq(&self, seq: u64) -> Option<&LogRecord> {
+        self.rt.active_log(seq).or_else(|| {
+            self.log_freeze
+                .as_ref()?
+                .iter()
+                .find(|log| log.seq == seq)
+        })
     }
 
     /// One row in the same shape as the exported log, for the clipboard.
@@ -910,7 +967,7 @@ impl App {
     /// Ctrl+Shift+C: the open detail row, else the newest visible row.
     fn current_row_text(&self) -> Option<String> {
         if let Some(seq) = self.detail_seq {
-            if let Some(log) = self.rt.active_log(seq) {
+            if let Some(log) = self.row_by_seq(seq) {
                 return Some(self.row_text(log));
             }
         }
@@ -1099,12 +1156,30 @@ impl App {
             Msg::OpenLog(seq) => self.detail_seq = Some(seq),
             Msg::CloseLog => self.detail_seq = None,
             Msg::ShowOlderLogs => {
-                self.log_window = self.log_window.saturating_add(LOG_RENDER_ROWS);
+                if let Some(rows) = self.log_freeze.as_mut() {
+                    if let Some(first) = rows.first().map(|log| log.seq) {
+                        let mut older: Vec<LogRecord> = self
+                            .rt
+                            .visible_logs()
+                            .iter()
+                            .filter(|log| log.seq < first)
+                            .map(|log| (*log).clone())
+                            .collect();
+                        let drop_count = older.len().saturating_sub(LOG_RENDER_ROWS);
+                        older.drain(..drop_count);
+                        if !older.is_empty() {
+                            older.extend(rows.drain(..));
+                            *rows = older;
+                        }
+                    }
+                } else {
+                    self.log_window = self.log_window.saturating_add(LOG_RENDER_ROWS);
+                }
             }
             Msg::ClearLogs => {
                 self.detail_seq = None;
                 self.log_window = LOG_RENDER_ROWS;
-                self.log_freeze_end = None;
+                self.log_freeze = None;
                 self.preview_cache.borrow_mut().clear();
                 self.rt.clear_logs();
             }
@@ -1346,10 +1421,9 @@ impl App {
             }
             Msg::AutoScroll(on) => {
                 if on {
-                    self.log_freeze_end = None;
-                } else if self.log_freeze_end.is_none() {
-                    let newest = self.rt.visible_logs().last().map(|log| log.seq);
-                    self.log_freeze_end = newest;
+                    self.log_freeze = None;
+                } else if self.log_freeze.is_none() {
+                    self.freeze_logs(true);
                 }
                 self.rt.set_auto_scroll(on);
             }
@@ -1396,6 +1470,15 @@ impl App {
 
         if self.rt.prefs.skin_choice == 0 && self.rt.refresh_system_skin() {
             // Palette changed; nothing else to do until the next frame.
+        }
+
+        // A session that starts with auto-scroll off keeps its first page: pin
+        // a copy as soon as the page is full so eviction cannot slide it.
+        if !self.rt.prefs.auto_scroll
+            && self.log_freeze.is_none()
+            && self.rt.visible_logs().len() >= LOG_RENDER_ROWS
+        {
+            self.freeze_logs(false);
         }
 
         let Some(bench) = self.bench.as_mut() else {
@@ -1636,7 +1719,7 @@ impl App {
         let pinned = self.rt.prefs.always_on_top;
         let pin = tooltip(
             control(
-                Icon::Pin,
+                if pinned { Icon::PinDown } else { Icon::Pin },
                 if pinned { c.accent } else { c.text_muted },
                 c.caption_button(),
                 Msg::ToggleAlwaysOnTop,
@@ -2436,25 +2519,28 @@ impl App {
 
         let logs = self.rt.visible_logs();
         let total = logs.len();
-        let end = if prefs.auto_scroll || paused {
-            total
+        // Frozen: render the copy taken when auto-scroll went off, so the ring
+        // buffer filling up cannot drag the view along. Following: the newest
+        // `log_window` rows straight from the store.
+        let rows: Vec<&LogRecord> = if let Some(frozen) = &self.log_freeze {
+            frozen.iter().collect()
         } else {
-            match self.log_freeze_end {
-                Some(seq) => logs
-                    .iter()
-                    .rposition(|log| log.seq == seq)
-                    .map_or(total, |index| index + 1),
-                // Auto-scroll was already off when the session opened: keep the
-                // first page where it is instead of sliding with new rows.
-                None => total.min(LOG_RENDER_ROWS),
-            }
+            logs[total.saturating_sub(self.log_window)..].to_vec()
         };
-        let start = end.saturating_sub(self.log_window);
-        let shown = end - start;
-        let hidden_before = start;
-        let hidden_after = total - end;
+        let shown = rows.len();
+        let (hidden_before, hidden_after) = if self.log_freeze.is_some() {
+            let first = rows.first().map_or(0, |log| log.seq);
+            let last = rows.last().map_or(0, |log| log.seq);
+            (
+                logs.iter().filter(|log| log.seq < first).count(),
+                logs.iter().filter(|log| log.seq > last).count(),
+            )
+        } else {
+            (total.saturating_sub(shown), 0)
+        };
+        let range_total = hidden_before + shown + hidden_after;
         let mut list = column![].spacing(5);
-        if logs.is_empty() {
+        if rows.is_empty() {
             list = list.push(
                 container(self.hint(c, t("还没有日志", "No logs yet")))
                     .padding(12)
@@ -2467,8 +2553,8 @@ impl App {
                         self.hint(
                             c,
                             t(
-                                &format!("仅显示 {shown} 条，共 {total} 条"),
-                                &format!("Showing {shown} of {total}"),
+                                &format!("仅显示 {shown} 条，共 {range_total} 条"),
+                                &format!("Showing {shown} of {range_total}"),
                             ),
                         ),
                         button(text(t("显示更早", "Show older")).size(fs(11.0)))
@@ -2480,7 +2566,7 @@ impl App {
                     .align_y(Alignment::Center),
                 );
             }
-            for log in &logs[start..end] {
+            for log in rows.iter().copied() {
                 list = list.push(self.log_bubble(c, log));
             }
             if hidden_after > 0 {
@@ -2654,7 +2740,7 @@ impl App {
     /// the complete bytes, so the cap only affects on-screen text shaping.
     fn log_detail(&self, c: &Colors) -> El<'_> {
         let seq = self.detail_seq.unwrap_or(0);
-        let Some(log) = self.rt.active_log(seq) else {
+        let Some(log) = self.row_by_seq(seq) else {
             return container(
                 column![
                     self.detail_back(c),
@@ -4152,6 +4238,50 @@ mod tests {
             let _page = app.view();
         }
         app.rt.toggle_logs_pause();
+        {
+            let _page = app.view();
+        }
+    }
+
+    /// Auto-scroll off pins the visible page by value, not by index: once the
+    /// ring buffer evicts those rows the page must stay put instead of sliding
+    /// to the newest row, and the detail panel must still find them.
+    #[test]
+    fn frozen_log_page_survives_eviction() {
+        let mut app = App::for_test();
+        let id = app.rt.active_id().unwrap();
+        app.rt.set_auto_scroll(false);
+        for n in 0..LOG_RENDER_ROWS {
+            app.rt
+                .push_log(&id, "RECV", "demo", format!("row {n}").into_bytes());
+        }
+        app.freeze_logs(true);
+        let frozen: Vec<u64> = app
+            .log_freeze
+            .as_ref()
+            .expect("page should be pinned")
+            .iter()
+            .map(|log| log.seq)
+            .collect();
+        assert_eq!(frozen.len(), LOG_RENDER_ROWS);
+
+        // Push past the ring-buffer limit so every pinned seq gets evicted.
+        for n in 0..600 {
+            app.rt
+                .push_log(&id, "RECV", "demo", format!("later {n}").into_bytes());
+        }
+        let after: Vec<u64> = app
+            .log_freeze
+            .as_ref()
+            .expect("page should stay pinned")
+            .iter()
+            .map(|log| log.seq)
+            .collect();
+        assert_eq!(after, frozen, "pinned page must not slide with the stream");
+
+        let first = frozen[0];
+        assert!(app.rt.active_log(first).is_none(), "row should be evicted");
+        assert!(app.row_by_seq(first).is_some(), "freeze keeps it reachable");
         {
             let _page = app.view();
         }
