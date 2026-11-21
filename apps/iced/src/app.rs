@@ -16,7 +16,7 @@ use iced::widget::{
     button, checkbox, column, container, mouse_area, pick_list, responsive, row, scrollable, text,
     text_editor, text_input, tooltip, Space, Stack,
 };
-use iced::{Alignment, Length, Point, Rectangle, Size, Task};
+use iced::{Alignment, Length, Padding, Point, Rectangle, Size, Task};
 use iced_widget::image::{Handle, Image};
 use mqttc_core::cli::BenchOptions;
 use mqttc_core::config::{FONT_SCALE_MAX, FONT_SCALE_MIN};
@@ -2673,6 +2673,22 @@ impl App {
             }
         }
 
+        // The scrollbar lane hugs the card border (2 px). The toolbar and the
+        // list are inset instead, so the bar keeps clear of SEND bubbles,
+        // which sit on their row's right edge. The list needs a little more
+        // than the bar is wide (10 px) so there is a visible gap.
+        let toolbar = container(toolbar)
+            .width(Length::Fill)
+            .padding(Padding {
+                right: 8.0,
+                ..Padding::default()
+            });
+        let list = container(list)
+            .width(Length::Fill)
+            .padding(Padding {
+                right: 14.0,
+                ..Padding::default()
+            });
         container(
             column![
                 toolbar,
@@ -2686,7 +2702,12 @@ impl App {
             .spacing(6)
             .height(Length::Fill),
         )
-        .padding(10)
+        .padding(Padding {
+            top: 10.0,
+            right: 2.0,
+            bottom: 10.0,
+            left: 10.0,
+        })
         .height(Length::FillPortion(3))
         .style(c.inset())
         .into()
