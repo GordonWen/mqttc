@@ -94,10 +94,12 @@ pub enum Skin {
     Blue,
     Green,
     Purple,
+    /// User-defined palette stored in `mqttc.json`.
+    Custom,
 }
 
 impl Skin {
-    /// Settings combo: 0=System, 1=Black, … 5=Purple.
+    /// Settings combo: 0=System, 1=Black, … 6=Custom.
     pub fn from_index(index: i32) -> Self {
         match index {
             0 => Self::System,
@@ -106,6 +108,7 @@ impl Skin {
             3 => Self::Blue,
             4 => Self::Green,
             5 => Self::Purple,
+            6 => Self::Custom,
             _ => Self::Black,
         }
     }
@@ -128,6 +131,7 @@ impl Skin {
             "blue" => Self::Blue,
             "green" => Self::Green,
             "purple" => Self::Purple,
+            "custom" => Self::Custom,
             _ => Self::Black,
         }
     }
@@ -140,6 +144,7 @@ impl Skin {
             Self::Blue => 3,
             Self::Green => 4,
             Self::Purple => 5,
+            Self::Custom => 6,
         }
     }
 
@@ -161,6 +166,7 @@ impl Skin {
             Self::Blue => "blue",
             Self::Green => "green",
             Self::Purple => "purple",
+            Self::Custom => "custom",
         }
     }
 
@@ -191,6 +197,7 @@ impl Skin {
             Self::Blue => ("蓝色", "Blue"),
             Self::Green => ("绿色", "Green"),
             Self::Purple => ("紫色", "Purple"),
+            Self::Custom => ("自定义", "Custom"),
         }
     }
 
@@ -199,13 +206,14 @@ impl Skin {
         i18n::t(zh, en)
     }
 
-    pub const ALL: [Skin; 6] = [
+    pub const ALL: [Skin; 7] = [
         Self::System,
         Self::Black,
         Self::White,
         Self::Blue,
         Self::Green,
         Self::Purple,
+        Self::Custom,
     ];
 }
 

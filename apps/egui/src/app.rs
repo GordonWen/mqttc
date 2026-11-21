@@ -979,7 +979,7 @@ impl eframe::App for App {
         }
 
         let skin = self.runtime.skin();
-        let pal = *self.runtime.palette();
+        let pal = self.runtime.palette();
         style::apply(&ctx, &pal, skin.is_light());
 
         let mut actions = Vec::new();

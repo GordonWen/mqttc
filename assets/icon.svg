@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">mqttc</title>
+  <defs>
+    <linearGradient id="plate" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="409" y2="584">
+      <stop offset="0" stop-color="#2DA4FF"/>
+      <stop offset="1" stop-color="#0060E2"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded plate -->
+  <rect width="512" height="512" rx="116" fill="url(#plate)"/>
+
+  <!-- Message bubble with tail -->
+  <rect x="103" y="122" width="306" height="220" rx="56" fill="#FFFFFF"/>
+  <path d="M145.3 341 L212.7 341 L121 407 Z" fill="#FFFFFF"/>
+
+  <!-- Telemetry pulse -->
+  <polyline points="136.5,232.5 198.6,232.5 233.4,179.5 277.8,284.5 313.8,232.5 373.5,232.5"
+            fill="none" stroke="#0A6CE8" stroke-width="29"
+            stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

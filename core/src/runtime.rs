@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use crate::cli::BenchOptions;
 use crate::config::{
-    self, normalize_auto_reply_echo, AppConfig, AutoReplyRule, ConnectionConfig,
+    self, clamp_font_scale, normalize_auto_reply_echo, AppConfig, AutoReplyRule, ConnectionConfig,
     SubscriptionConfig,
 };
 use crate::export;
@@ -27,7 +27,7 @@ use crate::model::{
 };
 use crate::mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, PublishOptions, UiEvent};
 use crate::payload;
-use crate::theme::{self, Palette};
+use crate::theme::{self, CustomPalette, Palette, PaletteField};
 
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(400);
 /// Give up after this many consecutive failures; the user can always click Connect.
@@ -94,6 +94,8 @@ pub struct PrefsState {
     pub log_kind_filter: i32,
     pub skin_choice: i32,
     pub language: i32,
+    /// Multiplier applied to every UI text size; `1.0` is standard.
+    pub font_scale: f32,
 }
 
 impl PrefsState {
@@ -105,6 +107,7 @@ impl PrefsState {
             log_kind_filter: config.log_kind_filter.clamp(0, 4),
             skin_choice: Skin::from_key(&config.skin).to_index(),
             language: Lang::from_key(&config.language).to_index(),
+            font_scale: clamp_font_scale(config.font_scale),
         }
     }
 }
@@ -333,8 +336,11 @@ impl AppRuntime {
         Skin::from_index(self.prefs.skin_choice)
     }
 
-    pub fn palette(&self) -> &'static Palette {
-        theme::palette(self.skin())
+    pub fn palette(&self) -> Palette {
+        match self.skin().resolve() {
+            Skin::Custom => self.config.custom_palette.resolve(),
+            skin => *theme::palette(skin),
+        }
     }
 
     // ---------------------------------------------------------------- prefs
@@ -350,6 +356,7 @@ impl AppRuntime {
             .to_key()
             .to_string();
         self.config.language = Lang::from_index(self.prefs.language).to_key().to_string();
+        self.config.font_scale = clamp_font_scale(self.prefs.font_scale);
         i18n::set_lang(Lang::from_index(self.prefs.language));
     }
 
@@ -375,14 +382,82 @@ impl AppRuntime {
     }
 
     pub fn set_skin_choice(&mut self, choice: i32) {
+        let previous = self.skin().resolve();
         self.prefs.skin_choice = choice;
         self.last_resolved_skin = self.skin().resolve();
+        // First switch to “custom” seeds a full palette from the skin the user
+        // was just looking at, so they tweak instead of starting from scratch.
+        if self.skin() == Skin::Custom && self.config.custom_palette.is_empty() {
+            let base = if previous == Skin::Custom {
+                Skin::Black
+            } else {
+                previous
+            };
+            self.config.custom_palette = CustomPalette::from_base(base);
+        }
         self.apply_prefs();
+        self.persist();
+    }
+
+    // ------------------------------------------------------- custom palette
+
+    pub fn custom_palette(&self) -> &CustomPalette {
+        &self.config.custom_palette
+    }
+
+    /// Raw hex text for one slot, defaulting to the resolved color.
+    pub fn custom_color_text(&self, field: PaletteField) -> String {
+        let resolved = self.palette();
+        self.config.custom_palette.text(field, field.get(&resolved))
+    }
+
+    /// Store what the user typed; invalid text simply falls back on resolve.
+    pub fn set_custom_color(&mut self, field: PaletteField, value: String) {
+        if self.skin() != Skin::Custom {
+            return;
+        }
+        self.config.custom_palette.set(field, value);
+        self.mark_dirty();
+    }
+
+    /// Drop one override so the slot follows the base skin again.
+    pub fn reset_custom_color(&mut self, field: PaletteField) {
+        if self.skin() != Skin::Custom {
+            return;
+        }
+        self.config.custom_palette.reset(field);
+        self.mark_dirty();
+    }
+
+    /// Pick the skin used for back-filling missing colors.
+    pub fn set_custom_base(&mut self, skin: i32) {
+        let skin = Skin::from_index(skin);
+        if skin == Skin::Custom {
+            return;
+        }
+        self.config.custom_palette.base = skin.resolve().to_key().to_string();
+        self.mark_dirty();
+    }
+
+    /// Overwrite every custom color with the base skin's table.
+    pub fn refill_custom_palette(&mut self) {
+        self.config.custom_palette.refill();
         self.persist();
     }
 
     pub fn set_language(&mut self, index: i32) {
         self.prefs.language = index;
+        self.apply_prefs();
+        self.persist();
+    }
+
+    /// Sets the UI text scale. Out-of-range or non-finite values are clamped.
+    pub fn set_font_scale(&mut self, scale: f32) {
+        let scale = clamp_font_scale(scale);
+        if self.prefs.font_scale == scale {
+            return;
+        }
+        self.prefs.font_scale = scale;
         self.apply_prefs();
         self.persist();
     }
@@ -1078,10 +1153,6 @@ impl AppRuntime {
         if let Some(idx) = self.active_index() {
             self.config.connections[idx].timed_interval = interval;
         }
-        // First tick uses the bottom form, not a preset.
-        if self.publish_from_connection(&id, false, true).is_err() {
-            return;
-        }
         let generation = {
             let runtime = self.runtime_mut(&id);
             let next = runtime.timed_generation.load(Ordering::Relaxed) + 1;
@@ -1089,6 +1160,8 @@ impl AppRuntime {
             runtime.timed_running = true;
             next
         };
+        // Log the start before the immediate first tick, so the log reads
+        // SYS (started) → SEND (first message) instead of SEND first.
         self.push_log(
             &id,
             "SYS",
@@ -1099,6 +1172,21 @@ impl AppRuntime {
             )
             .into_bytes(),
         );
+        // First tick uses the bottom form, not a preset.
+        if self.publish_from_connection(&id, false, true).is_err() {
+            self.stop_timed(&id);
+            self.push_log(
+                &id,
+                "SYS",
+                "",
+                i18n::t(
+                    "首条发送失败，定时发布未启动",
+                    "First send failed; timed publish not started",
+                )
+                .into_bytes(),
+            );
+            return;
+        }
         self.persist();
 
         let sink = self.sink.clone();
@@ -1951,6 +2039,32 @@ mod tests {
         assert_eq!(rt.config.language, "en");
         assert!(i18n::is_en());
         rt.set_language(0);
+
+        // Custom palette: switching seeds from the skin just shown, then single
+        // slots can be overridden without touching the rest.
+        rt.set_skin_choice(Skin::Custom.to_index());
+        assert_eq!(rt.skin(), Skin::Custom);
+        assert_eq!(
+            PaletteField::WindowBg.get(&rt.palette()),
+            PaletteField::WindowBg.get(theme::palette(Skin::Green))
+        );
+        rt.set_custom_color(PaletteField::WindowBg, "#123456".into());
+        assert_eq!(rt.custom_color_text(PaletteField::WindowBg), "#123456");
+        assert_eq!(
+            PaletteField::WindowBg.get(&rt.palette()),
+            (0x12, 0x34, 0x56)
+        );
+        assert_eq!(
+            rt.custom_color_text(PaletteField::PanelBg),
+            theme::to_hex(PaletteField::PanelBg.get(theme::palette(Skin::Green)))
+        );
+        // Invalid text stays in the box but resolves to the base color.
+        rt.set_custom_color(PaletteField::WindowBg, "#12".into());
+        assert_eq!(rt.custom_color_text(PaletteField::WindowBg), "#12");
+        assert_eq!(
+            PaletteField::WindowBg.get(&rt.palette()),
+            PaletteField::WindowBg.get(theme::palette(Skin::Green))
+        );
     }
 
     #[test]

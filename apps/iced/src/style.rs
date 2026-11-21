@@ -12,6 +12,16 @@ pub fn rgb((r, g, b): Rgb) -> Color {
     Color::from_rgb8(r, g, b)
 }
 
+/// Linear blend of two colors: `t = 0.0` keeps `base`, `t = 1.0` gives `accent`.
+fn blend(base: Color, accent: Color, t: f32) -> Color {
+    Color {
+        r: base.r + (accent.r - base.r) * t,
+        g: base.g + (accent.g - base.g) * t,
+        b: base.b + (accent.b - base.b) * t,
+        a: base.a,
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Colors {
     pub window_bg: Color,
@@ -42,7 +52,7 @@ pub struct Colors {
 }
 
 impl Colors {
-    pub fn from_palette(p: &Palette) -> Self {
+    pub fn from_palette(p: Palette) -> Self {
         Self {
             window_bg: rgb(p.window_bg),
             panel_bg: rgb(p.panel_bg),
@@ -122,6 +132,12 @@ impl Colors {
         move |_, status| ghost_style(c, status)
     }
 
+    /// Inline text link (About page): no frame at rest, soft tint on hover.
+    pub fn link_button(&self) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+        let c = *self;
+        move |_, status| link_style(c, status)
+    }
+
     /// One entry point for conditional styles: `if/else` branches over two
     /// different `impl Fn` returns would otherwise need distinct opaque types.
     pub fn button_kind(
@@ -131,7 +147,7 @@ impl Colors {
         let c = *self;
         move |_, status| match kind {
             ButtonKind::Ghost => ghost_style(c, status),
-            ButtonKind::Danger => danger_style(c, status),
+            ButtonKind::Danger => danger_outline_style(c, status),
             ButtonKind::Selected => selected_style(c, status),
         }
     }
@@ -141,17 +157,121 @@ impl Colors {
         move |_, status| danger_style(c, status)
     }
 
+    /// Minimize / maximize / close buttons in the custom title strip. They
+    /// share one flat cell style: full-height hover tint, no rounding, so the
+    /// group reads as native window chrome.
+    pub fn caption_button(&self) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+        let c = *self;
+        move |_, status| caption_style(c, status)
+    }
+
+    /// Outlined danger action (e.g. disconnect): a visible red frame that
+    /// fills solid on hover, so it reads as a button next to the primary one.
+    pub fn danger_outline_button(
+        &self,
+    ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+        let c = *self;
+        move |_, status| danger_outline_style(c, status)
+    }
+
+    /// Flat colour chip for the custom-palette picker. `ring` marks the value
+    /// currently in use so the active choice stays visible among lookalikes.
+    pub fn swatch_button(
+        &self,
+        fill: Rgb,
+        ring: bool,
+    ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+        let c = *self;
+        let fill = rgb(fill);
+        move |_, status| {
+            let hovered = matches!(
+                status,
+                button::Status::Hovered | button::Status::Pressed
+            );
+            button::Style {
+                background: Some(Background::Color(fill)),
+                text_color: c.text_primary,
+                border: Border {
+                    color: if ring || hovered { c.text_primary } else { c.hover_bg },
+                    width: if ring || hovered { 2.0 } else { 1.0 },
+                    radius: 4.0.into(),
+                },
+                shadow: Shadow::default(),
+                snap: true,
+            }
+        }
+    }
+
+    /// Full-width bar that reveals the folded colour slots. When open it is
+    /// tinted with the accent so the state reads at a glance, not only from
+    /// the chevron.
+    pub fn disclosure_button(
+        &self,
+        open: bool,
+    ) -> impl Fn(&Theme, button::Status) -> button::Style + 'static {
+        let c = *self;
+        move |_, status| {
+            let hovered = matches!(
+                status,
+                button::Status::Hovered | button::Status::Pressed
+            );
+            let (bg, line) = if hovered {
+                (c.hover_bg, blend(c.hover_bg, c.accent, 0.45))
+            } else if open {
+                (
+                    blend(c.panel_bg, c.accent, 0.12),
+                    blend(c.hover_bg, c.accent, 0.55),
+                )
+            } else {
+                (c.panel_bg, c.hover_bg)
+            };
+            button::Style {
+                background: Some(Background::Color(bg)),
+                text_color: c.text_body,
+                border: Border {
+                    color: line,
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                shadow: Shadow::default(),
+                snap: true,
+            }
+        }
+    }
+
     pub fn checkbox_style(&self) -> impl Fn(&Theme, checkbox::Status) -> checkbox::Style + 'static {
         let c = *self;
-        move |_, _status| checkbox::Style {
-            background: Background::Color(c.inset_bg),
-            icon_color: c.accent,
-            border: Border {
-                color: c.hover_bg,
-                width: 1.0,
-                radius: 4.0.into(),
-            },
-            text_color: Some(c.text_body),
+        move |_, status| {
+            let checked = matches!(
+                status,
+                checkbox::Status::Active { is_checked: true }
+                    | checkbox::Status::Hovered { is_checked: true }
+                    | checkbox::Status::Disabled { is_checked: true }
+            );
+
+            // Tint the box while checked. Besides the clearer affordance,
+            // this is what keeps the checkmark whole: iced 0.14 computes the
+            // damage rectangle of the centered icon from the box center, so
+            // toggling only the text repaints the right half of the mark.
+            // A changed background makes the whole box part of the damage.
+            checkbox::Style {
+                background: Background::Color(if checked {
+                    blend(c.inset_bg, c.accent, 0.12)
+                } else {
+                    c.inset_bg
+                }),
+                icon_color: c.accent,
+                border: Border {
+                    color: if checked {
+                        blend(c.hover_bg, c.accent, 0.45)
+                    } else {
+                        c.hover_bg
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                text_color: Some(c.text_body),
+            }
         }
     }
 
@@ -282,6 +402,27 @@ fn ghost_style(c: Colors, status: button::Status) -> button::Style {
     }
 }
 
+fn link_style(c: Colors, status: button::Status) -> button::Style {
+    let (bg, text_color) = match status {
+        button::Status::Active => (None, c.accent),
+        button::Status::Hovered | button::Status::Pressed => {
+            (Some(c.selected_bg), c.accent)
+        }
+        button::Status::Disabled => (None, c.text_faint),
+    };
+    button::Style {
+        background: bg.map(Background::Color),
+        text_color,
+        border: Border {
+            color: c.panel_bg,
+            width: 0.0,
+            radius: 4.0.into(),
+        },
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
 fn selected_style(c: Colors, status: button::Status) -> button::Style {
     let (bg, text_color) = match status {
         button::Status::Active | button::Status::Pressed => (c.selected_bg, c.text_primary),
@@ -312,6 +453,53 @@ fn danger_style(c: Colors, status: button::Status) -> button::Style {
         text_color,
         border: Border {
             color: if bg.is_some() { c.danger } else { c.panel_bg },
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
+/// Borderless chrome for the custom title strip's window buttons.
+fn caption_style(c: Colors, status: button::Status) -> button::Style {
+    let (bg, text_color) = match status {
+        button::Status::Active => (None, c.text_muted),
+        button::Status::Hovered | button::Status::Pressed => {
+            (Some(c.selected_bg), c.text_primary)
+        }
+        button::Status::Disabled => (None, c.text_faint),
+    };
+    button::Style {
+        background: bg.map(Background::Color),
+        text_color,
+        border: Border {
+            color: c.panel_bg,
+            width: 0.0,
+            radius: 0.0.into(),
+        },
+        shadow: Shadow::default(),
+        snap: true,
+    }
+}
+
+fn danger_outline_style(c: Colors, status: button::Status) -> button::Style {
+    let (bg, text_color, line) = match status {
+        button::Status::Active => (
+            Some(blend(c.panel_bg, c.danger, 0.07)),
+            c.danger,
+            blend(c.panel_bg, c.danger, 0.55),
+        ),
+        button::Status::Hovered | button::Status::Pressed => {
+            (Some(c.danger), c.accent_fg, c.danger)
+        }
+        button::Status::Disabled => (None, c.text_faint, c.panel_bg),
+    };
+    button::Style {
+        background: bg.map(Background::Color),
+        text_color,
+        border: Border {
+            color: line,
             width: 1.0,
             radius: 6.0.into(),
         },

@@ -144,7 +144,8 @@ mod tests {
     }
 
     #[test]
-    fn skin_options_cover_all_six() {
-        assert_eq!(skin_options().len(), 6);
+    fn skin_options_cover_every_skin() {
+        assert_eq!(skin_options().len(), crate::model::Skin::ALL.len());
+        assert_eq!(crate::model::Skin::ALL.len(), 7);
     }
 }

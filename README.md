@@ -10,9 +10,9 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows 10/11 x64 | `mqttc-v0.2.3-windows-x64.zip` | 解压运行 `mqttc.exe` |
-| Linux x64 | `mqttc-v0.2.3-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
-| macOS 11+ | `mqttc-v0.2.3-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
+| Windows 10/11 x64 | `mqttc-v1.0.0-windows-x64.zip` | 解压运行 `mqttc.exe` |
+| Linux x64 | `mqttc-v1.0.0-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
+| macOS 11+ | `mqttc-v1.0.0-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
 
 配置 `mqttc.json` 与导出的 `logs/` 都在可执行文件同目录，不写注册表、不写用户目录，
 整个文件夹可以放在 U 盘里带走。
@@ -35,7 +35,7 @@ Windows x64 release 实测（3 次独立进程中位数，详见 [基准报告](
 | 10 msg/s 流式接收 | 30.8 MB | — |
 | 1 Hz 定时发布 | 31.2 MB | — |
 
-- exe 5.92 MB，portable zip 3.00 MB
+- exe 5.95 MB，portable zip 2.82 MB
 - 空闲 CPU 接近 0%；10 msg/s 接收时最高 0.03%（按 16 逻辑核归一）
 - 每连接日志默认 200 条，可在设置中调到 2000 条；单连接另设 16 MB 字节预算
 
@@ -43,18 +43,19 @@ Windows x64 release 实测（3 次独立进程中位数，详见 [基准报告](
 
 - 多连接管理：新增 / 编辑 / 删除 / 切换，每条连接独立会话
 - MQTT 3.1.1 与 5.0；QoS 0/1/2、Clean Session、Keep Alive、连接超时、Last Will
-- TLS：系统根证书、自定义 CA、客户端证书 / 私钥、跳过证书校验
+- TLS：系统根证书、自定义 CA（仅信任该 CA）、客户端证书 / 私钥、跳过证书校验
 - 会话页标签：日志 / 订阅 / 自动回复 / 预设，均只作用于当前连接
 - 订阅管理：`+` / `#` 通配符，按 QoS 订阅，列表显示 QoS，点击订阅项用作日志过滤
 - 发布：文本 / JSON / Base64 / Hex 四种格式互转，JSON 美化，QoS 与保留标志
 - 定时发布：1–3600s 间隔
-- 预设发送：多条发布预设一键发送
+- 预设发送：多条发布预设一键发送，可置顶常用项；预设条按名称宽度自动折叠
 - 自动回复：按订阅主题 / 关键字 / 负载内容匹配，按规则顺序首条命中即回复
 - 聊天式日志：收发气泡、系统事件、错误提示；搜索、类型筛选、显示格式切换、
   自动滚动、导出、清空；大负载预览自动截断，可展开查看完整内容（上限 16 KB）
 - 日志缓冲可暂停接收、可在设置中调整历史上限；导出支持当前筛选结果或全部记录，
   文件名带连接名与毫秒时间戳
-- 中英文界面；6 套皮肤：跟随系统 / 黑 / 白 / 蓝 / 绿 / 紫
+- 中英文界面；7 套皮肤：跟随系统 / 黑 / 白 / 蓝 / 绿 / 紫 / 自定义（27 个颜色槽可调）
+- 4 档界面字号，整窗文字等比缩放；无边框窗口配自绘标题栏与缩放手柄
 
 ## 从源码构建
 
@@ -95,7 +96,7 @@ cargo build --release -p mqttc-iced
 
 | 程序 | UI 框架 | 渲染 | 工作集 | exe | 状态 |
 |---|---|---|---|---|---|
-| `mqttc-iced` | Iced 0.14 | tiny-skia 软件 | 28.8–31.2 MB | 5.83 MB | **发布版** |
+| `mqttc-iced` | Iced 0.14 | tiny-skia 软件 | 28.8–31.2 MB | 5.95 MB | **发布版** |
 | `mqttc-egui` | egui / eframe 0.37 | OpenGL | 96–111 MB | 8.22 MB | 开发备选 |
 | `mqttc-gpui` | GPUI 0.2.2 | Direct3D 11 | 47–49 MB | 9.38 MB | 探索性，少量编辑页只读 |
 
@@ -138,7 +139,8 @@ docs/                BENCHMARK / ARCHITECTURE / PARITY / RELEASING
 ## 配置
 
 `mqttc.json` 与早期 Slint 版本格式兼容：包含连接列表（`connections`）、当前连接
-（`active_id`）、外观（`skin`、`language`）、日志偏好（`log_format`、`auto_scroll`）等。
+（`active_id`）、外观（`skin`、`custom_palette`、`font_scale`、`language`）、
+日志偏好（`log_format`、`auto_scroll`）等；预设支持 `pinned` 置顶字段。
 首次运行若不存在会自动创建；旧版单连接配置会自动迁移。写入采用临时文件 + rename
 的原子写，文本编辑做 400ms 防抖。
 

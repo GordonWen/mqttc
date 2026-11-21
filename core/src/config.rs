@@ -44,6 +44,9 @@ pub struct PublishPreset {
     pub retain: bool,
     #[serde(default = "default_payload_format")]
     pub format: String,
+    /// Pinned presets sort ahead of the rest in the publish strip.
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl Default for PublishPreset {
@@ -55,6 +58,7 @@ impl Default for PublishPreset {
             qos: 0,
             retain: false,
             format: default_payload_format(),
+            pinned: false,
         }
     }
 }
@@ -199,8 +203,29 @@ pub struct AppConfig {
     pub log_limit: usize,
     #[serde(default = "default_skin")]
     pub skin: String,
+    /// Colors used when `skin` is `"custom"`; empty entries follow `base`.
+    #[serde(default)]
+    pub custom_palette: crate::theme::CustomPalette,
     #[serde(default = "default_language")]
     pub language: String,
+    /// UI text scale; `1.0` is the standard size. Clamped to
+    /// [`FONT_SCALE_MIN`]–[`FONT_SCALE_MAX`] when loaded or set.
+    #[serde(default = "default_font_scale")]
+    pub font_scale: f32,
+}
+
+/// Smallest UI text scale the settings page offers.
+pub const FONT_SCALE_MIN: f32 = 0.8;
+/// Largest UI text scale the settings page offers.
+pub const FONT_SCALE_MAX: f32 = 1.4;
+
+/// Keeps a hand-edited config from producing unreadable or overflowing type.
+pub fn clamp_font_scale(scale: f32) -> f32 {
+    if scale.is_finite() {
+        scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX)
+    } else {
+        1.0
+    }
 }
 
 fn default_host() -> String {
@@ -259,6 +284,10 @@ fn default_language() -> String {
     "zh".to_string()
 }
 
+fn default_font_scale() -> f32 {
+    1.0
+}
+
 fn default_protocol() -> String {
     "3.1.1".to_string()
 }
@@ -312,7 +341,9 @@ impl Default for AppConfig {
             log_kind_filter: 0,
             log_limit: default_log_limit(),
             skin: default_skin(),
+            custom_palette: crate::theme::CustomPalette::default(),
             language: default_language(),
+            font_scale: default_font_scale(),
         }
     }
 }
@@ -415,6 +446,7 @@ pub fn load_from(path: &Path) -> Result<Option<AppConfig>, String> {
         )
     })?;
     config.log_limit = crate::model::clamp_log_limit(config.log_limit);
+    config.font_scale = clamp_font_scale(config.font_scale);
 
     if config.connections.is_empty() {
         if let Some(conn) = legacy_connection(&value) {
@@ -529,6 +561,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn font_scale_defaults_and_clamps() {
+        assert_eq!(AppConfig::default().font_scale, 1.0);
+        let parsed: AppConfig = serde_json::from_str("{}").expect("defaults");
+        assert_eq!(parsed.font_scale, 1.0);
+        assert_eq!(clamp_font_scale(0.1), FONT_SCALE_MIN);
+        assert_eq!(clamp_font_scale(9.0), FONT_SCALE_MAX);
+        assert_eq!(clamp_font_scale(f32::NAN), 1.0);
+    }
+
+    #[test]
     fn legacy_flat_config_migrates_to_connection() {
         let value: serde_json::Value = serde_json::from_str(
             r#"{
@@ -583,6 +625,7 @@ mod tests {
             qos: 1,
             retain: true,
             format: "hex".to_string(),
+            pinned: true,
         });
         conn.auto_reply_echo = "rematch".to_string();
         conn.auto_reply_rules.push(AutoReplyRule {
@@ -633,6 +676,7 @@ mod tests {
         assert_eq!(back.connections[0].publish_presets[0].qos, 1);
         assert!(back.connections[0].publish_presets[0].retain);
         assert_eq!(back.connections[0].publish_presets[0].format, "hex");
+        assert!(back.connections[0].publish_presets[0].pinned);
         assert_eq!(back.connections[0].auto_reply_echo, "rematch");
         assert_eq!(back.connections[0].auto_reply_rules.len(), 1);
         assert!(back.connections[0].auto_reply_rules[0].enabled);
@@ -660,6 +704,7 @@ mod tests {
                 qos: 9,
                 retain: false,
                 format: String::new(),
+                pinned: false,
             },
             PublishPreset {
                 name: "b".into(),

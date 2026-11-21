@@ -38,7 +38,7 @@ pub struct Colors {
 }
 
 impl Colors {
-    pub fn from_palette(p: &Palette) -> Self {
+    pub fn from_palette(p: Palette) -> Self {
         Self {
             window_bg: c(p.window_bg),
             panel_bg: c(p.panel_bg),

@@ -569,10 +569,12 @@ impl Root {
             LogFormat => fmt_name(PayloadFormat::from_index(self.rt.prefs.log_format)).to_string(),
             Skin => {
                 let names = [
-                    "跟随系统", "黑", "白", "蓝", "绿", "紫",
+                    "跟随系统", "黑", "白", "蓝", "绿", "紫", "自定义",
                 ];
-                let names_en = ["System", "Black", "White", "Blue", "Green", "Purple"];
-                let i = (self.rt.prefs.skin_choice.clamp(0, 5)) as usize;
+                let names_en = [
+                    "System", "Black", "White", "Blue", "Green", "Purple", "Custom",
+                ];
+                let i = (self.rt.prefs.skin_choice.clamp(0, 6)) as usize;
                 if is_en() { names_en[i] } else { names[i] }.to_string()
             }
             Lang => if self.rt.prefs.language == 1 { "English" } else { "中文" }.to_string(),

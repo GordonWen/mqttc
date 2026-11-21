@@ -105,6 +105,7 @@ fn v311_roundtrip_preset_and_auto_reply() {
         qos: 0,
         retain: false,
         format: 0,
+        pinned: false,
     }];
     assert!(rt.publish_preset(0), "preset publish failed");
     assert!(
@@ -185,6 +186,24 @@ fn timed_publish_sends_and_stops() {
     rt.form.timed_interval = "1".into();
     rt.toggle_timed();
     assert!(rt.timed_running(), "timed publish did not start");
+
+    // The SYS "started" row must precede the immediate first SEND, so the log
+    // reads start → first message instead of the first message arriving first.
+    {
+        let logs = rt.visible_logs();
+        let first_send = logs
+            .iter()
+            .position(|log| log.kind == "SEND" && log.topic == "mqttc/it/timed")
+            .expect("first timed send missing");
+        assert!(first_send > 0, "first timed send has no preceding row");
+        let start_row = &logs[first_send - 1];
+        assert_eq!(start_row.kind, "SYS", "SYS start row must precede the first SEND");
+        let text = String::from_utf8_lossy(&start_row.payload);
+        assert!(
+            text.contains("定时发布") || text.contains("Timed publish"),
+            "unexpected row before first SEND: {text}"
+        );
+    }
 
     assert!(
         pump_until(&mut rt, 6, |rt| {

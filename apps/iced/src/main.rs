@@ -14,9 +14,10 @@ use std::io::Cursor;
 
 use iced::{window, Size};
 
-/// Decode `assets/icon.png` into the RGBA buffer iced wants for the window icon.
-fn load_icon() -> Option<window::Icon> {
-    let bytes = include_bytes!("../../../assets/icon.png");
+/// Decodes `assets/icons/mqttc-256.png` into the RGBA buffer shared by the
+/// window icon and the in-app mark.
+pub fn icon_rgba() -> Option<(u32, u32, Vec<u8>)> {
+    let bytes = include_bytes!("../../../assets/icons/mqttc-256.png");
     let decoder = png::Decoder::new(Cursor::new(&bytes[..]));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0; reader.output_buffer_size()?];
@@ -35,21 +36,29 @@ fn load_icon() -> Option<window::Icon> {
             .collect(),
         png::ColorType::Indexed => return None,
     };
-    iced::window::icon::from_rgba(rgba, info.width, info.height).ok()
+    Some((info.width, info.height, rgba))
+}
+
+fn load_icon() -> Option<window::Icon> {
+    let (width, height, rgba) = icon_rgba()?;
+    iced::window::icon::from_rgba(rgba, width, height).ok()
 }
 
 fn main() -> iced::Result {
     let mut settings = window::Settings {
         size: Size::new(1360.0, 860.0),
         min_size: Some(Size::new(980.0, 640.0)),
+        // The shell draws its own title strip (brand + window buttons) and
+        // resize grips, so the OS caption bar is disabled on every platform.
+        decorations: false,
         ..window::Settings::default()
     };
     if let Some(icon) = load_icon() {
         settings.icon = Some(icon);
     }
 
-    iced::application(app::App::new, app::App::update, app::App::view)
-        .title("mqttc")
+    iced::application(app::App::boot, app::App::update, app::App::view)
+        .title("MQTTC")
         .theme(app::App::theme)
         .subscription(app::App::subscription)
         .default_font(app::ui_font())

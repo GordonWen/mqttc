@@ -10,22 +10,205 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use iced::widget::canvas::{self, Canvas, LineCap, Path, Stroke};
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, checkbox, column, container, pick_list, row, scrollable, text, text_editor,
-    text_input, Space, Stack,
+    button, checkbox, column, container, mouse_area, pick_list, responsive, row, scrollable, text,
+    text_editor, text_input, tooltip, Space, Stack,
 };
-use iced::{Alignment, Length, Task};
+use iced::{Alignment, Length, Point, Rectangle, Size, Task};
+use iced_widget::image::{Handle, Image};
 use mqttc_core::cli::BenchOptions;
-use mqttc_core::form::FormState;
+use mqttc_core::config::{FONT_SCALE_MAX, FONT_SCALE_MIN};
+use mqttc_core::form::{FormState, PresetRow};
 use mqttc_core::i18n::{is_en, t};
 use mqttc_core::model::{default_client_id, ConnStatus, LogRecord, PayloadFormat, Skin};
 use mqttc_core::payload;
 use mqttc_core::runtime::AppRuntime;
+use mqttc_core::theme::{to_hex, PaletteField, Rgb};
 
 use crate::style::{rgb, ButtonKind, Colors};
 
 type El<'a> = iced::Element<'a, Msg>;
+
+/// Sidebar width in logical pixels. Collapsing the sidebar shrinks the window
+/// by the same amount so the page keeps its width instead of being stretched.
+const SIDEBAR_WIDTH: f32 = 180.0;
+/// Must match the window minimum in `main.rs`; the hidden-sidebar minimum
+/// drops by the sidebar width so the window really can get narrower.
+const MIN_WINDOW_WIDTH: f32 = 980.0;
+const MIN_WINDOW_HEIGHT: f32 = 640.0;
+
+// ------------------------------------------------------------- font scale
+
+thread_local! {
+    /// Set once per frame from `PrefsState::font_scale`; every text size goes
+    /// through [`fs`] so all pages share one scaled type scale.
+    static FONT_SCALE: Cell<f32> = const { Cell::new(1.0) };
+}
+
+/// Scales a design-time font size (or checkbox box) by the user preference.
+fn fs(size: f32) -> f32 {
+    FONT_SCALE.with(|scale| size * scale.get())
+}
+
+fn set_font_scale(scale: f32) {
+    FONT_SCALE.with(|cell| cell.set(scale.clamp(FONT_SCALE_MIN, FONT_SCALE_MAX)));
+}
+
+/// Runs a window action against the latest window (the shell only opens one).
+fn window_task(
+    action: impl Fn(iced::window::Id) -> Task<Msg> + Send + 'static,
+) -> Task<Msg> {
+    iced::window::latest().and_then(action)
+}
+
+// ------------------------------------------------------------ vector icons
+
+/// Small stroke icons drawn with the canvas renderer. The bundled system
+/// fonts have no dependable glyph set for caption/nav symbols, and a canvas
+/// keeps the three window buttons optically identical.
+#[derive(Clone, Copy)]
+enum Icon {
+    /// Caption controls.
+    Minus,
+    Square,
+    Close,
+    /// Sidebar navigation.
+    Gear,
+    Info,
+    Plus,
+    /// Title-strip sidebar toggle (panel outline with a divider).
+    Panel,
+}
+
+struct IconCanvas {
+    icon: Icon,
+    color: iced::Color,
+    /// Stroke width in logical pixels (scaled by the caller if needed).
+    stroke: f32,
+    /// Half-extent of the glyph box; the icon stays centred in its cell.
+    radius: f32,
+    /// Widget size / 15, so nav icons follow the text scale while caption
+    /// icons keep their native chrome size.
+    scale: f32,
+}
+
+impl IconCanvas {
+    fn new(icon: Icon, color: iced::Color) -> Self {
+        let (stroke, radius) = match icon {
+            Icon::Minus | Icon::Square | Icon::Close => (1.05, 5.4),
+            Icon::Gear | Icon::Info => (1.35, 6.0),
+            Icon::Plus => (1.25, 6.0),
+            Icon::Panel => (1.15, 6.2),
+        };
+        Self {
+            icon,
+            color,
+            stroke,
+            radius,
+            scale: 1.0,
+        }
+    }
+
+    fn widget<'a>(mut self, size: f32) -> iced::Element<'a, Msg> {
+        self.scale = size / 15.0;
+        Canvas::new(self)
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .into()
+    }
+}
+
+impl canvas::Program<Msg> for IconCanvas {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &Self::State,
+        renderer: &iced::Renderer,
+        _theme: &iced::Theme,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let (w, h) = (bounds.width, bounds.height);
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        let r = self.radius * self.scale;
+        let stroke = Stroke::default()
+            .with_color(self.color)
+            .with_width(self.stroke * self.scale);
+        let round = stroke.with_line_cap(LineCap::Round);
+        let line = |x1: f32, y1: f32, x2: f32, y2: f32| {
+            Path::line(Point::new(cx + x1, cy + y1), Point::new(cx + x2, cy + y2))
+        };
+        match self.icon {
+            Icon::Minus => {
+                frame.stroke(&line(-r, 0.0, r, 0.0), round);
+            }
+            Icon::Plus => {
+                frame.stroke(&line(-r, 0.0, r, 0.0), round);
+                frame.stroke(&line(0.0, -r, 0.0, r), round);
+            }
+            Icon::Square => {
+                let side = r * 1.55;
+                frame.stroke(
+                    &Path::rectangle(
+                        Point::new(cx - side / 2.0, cy - side / 2.0),
+                        Size::new(side, side),
+                    ),
+                    stroke,
+                );
+            }
+            Icon::Close => {
+                let d = r * 0.82;
+                frame.stroke(&line(-d, -d, d, d), round);
+                frame.stroke(&line(-d, d, d, -d), round);
+            }
+            Icon::Gear => {
+                frame.stroke(&Path::circle(Point::new(cx, cy), r * 0.72), stroke);
+                frame.stroke(&Path::circle(Point::new(cx, cy), r * 0.30), stroke);
+                // Eight short teeth around the ring read as a cog.
+                for i in 0..8 {
+                    let a = std::f32::consts::TAU * i as f32 / 8.0;
+                    let (s, c) = a.sin_cos();
+                    frame.stroke(
+                        &line(c * r * 0.70, s * r * 0.70, c * r * 0.98, s * r * 0.98),
+                        stroke,
+                    );
+                }
+            }
+            Icon::Info => {
+                frame.stroke(&Path::circle(Point::new(cx, cy), r * 0.92), stroke);
+                frame.stroke(&line(0.0, -r * 0.45, 0.0, r * 0.45), round);
+                let dot = self.stroke * self.scale;
+                frame.fill_rectangle(
+                    Point::new(cx - dot * 0.6, cy - r * 0.72),
+                    Size::new(dot * 1.2, dot * 1.2),
+                    self.color,
+                );
+            }
+            Icon::Panel => {
+                let side = Size::new(r * 2.0, r * 1.7);
+                let top_left = Point::new(cx - side.width / 2.0, cy - side.height / 2.0);
+                frame.stroke(
+                    &Path::rounded_rectangle(top_left, side, (2.5 * self.scale).into()),
+                    stroke,
+                );
+                let x = cx - side.width / 2.0 + side.width * 0.36;
+                let inset = self.scale;
+                frame.stroke(
+                    &Path::line(
+                        Point::new(x, top_left.y + inset),
+                        Point::new(x, top_left.y + side.height - inset),
+                    ),
+                    stroke,
+                );
+            }
+        }
+        vec![frame.into_geometry()]
+    }
+}
 
 // ---------------------------------------------------------------- fields
 
@@ -168,6 +351,10 @@ pub enum Msg {
     ToggleSub(String),
     Publish,
     PublishPreset(usize),
+    /// Fold the remaining preset buttons open below the publish form.
+    TogglePresetPalette,
+    /// Pin or unpin one preset so it sorts first in the publish strip.
+    TogglePresetPin(usize),
     Format,
     Timed,
     GenId,
@@ -181,10 +368,36 @@ pub enum Msg {
     Copy(String),
     CopyRow,
     FocusSearch,
-    RecallLastSend,
     DroppedFile(PathBuf),
     Skin(i32),
+    /// Custom palette slot edited: raw text is kept while the user types.
+    CustomColor(PaletteField, String),
+    ResetCustomColor(PaletteField),
+    CustomBase(i32),
+    RefillCustom,
+    ToggleMoreColors,
+    /// Open (or close with `None`) the preset chip panel for one slot.
+    SwatchPanel(Option<PaletteField>),
+    PickSwatch(Rgb),
     Language(i32),
+    /// Global text-size multiplier chosen in Settings → Appearance.
+    FontScale(f32),
+    /// Start moving the undecorated window from the title strip.
+    DragWindow,
+    MinimizeWindow,
+    ToggleMaximize,
+    /// Result of a custom maximize: the pre-maximize rect to restore later.
+    #[allow(dead_code)]
+    Maximized(Option<[i32; 4]>),
+    CloseWindow,
+    /// Start a native resize from one of the invisible window edges.
+    ResizeWindow(iced::window::Direction),
+    /// The window exists and platform chrome (rounded corners) has been applied.
+    WindowReady,
+    /// Fold the connection list away; the window shrinks by its width.
+    ToggleSidebar,
+    /// Open the project page in the default browser.
+    OpenRepo,
     AddRule,
     DelRule(usize),
     MoveRule(usize, isize),
@@ -293,6 +506,7 @@ fn skin_opts() -> Vec<Opt> {
                 Skin::Blue => t("蓝", "Blue"),
                 Skin::Green => t("绿", "Green"),
                 Skin::Purple => t("紫", "Purple"),
+                Skin::Custom => t("自定义", "Custom"),
             };
             opt(s.to_index(), label)
         })
@@ -303,6 +517,98 @@ fn skin_opts() -> Vec<Opt> {
 fn lang_opts() -> Vec<Opt> {
     vec![opt(0, "中文"), opt(1, "English")]
 }
+
+/// Text-size presets shown in Settings → Appearance. The multiplier applies
+/// to every text size and is persisted as `AppConfig::font_scale`.
+const FONT_CHOICES: [(f32, &str, &str); 4] = [
+    (0.9, "小", "Small"),
+    (1.0, "标准", "Default"),
+    (1.15, "大", "Large"),
+    (1.3, "特大", "Extra large"),
+];
+
+fn font_opts() -> Vec<Opt> {
+    FONT_CHOICES
+        .iter()
+        .enumerate()
+        .map(|(index, (_, zh, en))| opt(index as i32, t(zh, en)))
+        .collect()
+}
+
+/// Nearest preset for a persisted scale (hand-edited configs may hold any value).
+fn font_index(scale: f32) -> i32 {
+    let mut best = 1i32;
+    let mut distance = f32::MAX;
+    for (index, (value, _, _)) in FONT_CHOICES.iter().enumerate() {
+        let delta = (value - scale).abs();
+        if delta < distance {
+            distance = delta;
+            best = index as i32;
+        }
+    }
+    best
+}
+
+/// Concrete skins only: these seed and back-fill the custom palette.
+fn base_skin_opts() -> Vec<Opt> {
+    skin_opts()
+        .into_iter()
+        .filter(|o| o.value != Skin::System.to_index() && o.value != Skin::Custom.to_index())
+        .collect()
+}
+
+/// Preset chips for the custom palette: neutrals first, then warm-to-cool
+/// hues, ending with the soft bubble fills used by the default skins.
+const SWATCHES: [Rgb; 48] = [
+    (0x16, 0x18, 0x1d),
+    (0x1e, 0x22, 0x29),
+    (0x24, 0x28, 0x30),
+    (0x2b, 0x32, 0x40),
+    (0x3a, 0x3f, 0x49),
+    (0x52, 0x58, 0x5f),
+    (0x6d, 0x73, 0x7c),
+    (0x8b, 0x91, 0x9a),
+    (0xb8, 0xc0, 0xcc),
+    (0xd7, 0xe6, 0xf8),
+    (0xe7, 0xec, 0xf3),
+    (0xff, 0xff, 0xff),
+    (0xe8, 0x5d, 0x5d),
+    (0xc6, 0x28, 0x28),
+    (0x7a, 0x1f, 0x1f),
+    (0xff, 0x8a, 0x80),
+    (0xff, 0x9f, 0x43),
+    (0xe6, 0x7e, 0x22),
+    (0xf4, 0xd3, 0x5e),
+    (0xff, 0xf3, 0xb0),
+    (0x1f, 0x8a, 0x4c),
+    (0x4e, 0xcf, 0x7a),
+    (0x0c, 0x6b, 0x45),
+    (0x13, 0x4e, 0x40),
+    (0x58, 0xef, 0xc8),
+    (0x35, 0xd4, 0xae),
+    (0x22, 0xb8, 0xcf),
+    (0x72, 0xe4, 0xf6),
+    (0x1d, 0x5f, 0xbf),
+    (0x2f, 0x6f, 0xd0),
+    (0x5a, 0xa7, 0xff),
+    (0x7a, 0xb8, 0xff),
+    (0x12, 0x3a, 0x68),
+    (0x0d, 0x2d, 0x5c),
+    (0x07, 0x20, 0x48),
+    (0xd5, 0xe4, 0xf7),
+    (0x46, 0x25, 0x73),
+    (0x75, 0x47, 0xb5),
+    (0xb0, 0x96, 0xff),
+    (0xd9, 0xc2, 0xf8),
+    (0xf0, 0x65, 0x95),
+    (0xff, 0x8f, 0xab),
+    (0x32, 0x19, 0x56),
+    (0xf8, 0xf2, 0xff),
+    (0xe4, 0xf6, 0xea),
+    (0xe4, 0xee, 0xfc),
+    (0xfd, 0xe8, 0xe8),
+    (0xf3, 0xf6, 0xfa),
+];
 
 fn kind_opts() -> Vec<Opt> {
     vec![
@@ -335,7 +641,7 @@ where
         .find(|o| o.value == current)
         .cloned();
     pick_list(options.to_vec(), selected, move |o: Opt| on(o.value))
-        .text_size(13.0)
+        .text_size(fs(13.0))
         .padding([6, 8])
         .style(c.pick_list_style())
         .into()
@@ -368,12 +674,62 @@ pub struct App {
     detail_seq: Option<u64>,
     /// Connection id waiting for a delete confirmation.
     pending_delete: Option<String>,
+    /// “更多颜色” folded open in the custom-palette editor.
+    more_colors: bool,
+    /// Slot whose preset chip panel is open.
+    swatch_field: Option<PaletteField>,
+    /// “More presets” folded open below the publish form.
+    presets_open: bool,
+    /// App mark shown top-left; built once so the renderer can cache the decode.
+    icon: Option<Handle>,
+    /// Connection list / page links column in the content panel.
+    sidebar_visible: bool,
+    /// Custom maximize state (Windows only); native toggle_maximize overshoots
+    /// the monitor by the DPI factor on frameless windows.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    maximized: bool,
+    /// Outer window rect in physical pixels captured before maximizing.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    restore_rect: Option<[i32; 4]>,
 }
 
 impl App {
     pub fn new() -> Self {
         let options = mqttc_core::cli::parse(std::env::args().skip(1));
         let rt = AppRuntime::load(&options, None);
+        Self::with_runtime(rt, options)
+    }
+
+    /// Boot hook: iced runs this task only after the window has opened, which
+    /// lets us apply native chrome that has no iced setting (Windows 11 rounds
+    /// the frameless window like any other app).
+    pub fn boot() -> (Self, Task<Msg>) {
+        (
+            Self::new(),
+            window_task(|id| {
+                iced::window::run(id, |window| {
+                    #[cfg(windows)]
+                    win32::round_corners(window);
+                    Msg::WindowReady
+                })
+            }),
+        )
+    }
+
+    /// Tests run from `target/debug/deps`, where the portable `mqttc.json` may
+    /// hold filters or settings left by an earlier run. Build from defaults so
+    /// assertions never depend on that file.
+    #[cfg(test)]
+    fn for_test() -> Self {
+        // The i18n switch is process-wide and runtime construction applies the
+        // config language; serialize against tests that pin a language globally.
+        let _lang = tests::LANG_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        Self::with_runtime(AppRuntime::new(None, None, None), BenchOptions::default())
+    }
+
+    fn with_runtime(rt: AppRuntime, options: BenchOptions) -> Self {
         let editor = text_editor::Content::with_text(&rt.form.pub_payload);
         let started = Instant::now();
         let bench = options.bench.then(|| Bench {
@@ -397,6 +753,14 @@ impl App {
             preview_cache: RefCell::new(HashMap::new()),
             detail_seq: None,
             pending_delete: None,
+            more_colors: false,
+            swatch_field: None,
+            presets_open: false,
+            icon: crate::icon_rgba()
+                .map(|(width, height, pixels)| Handle::from_rgba(width, height, pixels)),
+            sidebar_visible: true,
+            maximized: false,
+            restore_rect: None,
         }
     }
 
@@ -501,18 +865,25 @@ impl App {
         match msg {
             Msg::Tick => return self.on_tick(),
             Msg::Select(id) => {
-                if self.rt.select_connection(&id) {
+                // Clicking the already-active row still opens its session:
+                // the sidebar is now the only entry point.
+                let changed = self.rt.select_connection(&id);
+                if changed || self.rt.active_id().as_deref() == Some(id.as_str()) {
                     self.page = 1;
                     self.session_tab = SessionTab::Logs;
                     self.detail_seq = None;
+                    self.presets_open = false;
                     self.preview_cache.borrow_mut().clear();
-                    self.reload_form();
+                    if changed {
+                        self.reload_form();
+                    }
                 }
             }
             Msg::New => {
                 self.rt.new_connection();
                 self.page = 0;
                 self.detail_seq = None;
+                self.presets_open = false;
                 self.preview_cache.borrow_mut().clear();
                 self.rt.persist();
                 self.reload_form();
@@ -525,6 +896,7 @@ impl App {
                     self.rt.delete_connection(&id);
                     self.page = 0;
                     self.detail_seq = None;
+                    self.presets_open = false;
                     self.preview_cache.borrow_mut().clear();
                     self.rt.persist();
                     self.reload_form();
@@ -542,15 +914,6 @@ impl App {
                 self.session_tab = SessionTab::Logs;
                 self.detail_seq = None;
                 return iced::widget::operation::focus(iced::widget::Id::new("log-search"));
-            }
-            Msg::RecallLastSend => {
-                if let Some(log) = self.rt.last_sent() {
-                    self.rt.form.pub_topic = log.topic.clone();
-                    self.rt.form.pub_payload = String::from_utf8_lossy(&log.payload).into_owned();
-                    self.editor = text_editor::Content::with_text(&self.rt.form.pub_payload);
-                    self.rt.apply_form();
-                    return self.touched();
-                }
             }
             Msg::DroppedFile(path) => {
                 if self.fill_cert_path(&path) {
@@ -587,12 +950,27 @@ impl App {
             }
             Msg::ToggleSub(topic) => self.rt.toggle_sub_filter(&topic),
             Msg::Publish => {
-                self.rt.apply_form();
-                self.rt.publish_form();
+                // The form is hidden while the preset palette is open; an
+                // Enter press should not publish an invisible topic/payload.
+                if !self.presets_open {
+                    self.rt.apply_form();
+                    self.rt.publish_form();
+                }
             }
             Msg::PublishPreset(index) => {
                 self.rt.apply_form();
                 self.rt.publish_preset(index);
+            }
+            Msg::TogglePresetPalette => {
+                if !self.rt.form.presets.is_empty() {
+                    self.presets_open = !self.presets_open;
+                }
+            }
+            Msg::TogglePresetPin(index) => {
+                if self.rt.form.toggle_preset_pin(index) {
+                    self.rt.apply_form();
+                    self.rt.persist();
+                }
             }
             Msg::Format => {
                 let _ = self.rt.format_payload();
@@ -625,8 +1003,120 @@ impl App {
                 self.preview_cache.borrow_mut().clear();
                 self.rt.clear_logs();
             }
-            Msg::Skin(choice) => self.rt.set_skin_choice(choice),
+            Msg::Skin(choice) => {
+                self.rt.set_skin_choice(choice);
+                self.swatch_field = None;
+            }
+            Msg::CustomColor(field, value) => {
+                self.rt.set_custom_color(field, value);
+                return self.touched();
+            }
+            Msg::ResetCustomColor(field) => {
+                self.rt.reset_custom_color(field);
+                return self.touched();
+            }
+            Msg::CustomBase(index) => {
+                self.rt.set_custom_base(index);
+                return self.touched();
+            }
+            Msg::RefillCustom => {
+                self.rt.refill_custom_palette();
+                self.swatch_field = None;
+            }
+            Msg::ToggleMoreColors => self.more_colors = !self.more_colors,
+            Msg::SwatchPanel(field) => {
+                self.swatch_field = if self.swatch_field == field {
+                    None
+                } else {
+                    field
+                };
+            }
+            Msg::PickSwatch(color) => {
+                if let Some(field) = self.swatch_field.take() {
+                    self.rt.set_custom_color(field, to_hex(color));
+                    return self.touched();
+                }
+            }
             Msg::Language(index) => self.rt.set_language(index),
+            Msg::FontScale(scale) => self.rt.set_font_scale(scale),
+            Msg::DragWindow => return window_task(iced::window::drag),
+            Msg::MinimizeWindow => return window_task(|id| iced::window::minimize(id, true)),
+            Msg::ToggleMaximize => {
+                #[cfg(windows)]
+                {
+                    if self.maximized {
+                        self.maximized = false;
+                        let rect = self.restore_rect.take();
+                        if let Some(rect) = rect {
+                            return window_task(move |id| {
+                                iced::window::run(id, move |window| {
+                                    win32::restore(window, rect);
+                                    Msg::Maximized(None)
+                                })
+                            });
+                        }
+                        return Task::none();
+                    }
+                    self.maximized = true;
+                    return window_task(|id| {
+                        iced::window::run(id, |window| {
+                            Msg::Maximized(win32::maximize(window))
+                        })
+                    });
+                }
+                #[cfg(not(windows))]
+                return window_task(|id| iced::window::toggle_maximize(id));
+            }
+            Msg::Maximized(rect) => self.restore_rect = rect,
+            Msg::CloseWindow => return window_task(iced::window::close),
+            Msg::WindowReady => {}
+            Msg::OpenRepo => open_url("https://github.com/GordonWen/mqttc"),
+            Msg::ToggleSidebar => {
+                self.sidebar_visible = !self.sidebar_visible;
+                let show = self.sidebar_visible;
+                // Maximized windows cannot shrink; the page takes the space.
+                if !self.maximized {
+                    return window_task(move |id| {
+                        iced::window::is_maximized(id).then(move |maximized| {
+                            if maximized {
+                                return Task::none();
+                            }
+                            let min = if show {
+                                MIN_WINDOW_WIDTH
+                            } else {
+                                MIN_WINDOW_WIDTH - SIDEBAR_WIDTH
+                            };
+                            iced::window::size(id).then(move |size: Size| {
+                                let width = if show {
+                                    size.width + SIDEBAR_WIDTH
+                                } else {
+                                    size.width - SIDEBAR_WIDTH
+                                }
+                                .max(min);
+                                // Window effects never produce a message, so
+                                // they cannot be chained with `.then` — the
+                                // `set_min_size` step would silently never
+                                // run. Batch both instead; the resize and the
+                                // new minimum are then applied back to back,
+                                // which keeps dragging continuous afterwards.
+                                Task::batch([
+                                    iced::window::resize::<Msg>(
+                                        id,
+                                        Size::new(width, size.height),
+                                    ),
+                                    iced::window::set_min_size::<Msg>(
+                                        id,
+                                        Some(Size::new(min, MIN_WINDOW_HEIGHT)),
+                                    ),
+                                ])
+                            })
+                        })
+                    });
+                }
+            }
+            Msg::ResizeWindow(direction) => {
+                return window_task(move |id| iced::window::drag_resize(id, direction));
+            }
             Msg::AddRule => {
                 self.rt.form.add_rule();
                 self.rt.apply_form();
@@ -689,6 +1179,9 @@ impl App {
             }
             Msg::DelPreset(index) => {
                 self.rt.form.remove_preset(index);
+                if self.rt.form.presets.is_empty() {
+                    self.presets_open = false;
+                }
                 self.rt.apply_form();
                 self.rt.persist();
             }
@@ -836,9 +1329,35 @@ impl App {
             println!("FIRST_FRAME_MS {ms:.1}");
         }
         let c = Colors::from_palette(self.rt.palette());
-        let base: El<'_> = row![self.sidebar(&c), self.main_area(&c)]
-            .spacing(12)
-            .padding(12)
+        set_font_scale(self.rt.prefs.font_scale);
+        let divider = container(Space::new().width(1).height(Length::Fill)).style(move |_| {
+            container::Style {
+                background: Some(iced::Background::Color(c.hover_bg)),
+                ..container::Style::default()
+            }
+        });
+        let content: El<'_> = if self.sidebar_visible {
+            row![self.sidebar(&c), divider, self.main_area(&c)]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            row![self.main_area(&c)]
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        };
+        let page: El<'_> = column![
+            self.title_bar(&c),
+            container(content)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .style(c.card()),
+        ]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
+        let base: El<'_> = Stack::with_children([page, self.resize_grips()])
             .width(Length::Fill)
             .height(Length::Fill)
             .into();
@@ -855,22 +1374,22 @@ impl App {
             .unwrap_or_default();
         let dialog = container(
             column![
-                text(t("删除连接？", "Delete connection?")).size(16.0).color(c.text_title),
+                text(t("删除连接？", "Delete connection?")).size(fs(16.0)).color(c.text_title),
                 text(t(
                     &format!("“{name}”及其订阅、规则和预设将从 mqttc.json 中移除。"),
                     &format!("“{name}” and its subscriptions, rules and presets will be removed from mqttc.json."),
                 ))
-                .size(12.0)
+                .size(fs(12.0))
                 .color(c.text_body)
                 .wrapping(Wrapping::WordOrGlyph),
                 row![
-                    button(text(t("取消", "Cancel")).size(12.0))
+                    button(text(t("取消", "Cancel")).size(fs(12.0)))
                         .padding([6, 14])
                         .style(c.ghost_button())
                         .on_press(Msg::CancelDelete),
-                    button(text(t("删除", "Delete")).size(12.0))
+                    button(text(t("删除", "Delete")).size(fs(12.0)))
                         .padding([6, 14])
-                        .style(c.danger_button())
+                        .style(c.danger_outline_button())
                         .on_press(Msg::ConfirmDelete),
                 ]
                 .spacing(8),
@@ -898,15 +1417,198 @@ impl App {
             .into()
     }
 
+    /// Custom title strip: brand on the left (doubles as the drag handle),
+    /// window buttons on the right. Replaces the OS caption bar.
+    fn title_bar(&self, c: &Colors) -> El<'_> {
+        /// One caption cell: identical box for every glyph, so the three
+        /// controls read as a set (VSCode/Qoder style) instead of tracking the
+        /// glyph's own width.
+        fn control<'a, S>(
+            icon: Icon,
+            color: iced::Color,
+            style: S,
+            msg: Msg,
+        ) -> El<'a>
+        where
+            S: Fn(&iced::Theme, button::Status) -> button::Style + 'static,
+        {
+            button(
+                container(IconCanvas::new(icon, color).widget(15.0))
+                    .width(Length::Fixed(46.0))
+                    .height(Length::Fixed(34.0))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .padding(0)
+            .style(style)
+            .on_press(msg)
+            .into()
+        }
+
+        let mark: El<'_> = match &self.icon {
+            Some(handle) => Image::new(handle.clone())
+                .width(18)
+                .height(18)
+                .content_fit(iced::ContentFit::Contain)
+                .into(),
+            None => Space::new().width(0).into(),
+        };
+
+        let brand = mouse_area(
+            row![
+                mark,
+                text("Mqtt Debug Client")
+                    .size(fs(13.0))
+                    .color(c.text_title),
+                Space::new().width(Length::Fill),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+        )
+        .on_press(Msg::DragWindow)
+        .on_double_click(Msg::ToggleMaximize);
+        let toggle = tooltip(
+            button(
+                container(IconCanvas::new(Icon::Panel, c.text_muted).widget(16.0))
+                    .width(Length::Fixed(28.0))
+                    .height(Length::Fixed(26.0))
+                    .align_x(Alignment::Center)
+                    .align_y(Alignment::Center),
+            )
+            .padding(0)
+            .style(c.button_kind(ButtonKind::Ghost))
+            .on_press(Msg::ToggleSidebar),
+            container(
+                text(t(
+                    if self.sidebar_visible {
+                        "隐藏侧栏"
+                    } else {
+                        "显示侧栏"
+                    },
+                    if self.sidebar_visible {
+                        "Hide sidebar"
+                    } else {
+                        "Show sidebar"
+                    },
+                ))
+                .size(fs(11.0))
+                .color(c.text_primary),
+            )
+            .padding([5, 8])
+            .style(c.inset()),
+            tooltip::Position::Bottom,
+        )
+        .delay(Duration::from_millis(300));
+        let controls = row![
+            control(
+                Icon::Minus,
+                c.text_muted,
+                c.caption_button(),
+                Msg::MinimizeWindow
+            ),
+            control(
+                Icon::Square,
+                c.text_muted,
+                c.caption_button(),
+                Msg::ToggleMaximize
+            ),
+            control(
+                Icon::Close,
+                c.text_muted,
+                c.caption_button(),
+                Msg::CloseWindow
+            ),
+        ];
+        container(
+            row![toggle, brand, controls]
+                .spacing(8)
+                .align_y(Alignment::Center),
+        )
+        .padding(iced::Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: 0.0,
+            left: 10.0,
+        })
+        .width(Length::Fill)
+        .into()
+    }
+
+    /// Thin invisible grips along every edge and corner, since a frameless
+    /// window has no OS resize border.
+    fn resize_grips(&self) -> El<'_> {
+        use iced::mouse::Interaction;
+        use iced::window::Direction;
+        fn grip<'a>(
+            direction: Direction,
+            width: Length,
+            height: Length,
+            cursor: Interaction,
+        ) -> El<'a> {
+            mouse_area(Space::new().width(width).height(height))
+                .interaction(cursor)
+                .on_press(Msg::ResizeWindow(direction))
+                .into()
+        }
+        let corner = |direction, cursor| {
+            grip(direction, Length::Fixed(5.0), Length::Fixed(5.0), cursor)
+        };
+        let edge_h = Length::Fixed(5.0);
+        let edge_v = Length::Fixed(5.0);
+        let top = row![
+            corner(Direction::NorthWest, Interaction::ResizingDiagonallyDown),
+            grip(
+                Direction::North,
+                Length::Fill,
+                edge_h,
+                Interaction::ResizingVertically
+            ),
+            corner(Direction::NorthEast, Interaction::ResizingDiagonallyUp),
+        ]
+        .height(edge_h);
+        let middle = row![
+            grip(
+                Direction::West,
+                edge_v,
+                Length::Fill,
+                Interaction::ResizingHorizontally
+            ),
+            Space::new().width(Length::Fill).height(Length::Fill),
+            grip(
+                Direction::East,
+                edge_v,
+                Length::Fill,
+                Interaction::ResizingHorizontally
+            ),
+        ]
+        .height(Length::Fill);
+        let bottom = row![
+            corner(Direction::SouthWest, Interaction::ResizingDiagonallyUp),
+            grip(
+                Direction::South,
+                Length::Fill,
+                edge_h,
+                Interaction::ResizingVertically
+            ),
+            corner(Direction::SouthEast, Interaction::ResizingDiagonallyDown),
+        ]
+        .height(edge_h);
+        column![top, middle, bottom]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
     fn sidebar(&self, c: &Colors) -> El<'_> {
         let mut list = column![].spacing(3);
         let active = self.rt.active_id();
         for conn in &self.rt.config.connections {
             let status = self.rt.status_of(&conn.id);
             let is_active = active.as_deref() == Some(conn.id.as_str());
-            let dot = text("●").size(9.0).color(rgb(status.rgb()));
+            let dot = text("●").size(fs(9.0)).color(rgb(status.rgb()));
             let name = text(conn.name.as_str())
-                .size(13.0)
+                .size(fs(13.0))
                 .color(if is_active { c.text_primary } else { c.text_body });
             let label = row![dot, name]
                 .spacing(6)
@@ -914,66 +1616,84 @@ impl App {
                 .width(Length::Fill);
             let pick = button(label)
                 .width(Length::Fill)
-                .padding([7, 8])
+                .padding([6, 8])
                 .style(c.button_kind(if is_active {
                     ButtonKind::Selected
                 } else {
                     ButtonKind::Ghost
                 }))
                 .on_press(Msg::Select(conn.id.clone()));
-            let del = button(text("×").size(14.0))
-                .padding([4, 6])
+            let del = button(text("×").size(fs(14.0)))
+                .padding([3, 5])
                 .style(c.danger_button())
                 .on_press(Msg::Delete(conn.id.clone()));
             list = list.push(row![pick, del].spacing(2));
         }
 
         let nav = [
-            (0, t("连接编辑", "Connection")),
-            (1, t("会话", "Session")),
-            (2, t("设置", "Settings")),
-            (5, t("关于", "About")),
+            (2, t("设置", "Settings"), Icon::Gear),
+            (5, t("关于", "About"), Icon::Info),
         ];
         let mut links = column![].spacing(2);
-        for (page, label) in nav {
+        // New connection heads the same block as the page links, so the three
+        // actions line up on one baseline grid at the bottom of the sidebar.
+        links = links.push(
+            button(
+                row![
+                    IconCanvas::new(Icon::Plus, c.text_muted).widget(fs(15.0)),
+                    text(t("新建连接", "New connection"))
+                        .size(fs(13.0))
+                        .color(c.text_body),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([5, 8])
+            .style(c.ghost_button())
+            .on_press(Msg::New),
+        );
+        for (page, label, icon) in nav {
+            let selected = self.page == page;
+            let tint = if selected {
+                c.text_primary
+            } else {
+                c.text_muted
+            };
             links = links.push(
-                button(text(label).size(13.0))
-                    .width(Length::Fill)
-                    .padding([6, 8])
-                    .style(c.button_kind(if self.page == page {
-                        ButtonKind::Selected
-                    } else {
-                        ButtonKind::Ghost
-                    }))
-                    .on_press(Msg::Page(page)),
+                button(
+                    row![
+                        IconCanvas::new(icon, tint).widget(fs(15.0)),
+                        text(label)
+                            .size(fs(13.0))
+                            .color(if selected { c.text_primary } else { c.text_body }),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                )
+                .width(Length::Fill)
+                .padding([5, 8])
+                .style(c.button_kind(if selected {
+                    ButtonKind::Selected
+                } else {
+                    ButtonKind::Ghost
+                }))
+                .on_press(Msg::Page(page)),
             );
         }
 
         container(
             column![
-                text("mqttc").size(20.0).color(c.text_title),
-                text("iced · MQTT debug client").size(11.0).color(c.text_faint),
-                Space::new().height(10),
-                scrollable(list).height(Length::FillPortion(3)),
-                button(text(format!("＋ {}", t("新建连接", "New connection"))).size(13.0))
-                    .width(Length::Fill)
-                    .padding([6, 8])
-                    .style(c.ghost_button())
-                    .on_press(Msg::New),
-                Space::new().height(8),
-                column![
-                    text(t("页面", "Pages")).size(11.0).color(c.text_faint),
-                    links
-                ]
-                .spacing(4),
+                scrollable(list).height(Length::Fill),
+                Space::new().height(6),
+                links,
             ]
-            .spacing(6)
-            .padding(12)
+            .spacing(5)
+            .padding(8)
             .height(Length::Fill),
         )
-        .width(216)
+        .width(SIDEBAR_WIDTH)
         .height(Length::Fill)
-        .style(c.card())
         .into()
     }
 
@@ -991,16 +1711,16 @@ impl App {
     }
 
     fn section(&self, c: &Colors, title: &str) -> El<'static> {
-        text(title.to_string()).size(12.0).color(c.text_muted).into()
+        text(title.to_string()).size(fs(12.0)).color(c.text_muted).into()
     }
 
     fn hint(&self, c: &Colors, text_value: String) -> El<'static> {
-        text(text_value).size(11.0).color(c.text_faint).into()
+        text(text_value).size(fs(11.0)).color(c.text_faint).into()
     }
 
     fn input(&self, c: &Colors, field: Field, placeholder: &'static str) -> El<'_> {
         text_input(placeholder, field.get(&self.rt.form))
-            .size(13.0)
+            .size(fs(13.0))
             .padding([7, 9])
             .width(Length::Fill)
             .style(c.input_style())
@@ -1009,7 +1729,7 @@ impl App {
     }
 
     fn labelled<'a>(&'a self, c: &Colors, label: &str, input: El<'a>) -> El<'a> {
-        column![text(label.to_string()).size(11.0).color(c.text_faint), input]
+        column![text(label.to_string()).size(fs(11.0)).color(c.text_faint), input]
             .spacing(3)
             .into()
     }
@@ -1023,7 +1743,7 @@ impl App {
             .unwrap_or(false);
 
         let general = column![
-            self.section(c, &t("常规", "General")),
+            self.section(c, &t("连接设置", "Connection settings")),
             row![
                 self.labelled(c, &t("名称", "Name"), self.input(c, Field::Name, "Local bench")),
                 self.labelled(c, &t("协议", "Protocol"), pick(c, &proto_opts(), f.protocol, |v| Msg::Num(Num::Protocol, v))),
@@ -1032,9 +1752,9 @@ impl App {
             row![
                 self.labelled(c, &t("主机", "Host"), self.input(c, Field::Host, "127.0.0.1")),
                 column![
-                    text(t("端口", "Port")).size(11.0).color(c.text_faint),
+                    text(t("端口", "Port")).size(fs(11.0)).color(c.text_faint),
                     text_input("1883", &f.port)
-                        .size(13.0)
+                        .size(fs(13.0))
                         .padding([7, 9])
                         .width(120)
                         .style(c.input_style())
@@ -1046,7 +1766,7 @@ impl App {
             .spacing(10),
             row![
                 self.labelled(c, &t("客户端 ID", "Client ID"), self.input(c, Field::ClientId, "auto")),
-                button(text(t("生成", "Generate")).size(12.0))
+                button(text(t("生成", "Generate")).size(fs(12.0)))
                     .padding([7, 10])
                     .style(c.ghost_button())
                     .on_press(Msg::GenId),
@@ -1058,7 +1778,7 @@ impl App {
                 self.labelled(c, &t("密码", "Password"), {
                     text_input("", &f.password)
                         .secure(true)
-                        .size(13.0)
+                        .size(fs(13.0))
                         .padding([7, 9])
                         .width(Length::Fill)
                         .style(c.input_style())
@@ -1076,54 +1796,74 @@ impl App {
                 self.labelled(c, &t("Keep Alive (s)", "Keep alive (s)"), self.input(c, Field::KeepAlive, "60")),
                 self.labelled(c, &t("连接超时 (s)", "Connect timeout (s)"), self.input(c, Field::Timeout, "10")),
                 column![
-                    text(t("Clean session", "Clean session")).size(11.0).color(c.text_faint),
+                    text(t("Clean session", "Clean session")).size(fs(11.0)).color(c.text_faint),
                     checkbox(f.clean_session)
-                        .size(15.0)
+                        .size(fs(15.0))
                         .style(c.checkbox_style())
                         .on_toggle(|v| Msg::Flag(Flag::CleanSession, v)),
                 ]
                 .spacing(3),
                 column![
-                    text(t("自动重连", "Auto reconnect")).size(11.0).color(c.text_faint),
+                    text(t("自动重连", "Auto reconnect")).size(fs(11.0)).color(c.text_faint),
                     checkbox(f.auto_reconnect)
-                        .size(15.0)
+                        .size(fs(15.0))
                         .style(c.checkbox_style())
                         .on_toggle(|v| Msg::Flag(Flag::AutoReconnect, v)),
                 ]
                 .spacing(3),
             ]
             .spacing(10),
-            row![
-                self.labelled(c, &t("订阅 Topic", "Subscribe topic"), self.input(c, Field::SubTopic, "mqttc/mvp/#")),
-                column![
-                    text(t("订阅 QoS", "Subscribe QoS")).size(11.0).color(c.text_faint),
-                    pick(c, &qos_opts(), f.sub_qos, |v| Msg::Num(Num::SubQos, v)),
-                ]
-                .spacing(3)
-                .width(110),
-                self.labelled(c, &t("定时间隔 (s)", "Timed interval (s)"), self.input(c, Field::TimedInterval, "5")),
-            ]
-            .spacing(10),
         ]
         .spacing(10);
+
+        let tls_note = if !f.ssl {
+            t(
+                "证书设置仅在启用 SSL 后生效",
+                "Certificate settings apply only when SSL is enabled",
+            )
+        } else if !f.ssl_verify {
+            t(
+                "已关闭校验：接受任意服务器证书，CA 不生效，存在中间人风险",
+                "Verification off: any certificate is accepted and the CA is ignored — MITM risk",
+            )
+        } else if f.ssl_ca.trim().is_empty() {
+            t(
+                "使用系统根证书校验服务器证书",
+                "Server certificates are verified against the system root store",
+            )
+        } else {
+            t(
+                "仅信任所填 CA 证书，不再加载系统根证书",
+                "Only the listed CA is trusted; system roots are not loaded",
+            )
+        };
 
         let ssl = column![
             self.section(c, &t("SSL / TLS", "SSL / TLS")),
             row![
                 checkbox(f.ssl)
                     .label(t("启用 SSL", "Enable SSL"))
-                    .size(15.0)
-                    .text_size(12.0)
+                    .size(fs(15.0))
+                    .text_size(fs(12.0))
                     .style(c.checkbox_style())
                     .on_toggle(|v| Msg::Flag(Flag::Ssl, v)),
                 checkbox(f.ssl_verify)
                     .label(t("校验服务器证书", "Verify certificate"))
-                    .size(15.0)
-                    .text_size(12.0)
+                    .size(fs(15.0))
+                    .text_size(fs(12.0))
                     .style(c.checkbox_style())
                     .on_toggle(|v| Msg::Flag(Flag::SslVerify, v)),
+                // Keep the current trust behaviour in sight, right next to the
+                // checkbox that controls it.
+                text(tls_note)
+                    .size(fs(11.0))
+                    .color(c.text_muted)
+                    .width(Length::Fill)
+                    .wrapping(Wrapping::WordOrGlyph),
             ]
-            .spacing(16),
+            .spacing(14)
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
             self.labelled(c, &t("CA 证书", "CA certificate"), self.input(c, Field::Ca, "path/to/ca.pem")),
             row![
                 self.labelled(c, &t("客户端证书", "Client certificate"), self.input(c, Field::Cert, "path/to/cert.pem")),
@@ -1147,7 +1887,7 @@ impl App {
                 self.labelled(c, &t("Will Topic", "Will topic"), self.input(c, Field::WillTopic, "mqttc/status")),
                 self.labelled(c, &t("Will Payload", "Will payload"), self.input(c, Field::WillPayload, "offline")),
                 column![
-                    text(t("Will QoS", "Will QoS")).size(11.0).color(c.text_faint),
+                    text(t("Will QoS", "Will QoS")).size(fs(11.0)).color(c.text_faint),
                     pick(c, &qos_opts(), f.will_qos, |v| Msg::Num(Num::WillQos, v)),
                 ]
                 .spacing(3)
@@ -1156,19 +1896,26 @@ impl App {
             .spacing(10),
             checkbox(f.will_retain)
                 .label(t("Retain", "Retain"))
-                .size(15.0)
-                .text_size(12.0)
+                .size(fs(15.0))
+                .text_size(fs(12.0))
                 .style(c.checkbox_style())
                 .on_toggle(|v| Msg::Flag(Flag::WillRetain, v)),
         ]
         .spacing(10);
 
         let actions = row![
-            button(text(t("连接", "Connect")).size(13.0))
-                .padding([8, 18])
-                .style(c.primary_button())
-                .on_press(Msg::Connect),
-            button(text(t("会话页", "Session")).size(13.0))
+            if connected {
+                button(text(t("断开", "Disconnect")).size(fs(13.0)))
+                    .padding([8, 18])
+                    .style(c.danger_outline_button())
+                    .on_press(Msg::Disconnect)
+            } else {
+                button(text(t("连接", "Connect")).size(fs(13.0)))
+                    .padding([8, 18])
+                    .style(c.primary_button())
+                    .on_press(Msg::Connect)
+            },
+            button(text(t("会话页", "Session")).size(fs(13.0)))
                 .padding([8, 14])
                 .style(c.ghost_button())
                 .on_press(Msg::Page(1)),
@@ -1187,14 +1934,13 @@ impl App {
         container(
             scrollable(
                 column![general, advanced, ssl, will, actions]
-                    .spacing(14)
-                    .padding(14),
+                    .spacing(12)
+                    .padding(8),
             )
             .height(Length::Fill),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(c.card())
         .into()
     }
 
@@ -1204,10 +1950,9 @@ impl App {
                 c,
                 t("还没有连接，请先新建", "No connection yet — create one first"),
             ))
-            .padding(16)
+            .padding(8)
             .width(Length::Fill)
             .height(Length::Fill)
-            .style(c.card())
             .into();
         };
         let status = self.rt.status();
@@ -1218,7 +1963,7 @@ impl App {
                 &format!("重连 {attempt}/8 · {}s 后", left.as_secs().max(1)),
                 &format!("Retry {attempt}/8 · in {}s", left.as_secs().max(1)),
             ))
-            .size(11.0)
+            .size(fs(11.0))
             .color(c.text_muted)
             .into(),
             None => Space::new().width(0).into(),
@@ -1227,27 +1972,27 @@ impl App {
         let header = container(
             row![
                 text(conn.name.as_str())
-                    .size(18.0)
+                    .size(fs(18.0))
                     .color(c.text_title)
                     .width(Length::Fill)
                     .wrapping(Wrapping::WordOrGlyph),
-                text("●").size(10.0).color(rgb(status.rgb())),
-                text(status.text()).size(12.0).color(c.text_muted),
+                text("●").size(fs(10.0)).color(rgb(status.rgb())),
+                text(status.text()).size(fs(12.0)).color(c.text_muted),
                 text(format!("{}:{}", conn.host, conn.port))
-                    .size(12.0)
+                    .size(fs(12.0))
                     .color(c.text_faint),
                 retry_note,
-                button(text(t("编辑", "Edit")).size(12.0))
+                button(text(t("编辑", "Edit")).size(fs(12.0)))
                     .padding([6, 12])
                     .style(c.ghost_button())
                     .on_press(Msg::Page(0)),
                 if connected || connecting {
-                    button(text(t("断开", "Disconnect")).size(12.0))
+                    button(text(t("断开", "Disconnect")).size(fs(12.0)))
                         .padding([6, 12])
-                        .style(c.danger_button())
+                        .style(c.danger_outline_button())
                         .on_press(Msg::Disconnect)
                 } else {
-                    button(text(t("连接", "Connect")).size(12.0))
+                    button(text(t("连接", "Connect")).size(fs(12.0)))
                         .padding([6, 12])
                         .style(c.primary_button())
                         .on_press(Msg::Connect)
@@ -1256,8 +2001,7 @@ impl App {
             .spacing(10)
             .align_y(Alignment::Center),
         )
-        .padding([12, 12])
-        .style(c.card());
+        .padding([2, 2]);
 
         let tabs = row![
             self.tab_button(c, SessionTab::Logs, t("日志", "Logs"), None),
@@ -1288,7 +2032,7 @@ impl App {
                     self.log_detail(c)
                 } else {
                     column![self.logs_card(c), self.publish_card(c)]
-                        .spacing(10)
+                        .spacing(6)
                         .height(Length::Fill)
                         .into()
                 }
@@ -1298,8 +2042,9 @@ impl App {
             SessionTab::Presets => self.page_presets(c),
         };
 
-        column![header, tabs, body]
-            .spacing(10)
+        container(column![header, tabs, body].spacing(8).height(Length::Fill))
+            .padding(8)
+            .width(Length::Fill)
             .height(Length::Fill)
             .into()
     }
@@ -1315,7 +2060,7 @@ impl App {
             Some(n) if n > 0 => format!("{label} · {n}"),
             _ => label,
         };
-        button(text(caption).size(12.0))
+        button(text(caption).size(fs(12.0)))
             .padding([6, 12])
             .style(c.button_kind(if self.session_tab == tab {
                 ButtonKind::Selected
@@ -1335,8 +2080,8 @@ impl App {
         for (index, sub) in subs.iter().enumerate() {
             let selected = !active.is_empty() && active == sub.topic;
             let label = text(sub.topic.as_str())
-                .size(13.0)
-                .color(if selected { c.accent } else { c.text_body });
+                .size(fs(13.0))
+                .color(if selected { c.text_primary } else { c.text_body });
             let pick = button(label)
                 .width(Length::Fill)
                 .padding([7, 8])
@@ -1347,9 +2092,9 @@ impl App {
                 }))
                 .on_press(Msg::ToggleSub(sub.topic.clone()));
             let qos = text(format!("QoS {}", sub.qos))
-                .size(11.0)
+                .size(fs(11.0))
                 .color(c.text_faint);
-            let nl = button(text("NL").size(10.0))
+            let nl = button(text("NL").size(fs(10.0)))
                 .padding([2, 6])
                 .style(c.button_kind(if sub.no_local {
                     ButtonKind::Selected
@@ -1357,7 +2102,7 @@ impl App {
                     ButtonKind::Ghost
                 }))
                 .on_press(Msg::FlipSubOption(index, true));
-            let rap = button(text("RAP").size(10.0))
+            let rap = button(text("RAP").size(fs(10.0)))
                 .padding([2, 6])
                 .style(c.button_kind(if sub.retain_as_published {
                     ButtonKind::Selected
@@ -1365,7 +2110,7 @@ impl App {
                     ButtonKind::Ghost
                 }))
                 .on_press(Msg::FlipSubOption(index, false));
-            let del = button(text("×").size(14.0))
+            let del = button(text("×").size(fs(14.0)))
                 .padding([4, 8])
                 .style(c.danger_button())
                 .on_press(Msg::Unsubscribe(index));
@@ -1379,7 +2124,7 @@ impl App {
             list = list.push(self.hint(c, t("尚未订阅", "No subscriptions yet")));
         }
 
-        let subscribe = button(text(t("订阅", "Subscribe")).size(12.0))
+        let subscribe = button(text(t("订阅", "Subscribe")).size(fs(12.0)))
             .padding([6, 16])
             .style(c.primary_button())
             .on_press_maybe(connected.then_some(Msg::Subscribe));
@@ -1394,7 +2139,7 @@ impl App {
             column![
                 row![
                     self.section(c, &t("订阅", "Subscriptions")),
-                    text(subs.len().to_string()).size(11.0).color(c.text_faint),
+                    text(subs.len().to_string()).size(fs(11.0)).color(c.text_faint),
                     Space::new().width(Length::Fill),
                     self.hint(c, status_hint),
                 ]
@@ -1402,7 +2147,7 @@ impl App {
                 .align_y(Alignment::Center),
                 row![
                     text_input("mqttc/mvp/#", &self.rt.form.sub_topic)
-                        .size(13.0)
+                        .size(fs(13.0))
                         .padding([7, 9])
                         .width(Length::Fill)
                         .style(c.input_style())
@@ -1415,14 +2160,14 @@ impl App {
                 row![
                     checkbox(self.rt.form.sub_no_local)
                         .label("No Local")
-                        .size(14.0)
-                        .text_size(11.0)
+                        .size(fs(14.0))
+                        .text_size(fs(11.0))
                         .style(c.checkbox_style())
                         .on_toggle(|v| Msg::Flag(Flag::SubNoLocal, v)),
                     checkbox(self.rt.form.sub_retain_as_published)
                         .label(t("保留发布标志", "Retain as published"))
-                        .size(14.0)
-                        .text_size(11.0)
+                        .size(fs(14.0))
+                        .text_size(fs(11.0))
                         .style(c.checkbox_style())
                         .on_toggle(|v| Msg::Flag(Flag::SubRap, v)),
                     self.hint(
@@ -1449,7 +2194,7 @@ impl App {
         )
         .padding(12)
         .height(Length::Fill)
-        .style(c.card())
+        .style(c.inset())
         .into()
     }
 
@@ -1461,7 +2206,7 @@ impl App {
                 &format!("已暂停 · 丢弃 {} 条", self.rt.paused_dropped()),
                 &format!("Paused · {} dropped", self.rt.paused_dropped()),
             ))
-            .size(11.0)
+            .size(fs(11.0))
             .color(c.err_text)
             .into()
         } else {
@@ -1475,7 +2220,7 @@ impl App {
                     &prefs.log_filter
                 )
                 .id(iced::widget::Id::new("log-search"))
-                .size(13.0)
+                .size(fs(13.0))
                 .padding([5, 7])
                 .width(Length::Fill)
                 .style(c.input_style())
@@ -1484,8 +2229,8 @@ impl App {
                 pick(c, &format_opts(), prefs.log_format, Msg::LogFormat),
                 checkbox(prefs.auto_scroll)
                     .label(t("自动滚动", "Auto-scroll"))
-                    .size(15.0)
-                    .text_size(12.0)
+                    .size(fs(15.0))
+                    .text_size(fs(12.0))
                     .style(c.checkbox_style())
                     .on_toggle(Msg::AutoScroll),
             ]
@@ -1494,7 +2239,7 @@ impl App {
             row![
                 pause_label,
                 Space::new().width(Length::Fill),
-                button(text(t("复制末行", "Copy last")).size(11.0))
+                button(text(t("复制末行", "Copy last")).size(fs(11.0)))
                     .padding([4, 9])
                     .style(c.ghost_button())
                     .on_press(Msg::CopyRow),
@@ -1503,7 +2248,7 @@ impl App {
                 } else {
                     t("暂停", "Pause")
                 })
-                .size(12.0))
+                .size(fs(12.0)))
                 .padding([5, 10])
                 .style(c.button_kind(if paused {
                     ButtonKind::Selected
@@ -1511,15 +2256,15 @@ impl App {
                     ButtonKind::Ghost
                 }))
                 .on_press(Msg::TogglePause),
-                button(text(t("保存", "Save")).size(12.0))
+                button(text(t("保存", "Save")).size(fs(12.0)))
                     .padding([5, 10])
                     .style(c.ghost_button())
                     .on_press(Msg::SaveLogs),
-                button(text(t("存筛选", "Save view")).size(12.0))
+                button(text(t("存筛选", "Save view")).size(fs(12.0)))
                     .padding([5, 10])
                     .style(c.ghost_button())
                     .on_press(Msg::SaveVisibleLogs),
-                button(text(t("清空", "Clear")).size(12.0))
+                button(text(t("清空", "Clear")).size(fs(12.0)))
                     .padding([5, 10])
                     .style(c.ghost_button())
                     .on_press(Msg::ClearLogs),
@@ -1556,7 +2301,7 @@ impl App {
         )
         .padding(10)
         .height(Length::FillPortion(3))
-        .style(c.card())
+        .style(c.inset())
         .into()
     }
 
@@ -1609,22 +2354,22 @@ impl App {
             format!("{} · {} · {}", log.time, log.kind, log.topic)
         };
         let mut header = row![text(topic_line)
-            .size(10.5)
+            .size(fs(10.5))
             .color(topic_color)
             .wrapping(Wrapping::WordOrGlyph)]
         .spacing(6)
         .align_y(Alignment::Center);
         header = header
             .push(Space::new().width(Length::Fill))
-            .push(text(human_bytes(log.payload.len())).size(10.0).color(c.text_faint))
+            .push(text(human_bytes(log.payload.len())).size(fs(10.0)).color(c.text_faint))
             .push(
-                button(text(t("复制", "Copy")).size(10.0))
+                button(text(t("复制", "Copy")).size(fs(10.0)))
                     .padding([1, 6])
                     .style(c.ghost_button())
                     .on_press(Msg::Copy(self.log_body_text(log))),
             )
             .push(
-                button(text(t("详情", "Detail")).size(10.0))
+                button(text(t("详情", "Detail")).size(fs(10.0)))
                     .padding([1, 6])
                     .style(c.ghost_button())
                     .on_press(Msg::OpenLog(log.seq)),
@@ -1647,11 +2392,11 @@ impl App {
                 }
                 meta.push_str(&t("预览已截断", "preview truncated"));
             }
-            content = content.push(text(meta).size(10.0).color(c.text_faint));
+            content = content.push(text(meta).size(fs(10.0)).color(c.text_faint));
         }
         content = content.push(
             text(body)
-                .size(12.5)
+                .size(fs(12.5))
                 .font(mono_font())
                 .color(body_color)
                 .wrapping(Wrapping::WordOrGlyph),
@@ -1673,7 +2418,7 @@ impl App {
     }
 
     fn detail_back(&self, c: &Colors) -> El<'static> {
-        button(text(t("← 返回日志", "← Back to logs")).size(12.0))
+        button(text(t("← 返回日志", "← Back to logs")).size(fs(12.0)))
             .padding([4, 8])
             .style(c.ghost_button())
             .on_press(Msg::CloseLog)
@@ -1697,7 +2442,7 @@ impl App {
             )
             .padding(12)
             .height(Length::Fill)
-            .style(c.card())
+            .style(c.inset())
             .into();
         };
 
@@ -1710,21 +2455,21 @@ impl App {
         let header = row![
             self.detail_back(c),
             text(format!("{} · {}", log.time, log.kind))
-                .size(11.0)
+                .size(fs(11.0))
                 .color(c.text_faint),
             text(log.topic.as_str())
-                .size(12.0)
+                .size(fs(12.0))
                 .color(c.text_body)
                 .width(Length::Fill)
                 .wrapping(Wrapping::WordOrGlyph),
             text(human_bytes(log.payload.len()))
-                .size(11.0)
+                .size(fs(11.0))
                 .color(c.text_faint),
-            button(text(t("复制内容", "Copy payload")).size(11.0))
+            button(text(t("复制内容", "Copy payload")).size(fs(11.0)))
                 .padding([3, 8])
                 .style(c.ghost_button())
                 .on_press(Msg::Copy(self.log_body_text(log))),
-            button(text(t("复制整行", "Copy row")).size(11.0))
+            button(text(t("复制整行", "Copy row")).size(fs(11.0)))
                 .padding([3, 8])
                 .style(c.ghost_button())
                 .on_press(Msg::Copy(self.row_text(log))),
@@ -1744,7 +2489,7 @@ impl App {
                 }
                 meta.push_str(&props);
             }
-            text(meta).size(11.0).color(c.text_faint).into()
+            text(meta).size(fs(11.0)).color(c.text_faint).into()
         };
 
         let mut panel = column![
@@ -1753,7 +2498,7 @@ impl App {
             scrollable(
                 container(
                     text(body)
-                        .size(12.5)
+                        .size(fs(12.5))
                         .font(mono_font())
                         .color(c.text_body)
                         .wrapping(Wrapping::WordOrGlyph),
@@ -1777,31 +2522,137 @@ impl App {
         container(panel)
             .padding(12)
             .height(Length::Fill)
-            .style(c.card())
+            .style(c.inset())
             .into()
+    }
+
+    /// One quick-publish button, sized to its name and capped at about nine
+    /// CJK glyphs. `max_units` is the display budget; truncated names expose
+    /// the full text through a tooltip.
+    fn preset_button(&self, c: &Colors, index: usize, max_units: usize) -> El<'_> {
+        let preset = &self.rt.form.presets[index];
+        let (caption, full) = preset_caption(preset, index, max_units);
+        let sized = button(text(caption).size(fs(12.0)))
+            .padding([5, 8])
+            .width(Length::Shrink)
+            .style(c.ghost_button())
+            .on_press(Msg::PublishPreset(index));
+        match full {
+            Some(full) => tooltip(
+                sized,
+                container(text(full).size(fs(11.0)).color(c.text_primary))
+                    .padding([5, 8])
+                    .style(c.inset()),
+                tooltip::Position::Top,
+            )
+            .delay(Duration::from_millis(300))
+            .into(),
+            None => sized.into(),
+        }
+    }
+
+    /// Header strip: as many presets as fit at their natural widths, with the
+    /// fold toggle kept at the far right.
+    fn quick_presets(&self, c: &Colors, available: f32) -> El<'_> {
+        let order = self.rt.form.preset_display_order();
+        let widths: Vec<f32> = order
+            .iter()
+            .map(|&index| {
+                let (caption, _) = preset_caption(&self.rt.form.presets[index], index, 18);
+                caption_button_width(&caption)
+            })
+            .collect();
+        let all_width = widths.iter().sum::<f32>()
+            + widths.len().saturating_sub(1) as f32 * PRESET_BUTTON_GAP;
+        let shown = if !self.presets_open && all_width <= available {
+            widths.len()
+        } else {
+            pack_button_count(&widths, available - fold_button_width() - PRESET_BUTTON_GAP)
+        };
+        let mut strip = row![].spacing(PRESET_BUTTON_GAP).align_y(Alignment::Center);
+        for &index in order.iter().take(shown) {
+            strip = strip.push(self.preset_button(c, index, 18));
+        }
+        if order.len() > shown || self.presets_open {
+            let label = if self.presets_open {
+                t("收起预设 ▾", "Hide presets ▾")
+            } else {
+                t("更多预设 ▸", "More presets ▸")
+            };
+            strip = strip.push(
+                button(text(label).size(fs(12.0)))
+                    .padding([4, 10])
+                    .style(c.ghost_button())
+                    .on_press(Msg::TogglePresetPalette),
+            );
+        }
+        strip.into()
+    }
+
+    /// Folded-open preset grid, shown in place of the publish form so long
+    /// lists get the whole card body instead of a horizontal scroll.
+    fn preset_palette(&self, c: &Colors) -> El<'_> {
+        let order = self.rt.form.preset_display_order();
+        let widths: Vec<(usize, f32)> = order
+            .iter()
+            .map(|&index| {
+                let (caption, _) = preset_caption(&self.rt.form.presets[index], index, 18);
+                (index, caption_button_width(&caption))
+            })
+            .collect();
+        let colors = *c;
+        let grid = responsive(move |size| {
+            // Pack whole buttons greedily, wrapping once the next natural
+            // width no longer fits the current row.
+            let mut rows = column![].spacing(6);
+            let mut current = row![].spacing(PRESET_BUTTON_GAP);
+            let mut used = 0.0f32;
+            for &(index, width) in &widths {
+                let add = if used > 0.0 {
+                    PRESET_BUTTON_GAP + width
+                } else {
+                    width
+                };
+                if used > 0.0 && used + add > size.width {
+                    rows = rows.push(current);
+                    current = row![].spacing(PRESET_BUTTON_GAP);
+                    used = width;
+                } else {
+                    used += add;
+                }
+                current = current.push(self.preset_button(&colors, index, 18));
+            }
+            if used > 0.0 {
+                rows = rows.push(current);
+            }
+            rows.into()
+        })
+        .height(Length::Shrink);
+        column![
+            self.hint(
+                c,
+                t(
+                    "点击预设立即发布；在“发送预设”页点 ☆ 可置顶",
+                    "Click a preset to publish; pin one with ☆ in the Presets tab"
+                )
+                .to_string(),
+            ),
+            container(scrollable(grid).height(Length::Fixed(168.0)))
+                .padding(8)
+                .style(c.inset()),
+        ]
+        .spacing(6)
+        .into()
     }
 
     fn publish_card(&self, c: &Colors) -> El<'_> {
         let f = &self.rt.form;
         let timed = self.rt.timed_running();
-        let presets = self
-            .rt
-            .form
-            .presets
-            .iter()
-            .enumerate()
-            .fold(row![].spacing(4), |acc, (i, p)| {
-                acc.push(
-                    button(text(p.name.as_str()).size(12.0))
-                        .padding([4, 8])
-                        .style(c.ghost_button())
-                        .on_press(Msg::PublishPreset(i)),
-                )
-            });
+        let palette_open = self.presets_open && !f.presets.is_empty();
 
         let topic_row = row![
             text_input("mqttc/mvp/hello", &f.pub_topic)
-                .size(13.0)
+                .size(fs(13.0))
                 .padding([5, 7])
                 .width(Length::Fill)
                 .style(c.input_style())
@@ -1809,12 +2660,12 @@ impl App {
             pick(c, &qos_opts(), f.pub_qos, |v| Msg::Num(Num::PubQos, v)),
             checkbox(f.pub_retain)
                 .label("Retain")
-                .size(15.0)
-                .text_size(12.0)
+                .size(fs(15.0))
+                .text_size(fs(12.0))
                 .style(c.checkbox_style())
                 .on_toggle(|v| Msg::Flag(Flag::PubRetain, v)),
             pick(c, &format_opts(), f.pub_format, |v| Msg::Num(Num::PubFormat, v)),
-            button(text(t("美化", "Pretty")).size(12.0))
+            button(text(t("美化", "Pretty")).size(fs(12.0)))
                 .padding([4, 8])
                 .style(c.ghost_button())
                 .on_press(Msg::Format),
@@ -1823,16 +2674,16 @@ impl App {
         .align_y(Alignment::Center);
 
         let props_row = row![
-            text(t("用户属性", "User props")).size(11.0).color(c.text_faint),
+            text(t("用户属性", "User props")).size(fs(11.0)).color(c.text_faint),
             text_input("k=v;k2=v2", &f.pub_props)
-                .size(12.0)
+                .size(fs(12.0))
                 .padding([4, 7])
                 .width(Length::Fill)
                 .style(c.input_style())
                 .on_input(|v| Msg::Field(Field::PubProps, v)),
-            text(t("过期 (s)", "Expiry (s)")).size(11.0).color(c.text_faint),
+            text(t("过期 (s)", "Expiry (s)")).size(fs(11.0)).color(c.text_faint),
             text_input("0", &f.pub_expiry)
-                .size(12.0)
+                .size(fs(12.0))
                 .padding([4, 7])
                 .width(70)
                 .style(c.input_style())
@@ -1844,101 +2695,295 @@ impl App {
 
         let timed_row = row![
             text_input("5", &f.timed_interval)
-                .size(13.0)
+                .size(fs(13.0))
                 .padding([5, 7])
                 .width(70)
                 .style(c.input_style())
                 .on_input(|v| Msg::Field(Field::TimedInterval, v)),
-            text(t("秒一次", "sec interval")).size(11.0).color(c.text_faint),
+            text(t("秒一次", "sec interval")).size(fs(11.0)).color(c.text_faint),
             button(
                 text(if timed {
                     t("停止定时", "Stop timed")
                 } else {
                     t("开始定时", "Start timed")
                 })
-                .size(11.0)
+                .size(fs(12.0))
             )
-            .padding([4, 9])
+            .padding([5, 12])
             .style(c.button_kind(if timed {
                 ButtonKind::Danger
             } else {
                 ButtonKind::Ghost
             }))
             .on_press(Msg::Timed),
-            button(text(t("发布", "Publish")).size(12.0))
+            Space::new().width(Length::Fill),
+            // The shortcut hint sits beside Publish instead of on its own
+            // row, leaving the log area that much taller.
+            self.hint(
+                c,
+                t("Enter 或 Ctrl+Enter 发布", "Enter or Ctrl+Enter publishes").to_string(),
+            ),
+            button(text(t("发布", "Publish")).size(fs(12.0)))
                 .padding([5, 14])
                 .style(c.primary_button())
                 .on_press(Msg::Publish),
         ]
         .spacing(6)
-        .align_y(Alignment::Center);
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
+
+        let body: El<'_> = if palette_open {
+            self.preset_palette(c)
+        } else {
+            column![
+                topic_row,
+                props_row,
+                // 81 = 2 * 8 padding + 4 * 16.25 line height (12.5 * 1.3):
+                // the text area must hold a whole number of lines, otherwise
+                // tiny-skia draws the partial edge lines outside the field and
+                // they overlap the widgets above/below.
+                text_editor(&self.editor)
+                    .height(81)
+                    .padding(8)
+                    .size(fs(12.5))
+                    .font(mono_font())
+                    .style(c.editor_style())
+                    .on_action(Msg::PubEdit),
+                timed_row,
+            ]
+            .spacing(6)
+            .into()
+        };
+
+        let colors = *c;
+        let quick = responsive(move |size| {
+            row![
+                Space::new().width(Length::Fill),
+                self.quick_presets(&colors, size.width),
+            ]
+            .align_y(Alignment::Center)
+            .into()
+        })
+        .height(Length::Shrink);
 
         container(
             column![
                 row![
                     self.section(c, &t("发布", "Publish")),
-                    Space::new().width(Length::Fill),
-                    scrollable(presets)
-                        .direction(scrollable::Direction::Horizontal(
-                            scrollable::Scrollbar::new()
-                        ))
-                        .height(26),
+                    quick,
                 ]
                 .align_y(Alignment::Center),
-                topic_row,
-                props_row,
-                text_editor(&self.editor)
-                    .height(84)
-                    .padding(8)
-                    .size(12.5)
-                    .font(mono_font())
-                    .style(c.editor_style())
-                    .on_action(Msg::PubEdit),
-                timed_row,
-                self.hint(
-                    c,
-                    t(
-                        "Enter 或 Ctrl+Enter 发布；↑ 取回上一条 SEND",
-                        "Enter or Ctrl+Enter publishes; ↑ recalls the last SEND",
-                    )
-                    .to_string(),
-                ),
+                body,
             ]
             .spacing(6),
         )
         .padding(10)
-        .style(c.card())
+        .style(c.inset())
         .into()
     }
 
-    fn page_settings(&self, c: &Colors) -> El<'_> {
+    /// One row of the custom-palette editor: chip, name, hex box, reset.
+    fn color_row(&self, c: &Colors, field: PaletteField) -> El<'_> {
+        let (zh, en) = field.label();
+        let active = field.get(&self.rt.palette());
+        let value = self.rt.custom_color_text(field);
+        row![
+            button(Space::new())
+                .width(22)
+                .height(22)
+                .padding(0)
+                .style(c.swatch_button(active, self.swatch_field == Some(field)))
+                .on_press(Msg::SwatchPanel(Some(field))),
+            text(t(zh, en))
+                .size(fs(12.0))
+                .color(c.text_body)
+                .width(Length::Fill),
+            text_input("", &value)
+                .size(fs(12.0))
+                .font(mono_font())
+                .padding([4, 7])
+                .width(110)
+                .style(c.input_style())
+                .on_input(move |v| Msg::CustomColor(field, v)),
+            button(text("↺").size(fs(12.0)))
+                .padding([3, 7])
+                .style(c.ghost_button())
+                .on_press(Msg::ResetCustomColor(field)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
+    }
+
+    /// Inline chip grid rather than a popup, so it works across all three
+    /// shells and never clips the row it was opened from.
+    fn swatch_panel(&self, c: &Colors, field: PaletteField) -> El<'_> {
+        let (zh, en) = field.label();
+        let active = field.get(&self.rt.palette());
+        let mut chips = row![].spacing(5);
+        for color in SWATCHES {
+            chips = chips.push(
+                button(Space::new())
+                    .width(20)
+                    .height(20)
+                    .padding(0)
+                    .style(c.swatch_button(color, color == active))
+                    .on_press(Msg::PickSwatch(color)),
+            );
+        }
+        let chips = chips.wrap();
         container(
             column![
-                self.section(c, &t("外观", "Appearance")),
                 row![
-                    text(t("皮肤", "Skin")).size(13.0).color(c.text_body),
-                    pick(c, &skin_opts(), self.rt.prefs.skin_choice, Msg::Skin),
+                    text(t("选择颜色", "Pick a colour"))
+                        .size(fs(12.0))
+                        .color(c.text_title),
+                    text(t(zh, en)).size(fs(11.0)).color(c.text_faint),
+                    Space::new().width(Length::Fill),
+                    button(text("×").size(fs(12.0)))
+                        .padding([1, 6])
+                        .style(c.ghost_button())
+                        .on_press(Msg::SwatchPanel(None)),
                 ]
-                .spacing(12)
+                .spacing(8)
                 .align_y(Alignment::Center),
-                row![
-                    text(t("语言", "Language")).size(13.0).color(c.text_body),
-                    pick(c, &lang_opts(), self.rt.prefs.language, Msg::Language),
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center),
-                self.hint(
-                    c,
-                    t(
-                        "跟随系统会按 Windows/macOS/Linux 的深浅色自动切换",
-                        "System follows the OS light/dark setting on Windows/macOS/Linux"
-                    )
+                chips,
+            ]
+            .spacing(8),
+        )
+        .padding(10)
+        .style(c.inset())
+        .into()
+    }
+
+    fn color_rows(&self, c: &Colors, fields: &[PaletteField]) -> El<'_> {
+        let mut rows = column![].spacing(4);
+        for &field in fields {
+            rows = rows.push(self.color_row(c, field));
+            // Keep the chip panel next to the row it belongs to; otherwise a
+            // click in the folded-open list would push it out of view.
+            if self.swatch_field == Some(field) {
+                rows = rows.push(self.swatch_panel(c, field));
+            }
+        }
+        rows.into()
+    }
+
+    fn custom_palette_section(&self, c: &Colors) -> El<'_> {
+        let base = self.rt.custom_palette().base_skin().to_index();
+        let hidden = PaletteField::MORE.len();
+        let (glyph, more_label) = if self.more_colors {
+            ("▾", t("收起更多颜色", "Show fewer colours"))
+        } else {
+            (
+                "▸",
+                t(
+                    &format!("展开更多颜色（还有 {hidden} 项）"),
+                    &format!("Show more colours ({hidden} more)"),
                 ),
-                Space::new().height(8),
-                self.section(c, &t("日志", "Logs")),
+            )
+        };
+        let toggle = button(
+            row![
+                text(glyph).size(fs(11.0)).color(c.text_muted),
+                text(more_label).size(fs(12.0)),
+                Space::new().width(Length::Fill),
+            ]
+            .spacing(6)
+            .width(Length::Fill)
+            .align_y(Alignment::Center),
+        )
+        .width(Length::Fill)
+        .padding([6, 9])
+        .style(c.disclosure_button(self.more_colors))
+        .on_press(Msg::ToggleMoreColors);
+
+        let mut body = column![
+            row![
+                text(t("自定义配色", "Custom palette"))
+                    .size(fs(13.0))
+                    .color(c.text_title),
+                Space::new().width(Length::Fill),
+                text(t("基础皮肤", "Base skin")).size(fs(11.0)).color(c.text_faint),
+                pick(c, &base_skin_opts(), base, Msg::CustomBase),
+                button(text(t("按基础重置", "Reset to base")).size(fs(11.0)))
+                    .padding([5, 9])
+                    .style(c.ghost_button())
+                    .on_press(Msg::RefillCustom),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            self.hint(
+                c,
+                t(
+                    "点色块选预设，或直接输入 #rrggbb；无效值自动回退到基础皮肤",
+                    "Tap a chip for a preset or type #rrggbb; invalid values fall back to the base skin"
+                ),
+            ),
+            self.color_rows(c, &PaletteField::COMMON),
+            toggle,
+        ]
+        .spacing(8);
+        if self.more_colors {
+            body = body.push(self.color_rows(c, &PaletteField::MORE));
+        }
+        container(body).padding(10).style(c.inset()).into()
+    }
+
+    fn page_settings(&self, c: &Colors) -> El<'_> {
+        let mut body = column![
+            self.section(c, &t("外观", "Appearance")),
+            row![
+                text(t("皮肤", "Skin")).size(fs(13.0)).color(c.text_body),
+                pick(c, &skin_opts(), self.rt.prefs.skin_choice, Msg::Skin),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+            self.hint(
+                c,
+                t(
+                    "跟随系统会按 Windows/macOS/Linux 的深浅色自动切换",
+                    "System follows the OS light/dark setting on Windows/macOS/Linux"
+                )
+            ),
+            row![
+                text(t("语言", "Language")).size(fs(13.0)).color(c.text_body),
+                pick(c, &lang_opts(), self.rt.prefs.language, Msg::Language),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+            row![
+                text(t("字号", "Text size")).size(fs(13.0)).color(c.text_body),
+                pick(
+                    c,
+                    &font_opts(),
+                    font_index(self.rt.prefs.font_scale),
+                    |index| Msg::FontScale(FONT_CHOICES[index as usize].0),
+                ),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+            self.hint(
+                c,
+                t(
+                    "字号按比例缩放整个界面，适合高分屏或视力需要放大时使用",
+                    "Text size scales the whole interface — handy on high-DPI or hard-to-read displays"
+                )
+            ),
+        ]
+        .spacing(12);
+
+        if self.rt.skin() == Skin::Custom {
+            body = body.push(self.custom_palette_section(c));
+        }
+
+        body = body
+            .push(Space::new().height(8))
+            .push(self.section(c, &t("日志", "Logs")))
+            .push(
                 row![
                     text(t("历史上限", "History limit"))
-                        .size(13.0)
+                        .size(fs(13.0))
                         .color(c.text_body),
                     pick(
                         c,
@@ -1952,36 +2997,32 @@ impl App {
                             "每条连接单独计数；上限越高，列表重绘越慢",
                             "Counted per connection; a larger limit redraws more slowly"
                         )
-                        .to_string()
                     ),
                 ]
                 .spacing(12)
                 .align_y(Alignment::Center),
-                self.hint(
-                    c,
-                    t(
-                        "大报文在气泡内自动截断，点“展开”查看；单连接原始数据另有 16 MB 内存上限",
-                        "Large payloads are truncated inline — use Open to expand; raw data is capped at 16 MB per connection"
-                    )
-                    .to_string()
+            )
+            .push(self.hint(
+                c,
+                t(
+                    "大报文在气泡内自动截断，点“展开”查看；单连接原始数据另有 16 MB 内存上限",
+                    "Large payloads are truncated inline — use Open to expand; raw data is capped at 16 MB per connection"
                 ),
-                Space::new().height(8),
-                self.section(c, &t("配置文件", "Configuration")),
-                self.hint(
-                    c,
-                    t(
-                        "所有设置写入 exe 同目录的 mqttc.json，复制整个目录即可迁移",
-                        "Everything is stored in mqttc.json next to the exe; copy the folder to migrate"
-                    )
+            ))
+            .push(Space::new().height(8))
+            .push(self.section(c, &t("配置文件", "Configuration")))
+            .push(self.hint(
+                c,
+                t(
+                    "所有设置写入 exe 同目录的 mqttc.json，复制整个目录即可迁移",
+                    "Everything is stored in mqttc.json next to the exe; copy the folder to migrate"
                 ),
-            ]
-            .spacing(12)
-            .padding(14),
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .style(c.card())
-        .into()
+            ));
+
+        container(scrollable(body.padding(8)).height(Length::Fill))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     fn page_rules(&self, c: &Colors) -> El<'_> {
@@ -1995,20 +3036,20 @@ impl App {
                     row![
                         checkbox(rule.enabled)
                             .label(t("启用", "Enabled"))
-                            .size(15.0)
-                            .text_size(12.0)
+                            .size(fs(15.0))
+                            .text_size(fs(12.0))
                             .style(c.checkbox_style())
                             .on_toggle(move |v| Msg::RuleEnabled(index, v)),
-                        text(t("匹配 Topic", "Match topic")).size(11.0).color(c.text_faint),
+                        text(t("匹配 Topic", "Match topic")).size(fs(11.0)).color(c.text_faint),
                         text_input("mqttc/in/#", &rule.match_topic)
-                            .size(13.0)
+                            .size(fs(13.0))
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
                             .on_input(move |v| Msg::RuleText(index, RuleTextField::MatchTopic, v)),
-                        text(t("间隔 s", "Every s")).size(10.0).color(c.text_faint),
+                        text(t("间隔 s", "Every s")).size(fs(10.0)).color(c.text_faint),
                         text_input("0", &rule.min_interval_secs)
-                            .size(12.0)
+                            .size(fs(12.0))
                             .padding([4, 6])
                             .width(56)
                             .style(c.input_style())
@@ -2017,19 +3058,19 @@ impl App {
                             &format!("命中 {hit_count}"),
                             &format!("{hit_count} hits"),
                         ))
-                        .size(10.0)
+                        .size(fs(10.0))
                         .color(c.text_faint),
-                        button(text("↑").size(12.0))
+                        button(text("↑").size(fs(12.0)))
                             .padding([2, 5])
                             .style(c.ghost_button())
                             .on_press_maybe((index > 0).then_some(Msg::MoveRule(index, -1))),
-                        button(text("↓").size(12.0))
+                        button(text("↓").size(fs(12.0)))
                             .padding([2, 5])
                             .style(c.ghost_button())
                             .on_press_maybe(
                                 (index + 1 < total).then_some(Msg::MoveRule(index, 1)),
                             ),
-                        button(text("×").size(13.0))
+                        button(text("×").size(fs(13.0)))
                             .padding([3, 7])
                             .style(c.danger_button())
                             .on_press(Msg::DelRule(index)),
@@ -2037,16 +3078,16 @@ impl App {
                     .spacing(6)
                     .align_y(Alignment::Center),
                     row![
-                        text(t("包含文本", "Contains")).size(11.0).color(c.text_faint),
+                        text(t("包含文本", "Contains")).size(fs(11.0)).color(c.text_faint),
                         text_input("", &rule.payload_contains)
-                            .size(13.0)
+                            .size(fs(13.0))
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
                             .on_input(move |v| Msg::RuleText(index, RuleTextField::Contains, v)),
-                        text(t("回复 Topic", "Reply topic")).size(11.0).color(c.text_faint),
+                        text(t("回复 Topic", "Reply topic")).size(fs(11.0)).color(c.text_faint),
                         text_input("", &rule.reply_topic)
-                            .size(13.0)
+                            .size(fs(13.0))
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
@@ -2055,9 +3096,9 @@ impl App {
                     .spacing(6)
                     .align_y(Alignment::Center),
                     row![
-                        text(t("回复内容", "Reply payload")).size(11.0).color(c.text_faint),
+                        text(t("回复内容", "Reply payload")).size(fs(11.0)).color(c.text_faint),
                         text_input("", &rule.reply_payload)
-                            .size(13.0)
+                            .size(fs(13.0))
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
@@ -2065,8 +3106,8 @@ impl App {
                         pick(c, &qos_opts(), rule.qos, move |v| Msg::RuleNum(index, v)),
                         checkbox(rule.retain)
                             .label("Retain")
-                            .size(15.0)
-                            .text_size(12.0)
+                            .size(fs(15.0))
+                            .text_size(fs(12.0))
                             .style(c.checkbox_style())
                             .on_toggle(move |v| Msg::RuleRetain(index, v)),
                         pick(c, &format_opts(), rule.format, move |v| Msg::RuleFormat(index, v)),
@@ -2092,15 +3133,15 @@ impl App {
                 row![
                     self.section(c, &t("自动回复", "Auto reply")),
                     Space::new().width(Length::Fill),
-                    text(t("自身回投", "Own echo")).size(11.0).color(c.text_faint),
+                    text(t("自身回投", "Own echo")).size(fs(11.0)).color(c.text_faint),
                     pick(c, &echo_opts(), self.rt.form.auto_reply_echo, |v| {
                         Msg::Num(Num::Echo, v)
                     }),
-                    button(text(t("重置计数", "Reset hits")).size(11.0))
+                    button(text(t("重置计数", "Reset hits")).size(fs(11.0)))
                         .padding([5, 9])
                         .style(c.ghost_button())
                         .on_press(Msg::ResetRuleStats),
-                    button(text(t("新增规则", "Add rule")).size(12.0))
+                    button(text(t("新增规则", "Add rule")).size(fs(12.0)))
                         .padding([5, 10])
                         .style(c.primary_button())
                         .on_press(Msg::AddRule),
@@ -2117,7 +3158,7 @@ impl App {
                 ),
             ]
             .spacing(10)
-            .padding(12),
+            .padding(0),
         )
         .height(Length::Fill)
         .into()
@@ -2129,14 +3170,33 @@ impl App {
             let card = container(
                 column![
                     row![
+                        tooltip(
+                            button(text(if preset.pinned { "★" } else { "☆" }).size(fs(13.0)))
+                                .padding([3, 7])
+                                .style(c.button_kind(if preset.pinned {
+                                    ButtonKind::Selected
+                                } else {
+                                    ButtonKind::Ghost
+                                }))
+                                .on_press(Msg::TogglePresetPin(index)),
+                            container(
+                                text(t("置顶 / 取消置顶", "Pin / unpin"))
+                                    .size(fs(11.0))
+                                    .color(c.text_primary)
+                            )
+                            .padding([4, 7])
+                            .style(c.inset()),
+                            tooltip::Position::Top,
+                        )
+                        .delay(Duration::from_millis(300)),
                         text_input(l("名称", "Name"), &preset.name)
-                            .size(13.0)
+                            .size(fs(13.0))
                             .padding([5, 7])
                             .width(140)
                             .style(c.input_style())
                             .on_input(move |v| Msg::PresetText(index, PresetTextField::Name, v)),
                         text_input("mqttc/mvp/hello", &preset.topic)
-                            .size(13.0)
+                            .size(fs(13.0))
                             .padding([5, 7])
                             .width(Length::Fill)
                             .style(c.input_style())
@@ -2144,16 +3204,16 @@ impl App {
                         pick(c, &qos_opts(), preset.qos, move |v| Msg::PresetNum(index, v)),
                         checkbox(preset.retain)
                             .label("Retain")
-                            .size(15.0)
-                            .text_size(12.0)
+                            .size(fs(15.0))
+                            .text_size(fs(12.0))
                             .style(c.checkbox_style())
                             .on_toggle(move |v| Msg::PresetRetain(index, v)),
                         pick(c, &format_opts(), preset.format, move |v| Msg::PresetFormat(index, v)),
-                        button(text(t("发送", "Send")).size(12.0))
+                        button(text(t("发送", "Send")).size(fs(12.0)))
                             .padding([4, 8])
                             .style(c.primary_button())
                             .on_press(Msg::PublishPreset(index)),
-                        button(text("×").size(13.0))
+                        button(text("×").size(fs(13.0)))
                             .padding([3, 7])
                             .style(c.danger_button())
                             .on_press(Msg::DelPreset(index)),
@@ -2161,7 +3221,7 @@ impl App {
                     .spacing(5)
                     .align_y(Alignment::Center),
                     text_input(l("内容", "Payload"), &preset.payload)
-                        .size(13.0)
+                        .size(fs(13.0))
                         .padding([5, 7])
                         .width(Length::Fill)
                         .style(c.input_style())
@@ -2185,7 +3245,7 @@ impl App {
                 row![
                     self.section(c, &t("发送预设", "Publish presets")),
                     Space::new().width(Length::Fill),
-                    button(text(t("新增预设", "Add preset")).size(12.0))
+                    button(text(t("新增预设", "Add preset")).size(fs(12.0)))
                         .padding([5, 10])
                         .style(c.primary_button())
                         .on_press(Msg::AddPreset),
@@ -2196,54 +3256,95 @@ impl App {
                 self.hint(
                     c,
                     t(
-                        "日志页发布框上方也有一键发送按钮",
-                        "The Logs tab also shows one-click buttons for every preset"
+                        "★ 置顶的预设排在发布框最前；每行仍可直接发送",
+                        "Pinned (★) presets lead the publish strip; each row can still send"
                     )
                 ),
             ]
             .spacing(10)
-            .padding(12),
+            .padding(0),
         )
         .height(Length::Fill)
         .into()
     }
 
     fn page_about(&self, c: &Colors) -> El<'_> {
+        let link = button(text("github.com/GordonWen/mqttc").size(fs(12.0)))
+            .padding([2, 4])
+            .style(c.link_button())
+            .on_press(Msg::OpenRepo);
+
         container(
             column![
-                text("mqttc · iced").size(22.0).color(c.text_title),
+                text("MQTT Debug Client").size(fs(22.0)).color(c.text_title),
                 text(format!("v{}", env!("CARGO_PKG_VERSION")))
-                    .size(12.0)
+                    .size(fs(12.0))
                     .color(c.text_faint),
                 Space::new().height(8),
                 text(t(
-                    "轻量级跨平台 MQTT 调试客户端，核心逻辑与 egui / GPUI 版本共用。",
-                    "A lightweight cross-platform MQTT debug client sharing its core with the egui / GPUI builds."
+                    "轻量级跨平台 MQTT 调试客户端，支持 Windows、Linux 和 macOS。",
+                    "A lightweight, cross-platform MQTT debug client for Windows, Linux and macOS."
                 ))
-                .size(13.0)
-                .color(c.text_body),
+                .size(fs(13.0))
+                .color(c.text_body)
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph),
                 text(t(
-                    "渲染：iced + tiny-skia 软件光栅；字体使用系统 CJK 回退。",
-                    "Rendering: iced + tiny-skia software rasterizer; CJK glyphs come from system fonts."
+                    "支持 MQTT 3.1.1 / 5.0、TLS、订阅与发布、遗嘱消息、自动回复、定时发布，以及日志筛选和导出。",
+                    "MQTT 3.1.1 / 5.0, TLS, subscribe and publish, last will, auto reply, timed publish, plus log filtering and export."
                 ))
-                .size(12.0)
-                .color(c.text_muted),
+                .size(fs(12.0))
+                .color(c.text_muted)
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph),
+                text(t(
+                    "设计以轻量、易用为主：单个可执行文件，无需安装，配置和日志都保存在 exe 同目录。",
+                    "Designed to stay light and simple: one executable, no installer, with config and logs stored next to it."
+                ))
+                .size(fs(12.0))
+                .color(c.text_muted)
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph),
                 Space::new().height(8),
-                self.hint(c, "MQTT 3.1.1 / 5.0 · TLS · Last Will · Auto reply · Timed publish".to_string()),
+                row![
+                    text("GitHub").size(fs(12.0)).color(c.text_faint),
+                    link,
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+                self.hint(
+                    c,
+                    t(
+                        "遇到问题或有建议，欢迎到 GitHub Issues 反馈。",
+                        "Found an issue or have an idea? Open a GitHub Issue."
+                    )
+                    .to_string(),
+                ),
+                Space::new().height(4),
                 self.hint(c, "License: MIT".to_string()),
             ]
             .spacing(8)
-            .padding(16),
+            .padding(8),
         )
         .width(Length::Fill)
         .height(Length::Fill)
-        .style(c.card())
         .into()
     }
 }
 
+/// Opens a link in the platform browser. Only compile-time constants are
+/// passed in, never user or broker supplied text.
+fn open_url(url: &'static str) {
+    #[cfg(windows)]
+    win32::open_url(url);
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+}
+
 /// Global shortcuts + window file drops. Ctrl-modified keys are handled even
-/// while an input has focus; bare Enter / ↑ only when no widget consumed them.
+/// while an input has focus; bare Enter only when no widget consumed it.
 fn event_message(
     event: iced::Event,
     status: iced::event::Status,
@@ -2277,12 +3378,8 @@ fn event_message(
             return Some(Msg::Publish);
         }
     }
-    if status == iced::event::Status::Ignored {
-        match key {
-            Key::Named(Named::Enter) => return Some(Msg::Publish),
-            Key::Named(Named::ArrowUp) => return Some(Msg::RecallLastSend),
-            _ => {}
-        }
+    if status == iced::event::Status::Ignored && key == Key::Named(Named::Enter) {
+        return Some(Msg::Publish);
     }
     None
 }
@@ -2299,6 +3396,90 @@ fn human_bytes(size: usize) -> String {
 
 /// `t()` returns an owned `String`; `text_input` placeholders must borrow a
 /// `&'static str`, so the small helper keeps both strings in the binary.
+/// One inline preset button: a little over nine CJK glyphs including padding.
+const PRESET_BUTTON_GAP: f32 = 4.0;
+
+/// Estimated rendered width of a preset button for a caption: glyph budget
+/// plus horizontal padding. Overestimating CJK keeps the row from overflowing.
+fn caption_button_width(caption: &str) -> f32 {
+    let units = caption.chars().map(char_units).sum::<usize>();
+    fs(units as f32 * 6.5 + 20.0)
+}
+
+/// Header room for the “More / Hide presets” toggle, estimated from the
+/// localized label so the wider English text cannot push it off the row.
+fn fold_button_width() -> f32 {
+    let label = t("更多预设 ▸", "More presets ▸");
+    fs(20.0 + label.chars().map(char_units).sum::<usize>() as f32 * 6.5)
+}
+
+/// Greedily count how many natural-width buttons fit into `budget`, including
+/// the gaps between them.
+fn pack_button_count(widths: &[f32], budget: f32) -> usize {
+    let mut used = 0.0f32;
+    let mut count = 0usize;
+    for &width in widths {
+        let add = if count == 0 {
+            width
+        } else {
+            PRESET_BUTTON_GAP + width
+        };
+        if used + add > budget {
+            break;
+        }
+        used += add;
+        count += 1;
+    }
+    count
+}
+
+/// Rough width in half-em units, so CJK names truncate sooner than ASCII ones.
+fn char_units(ch: char) -> usize {
+    if ch.is_ascii() {
+        1
+    } else {
+        2
+    }
+}
+
+fn ellipsize(input: &str, max_units: usize) -> (String, bool) {
+    if input.chars().map(char_units).sum::<usize>() <= max_units {
+        return (input.to_string(), false);
+    }
+    let mut budget = max_units.saturating_sub(1); // reserve room for the ellipsis
+    let mut out = String::new();
+    for ch in input.chars() {
+        let units = char_units(ch);
+        if units > budget {
+            break;
+        }
+        out.push(ch);
+        budget -= units;
+    }
+    out.push('…');
+    (out, true)
+}
+
+/// Display caption plus the full text when the caption had to be shortened.
+fn preset_caption(
+    preset: &PresetRow,
+    index: usize,
+    max_units: usize,
+) -> (String, Option<String>) {
+    let base = if preset.name.trim().is_empty() {
+        format!("{} {}", t("预设", "Preset"), index + 1)
+    } else {
+        preset.name.trim().to_string()
+    };
+    let full = if preset.pinned {
+        format!("★ {base}")
+    } else {
+        base
+    };
+    let (shown, truncated) = ellipsize(&full, max_units);
+    (shown, truncated.then_some(full))
+}
+
 fn l(zh: &'static str, en: &'static str) -> &'static str {
     if is_en() {
         en
@@ -2330,19 +3511,219 @@ pub fn ui_font() -> iced::Font {
     }
 }
 
+/// Window geometry helpers for the frameless shell.
+#[cfg(windows)]
+mod win32 {
+    use raw_window_handle::RawWindowHandle;
+    use std::ffi::c_void;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Rect {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    #[repr(C)]
+    struct MonitorInfo {
+        size: u32,
+        _monitor: Rect,
+        work: Rect,
+        _flags: u32,
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn MonitorFromWindow(hwnd: *mut c_void, flags: u32) -> *mut c_void;
+        fn GetMonitorInfoW(monitor: *mut c_void, info: *mut MonitorInfo) -> i32;
+        fn GetWindowRect(hwnd: *mut c_void, rect: *mut Rect) -> i32;
+        fn SetWindowPos(
+            hwnd: *mut c_void,
+            after: *mut c_void,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> i32;
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmSetWindowAttribute(
+            hwnd: *mut c_void,
+            attribute: u32,
+            value: *const c_void,
+            size: u32,
+        ) -> i32;
+    }
+
+    #[link(name = "shell32")]
+    extern "system" {
+        fn ShellExecuteW(
+            hwnd: *mut c_void,
+            operation: *const u16,
+            file: *const u16,
+            parameters: *const u16,
+            directory: *const u16,
+            show: i32,
+        ) -> *mut c_void;
+    }
+
+    const MONITOR_DEFAULTTONEAREST: u32 = 2;
+    const SWP_NOZORDER: u32 = 0x0004;
+    const SWP_NOACTIVATE: u32 = 0x0010;
+    /// `DWMWA_WINDOW_CORNER_PREFERENCE` (Windows 11 22000+).
+    const DWMWA_WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: i32 = 2;
+
+    fn hwnd(window: &dyn iced::window::Window) -> Option<*mut c_void> {
+        match window.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as *mut c_void),
+            _ => None,
+        }
+    }
+
+    /// Opens an http(s) URL in the default browser. ShellExecute keeps the
+    /// launch silent, unlike spawning a console process.
+    pub fn open_url(url: &str) {
+        fn wide(text: &str) -> Vec<u16> {
+            text.encode_utf16().chain(std::iter::once(0)).collect()
+        }
+        let operation = wide("open");
+        let file = wide(url);
+        // SAFETY: both UTF-16 buffers are NUL-terminated for the call.
+        unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                file.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            );
+        }
+    }
+
+    /// Windows 11 rounds every top-level window; a frameless one is otherwise
+    /// square. Windows 10 rejects the attribute, which is fine.
+    pub fn round_corners(window: &dyn iced::window::Window) {
+        if let Some(hwnd) = hwnd(window) {
+            let preference = DWMWCP_ROUND;
+            // SAFETY: hwnd belongs to the live iced window.
+            unsafe {
+                DwmSetWindowAttribute(
+                    hwnd,
+                    DWMWA_WINDOW_CORNER_PREFERENCE,
+                    &preference as *const i32 as *const c_void,
+                    std::mem::size_of::<i32>() as u32,
+                );
+            }
+        }
+    }
+
+    /// Fits the window to the monitor work area and returns the old rect so it
+    /// can be restored. winit's own maximize doubles the size on high-DPI
+    /// frameless windows, so the title bar drives this instead.
+    pub fn maximize(window: &dyn iced::window::Window) -> Option<[i32; 4]> {
+        let hwnd = hwnd(window)?;
+        let mut current = Rect::default();
+        // SAFETY: hwnd belongs to the live iced window.
+        unsafe {
+            if GetWindowRect(hwnd, &mut current) == 0 {
+                return None;
+            }
+            let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+            if monitor.is_null() {
+                return None;
+            }
+            let mut info = MonitorInfo {
+                size: std::mem::size_of::<MonitorInfo>() as u32,
+                _monitor: Rect::default(),
+                work: Rect::default(),
+                _flags: 0,
+            };
+            if GetMonitorInfoW(monitor, &mut info) == 0 {
+                return None;
+            }
+            let work = info.work;
+            SetWindowPos(
+                hwnd,
+                std::ptr::null_mut(),
+                work.left,
+                work.top,
+                work.right - work.left,
+                work.bottom - work.top,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+        Some([current.left, current.top, current.right, current.bottom])
+    }
+
+    pub fn restore(window: &dyn iced::window::Window, rect: [i32; 4]) {
+        if let Some(hwnd) = hwnd(window) {
+            // SAFETY: hwnd belongs to the live iced window.
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    rect[0],
+                    rect[1],
+                    rect[2] - rect[0],
+                    rect[3] - rect[1],
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The i18n switch is process-wide, so tests that pin a language and tests
+    /// that construct an app (which applies the config language) take turns.
+    pub(super) static LANG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// Widget construction has no renderer dependency; building every page
     /// catches layout/borrow panics that the bench (always on page 0) misses.
     #[test]
     fn every_page_builds() {
-        let mut app = App::new();
+        let mut app = App::for_test();
         for page in [0, 1, 2, 5] {
             app.page = page;
             let _page = app.view();
         }
+    }
+
+    /// The four presets must map back to their own index even after a
+    /// hand-edited config lands between two of them.
+    #[test]
+    fn font_choices_round_trip() {
+        for (index, (scale, _, _)) in FONT_CHOICES.iter().enumerate() {
+            assert_eq!(font_index(*scale), index as i32);
+        }
+        assert_eq!(font_index(0.5), 0);
+        assert_eq!(font_index(2.0), 3);
+    }
+
+    /// Every page must build at the largest preset without overflowing or
+    /// tripping the scaled-size helpers.
+    #[test]
+    fn every_page_builds_at_large_text() {
+        let mut app = App::for_test();
+        app.rt.prefs.font_scale = FONT_SCALE_MAX;
+        for page in [0, 1, 2, 5] {
+            app.page = page;
+            let _page = app.view();
+        }
+        assert_eq!(fs(13.0), 13.0 * FONT_SCALE_MAX);
+        app.rt.prefs.font_scale = 1.0;
+        let _ = app.view();
+        assert_eq!(fs(13.0), 13.0);
     }
 
     /// Each session tab has its own body builder; exercise all of them with
@@ -2352,7 +3733,7 @@ mod tests {
         use mqttc_core::config::{AutoReplyRule, ConnectionConfig, SubscriptionConfig};
         use mqttc_core::form::FormState;
 
-        let mut app = App::new();
+        let mut app = App::for_test();
         let mut conn = ConnectionConfig::new("test".into());
         conn.subscriptions.push(SubscriptionConfig {
             topic: "mqttc/test/#".into(),
@@ -2376,22 +3757,133 @@ mod tests {
         }
     }
 
+    /// Preset captions shorten by display width and keep the full text for the
+    /// hover tooltip; pinned entries carry the ★ prefix.
+    #[test]
+    fn preset_caption_ellipsizes_long_names() {
+        let mut preset = PresetRow {
+            name: "battery-voltage-report".into(),
+            ..Default::default()
+        };
+        let (shown, full) = preset_caption(&preset, 0, 12);
+        assert!(shown.ends_with('…'));
+        assert!(shown.chars().count() < preset.name.chars().count());
+        assert_eq!(full.as_deref(), Some("battery-voltage-report"));
+
+        preset.name = "OTA".into();
+        let (shown, full) = preset_caption(&preset, 0, 12);
+        assert_eq!(shown, "OTA");
+        assert!(full.is_none());
+
+        preset.name = "OTA".into();
+        preset.pinned = true;
+        let (shown, _) = preset_caption(&preset, 0, 12);
+        assert_eq!(shown, "★ OTA");
+    }
+
+    /// With the fold open, every preset (including the empty-name fallback and
+    /// the pinned-first order) must build without touching the runtime.
+    #[test]
+    fn preset_palette_builds() {
+        let mut app = App::for_test();
+        app.rt.form.presets = (0..8)
+            .map(|index| PresetRow {
+                name: if index == 3 {
+                    String::new()
+                } else {
+                    format!("preset-{index}")
+                },
+                topic: format!("demo/{index}"),
+                payload: "x".into(),
+                pinned: index == 7,
+                ..Default::default()
+            })
+            .collect();
+        app.presets_open = true;
+        app.page = 1;
+        app.session_tab = SessionTab::Logs;
+        let _page = app.view();
+    }
+
+    /// Folding open/closed is independent of how many presets fit the header.
+    #[test]
+    fn toggle_palette_with_three_presets() {
+        let mut app = App::for_test();
+        app.rt.form.presets = (0..3).map(|_| PresetRow::default()).collect();
+        let _ = app.update(Msg::TogglePresetPalette);
+        assert!(app.presets_open);
+        let _ = app.update(Msg::TogglePresetPalette);
+        assert!(!app.presets_open);
+    }
+
+    /// Buttons follow their names: two-character names stay narrow, long ones
+    /// stop at the capped budget instead of widening the strip.
+    #[test]
+    fn preset_buttons_size_to_their_names() {
+        let short = PresetRow {
+            name: "报警".into(),
+            ..Default::default()
+        };
+        let long = PresetRow {
+            name: "这是一条特别长的预设名称用来验证八到九个中文字符之后会被省略".into(),
+            ..Default::default()
+        };
+        let (short_caption, short_full) = preset_caption(&short, 0, 18);
+        let (long_caption, long_full) = preset_caption(&long, 0, 18);
+        assert!(short_full.is_none());
+        assert!(long_full.is_some());
+        let short_width = caption_button_width(&short_caption);
+        let long_width = caption_button_width(&long_caption);
+        assert!(short_width < 70.0);
+        assert!(long_width > short_width);
+        assert!(long_width <= 140.0);
+    }
+
+    /// Header packing uses each button's own width, so short names leave room
+    /// for more buttons than the old fixed slot did.
+    #[test]
+    fn pack_buttons_uses_each_natural_width() {
+        let widths = [44.0, 44.0, 70.0, 122.0, 44.0];
+        assert_eq!(pack_button_count(&widths, 100.0), 2);
+        assert_eq!(pack_button_count(&widths, 92.0), 2);
+        assert_eq!(pack_button_count(&widths, 91.0), 1);
+        assert_eq!(pack_button_count(&widths, 0.0), 0);
+        assert_eq!(pack_button_count(&[44.0, 44.0, 44.0], 140.0), 3);
+        assert_eq!(pack_button_count(&[140.0], 120.0), 0);
+    }
+
+    /// Deleting the last preset while folded open must return to the form.
+    #[test]
+    fn deleting_last_open_preset_closes_palette() {
+        let mut app = App::for_test();
+        app.rt.form.presets = vec![PresetRow::default()];
+        app.presets_open = true;
+        let _ = app.update(Msg::DelPreset(0));
+        assert!(!app.presets_open);
+        assert!(app.rt.form.presets.is_empty());
+    }
+
     /// Pick-list labels are rebuilt from the active language, so switching
     /// language must not leave "全部 / 黑" frozen in the dropdowns.
     #[test]
     fn option_labels_follow_language() {
         use mqttc_core::i18n::{set_lang, Lang};
 
+        let _lang = LANG_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         set_lang(Lang::Zh);
         assert_eq!(skin_opts()[1].label, "黑");
         assert_eq!(kind_opts()[0].label, "全部");
         assert_eq!(echo_opts()[0].label, "显示");
+        assert_eq!(font_opts()[3].label, "特大");
 
         set_lang(Lang::En);
         assert_eq!(skin_opts()[1].label, "Black");
         assert_eq!(kind_opts()[0].label, "All");
         assert_eq!(kind_opts()[4].label, "Errors");
         assert_eq!(echo_opts()[0].label, "Show");
+        assert_eq!(font_opts()[3].label, "Extra large");
 
         set_lang(Lang::Zh);
     }
@@ -2400,7 +3892,7 @@ mod tests {
     /// toolbar state without needing a broker.
     #[test]
     fn big_payload_detail_and_pause_build() {
-        let mut app = App::new();
+        let mut app = App::for_test();
         let id = app.rt.active_id().unwrap();
         app.rt
             .push_log(&id, "RECV", "demo/large", vec![b'x'; 4096]);
@@ -2439,7 +3931,7 @@ mod tests {
     /// must build for both an existing and an already-removed id.
     #[test]
     fn delete_confirmation_builds() {
-        let mut app = App::new();
+        let mut app = App::for_test();
         let id = app.rt.active_id().unwrap();
 
         app.pending_delete = Some(id);

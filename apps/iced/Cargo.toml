@@ -17,7 +17,9 @@ mqttc-core = { workspace = true }
 iced = { version = "0.14", default-features = false, features = [
     "tiny-skia",
     "advanced",
+    "canvas",
     "crisp",
+    "image-without-codecs",
     "thread-pool",
     "smol",
     "x11",
@@ -25,3 +27,11 @@ iced = { version = "0.14", default-features = false, features = [
     "linux-theme-detection",
 ] }
 png = "0.18"
+# iced's top-level `image` module is gated behind the codec-heavy feature; we
+# decode the embedded PNG ourselves and only need the widget + RGBA renderer.
+iced_widget = { version = "0.14", default-features = false }
+
+# Frameless windows need the native HWND to clamp maximize to the monitor work
+# area; winit's undecorated maximize is scaled twice on high-DPI Windows.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"

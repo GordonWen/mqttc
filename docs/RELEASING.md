@@ -82,7 +82,8 @@ gh release list -R GordonWen/mqttc --json tagName -q '.[].tagName' |
 4. `.github/workflows/release.yml` 自动构建：
 
    - Linux x64：`ubuntu-22.04` → `mqttc-v<version>-linux-x64.tar.gz`
-   - macOS universal（arm64 + x64）：`macos-14` → `mqttc-v<version>-macos-universal.zip`（内含 `mqttc.app`）
+   - macOS universal（arm64 + x64）：`macos-15` / `macos-15-intel` 分别构建后 `lipo` 合并
+     → `mqttc-v<version>-macos-universal.zip`（内含 `mqttc.app`）
    - `release` job 创建 GitHub Release 并上传两个产物与 `SHA256SUMS.txt`。
 
    用 `gh run watch` 或 Actions 页面确认通过。

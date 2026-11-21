@@ -24,6 +24,7 @@ pub struct PresetRow {
     pub qos: i32,
     pub retain: bool,
     pub format: i32,
+    pub pinned: bool,
 }
 
 impl Default for PresetRow {
@@ -35,6 +36,7 @@ impl Default for PresetRow {
             qos: 0,
             retain: false,
             format: 0,
+            pinned: false,
         }
     }
 }
@@ -47,6 +49,7 @@ impl PresetRow {
         preset.qos = self.qos.clamp(0, 2) as u8;
         preset.retain = self.retain;
         preset.format = PayloadFormat::from_index(self.format).to_key().to_string();
+        preset.pinned = self.pinned;
     }
 }
 
@@ -191,6 +194,7 @@ impl FormState {
                 qos: preset.qos.min(2) as i32,
                 retain: preset.retain,
                 format: PayloadFormat::from_key(&preset.format).to_index(),
+                pinned: preset.pinned,
             })
             .collect();
         self.rules = cfg
@@ -340,6 +344,27 @@ impl FormState {
         }
     }
 
+    /// Publish order: pinned presets first, each group in edit-list order.
+    ///
+    /// Returns original indices so callers can still publish by index while
+    /// the presets page keeps its stable editing order.
+    pub fn preset_display_order(&self) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..self.presets.len()).collect();
+        order.sort_by_key(|&index| !self.presets[index].pinned);
+        order
+    }
+
+    /// Flip the pin flag of one preset. Returns false for a stale index.
+    pub fn toggle_preset_pin(&mut self, index: usize) -> bool {
+        match self.presets.get_mut(index) {
+            Some(preset) => {
+                preset.pinned = !preset.pinned;
+                true
+            }
+            None => false,
+        }
+    }
+
     pub fn add_rule(&mut self) -> usize {
         self.rules.push(RuleRow::default());
         self.rules.len() - 1
@@ -390,6 +415,7 @@ mod tests {
             qos: 1,
             retain: true,
             format: "json".into(),
+            pinned: true,
         });
         cfg.auto_reply_rules.push(AutoReplyRule {
             enabled: true,
@@ -418,6 +444,7 @@ mod tests {
         assert_eq!(back.publish_presets.len(), 1);
         assert_eq!(back.publish_presets[0].format, "json");
         assert!(back.publish_presets[0].retain);
+        assert!(back.publish_presets[0].pinned);
         assert_eq!(back.auto_reply_rules.len(), 1);
         assert_eq!(back.auto_reply_rules[0].match_topic, "in/#");
         assert_eq!(back.auto_reply_rules[0].min_interval_secs, 5);
@@ -449,6 +476,21 @@ mod tests {
         assert_eq!(cfg.sub_qos, 0);
         assert_eq!(cfg.will_qos, 2);
         assert_eq!(cfg.name, "broker:1883");
+    }
+
+    #[test]
+    fn pinned_presets_sort_first() {
+        let mut form = FormState::default();
+        form.add_preset();
+        form.add_preset();
+        form.add_preset();
+        form.presets[1].pinned = true;
+        form.presets[2].pinned = true;
+        assert_eq!(form.preset_display_order(), vec![1, 2, 0]);
+
+        assert!(form.toggle_preset_pin(1));
+        assert_eq!(form.preset_display_order(), vec![2, 0, 1]);
+        assert!(!form.toggle_preset_pin(9));
     }
 
     #[test]

@@ -755,12 +755,10 @@ impl ServerCertVerifier for NoServerVerification {
     }
 }
 
-/// Custom CA and/or client cert when set; otherwise the native store.
-/// `ssl_verify = false` accepts any server certificate (lab brokers with self-signed certs).
-fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
+/// Trust anchors for server verification: the custom CA when set, otherwise
+/// the native system store.
+fn load_trust_roots(ca_path: &str) -> Result<RootCertStore, String> {
     let mut roots = RootCertStore::empty();
-    let ca_path = params.ssl_ca.trim();
     if !ca_path.is_empty() {
         let mut reader = BufReader::new(File::open(ca_path).map_err(|err| {
             i18n::t(
@@ -790,7 +788,7 @@ fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
                 )
             })?;
         }
-    } else if params.ssl_verify {
+    } else {
         let native = rustls_native_certs::load_native_certs();
         for cert in native.certs {
             let _ = roots.add(cert);
@@ -802,6 +800,21 @@ fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
             ));
         }
     }
+    Ok(roots)
+}
+
+/// Custom CA and/or client cert when set; otherwise the native store.
+/// `ssl_verify = false` accepts any server certificate and ignores the CA
+/// path entirely, so lab brokers with self-signed certs need no CA file.
+fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    // Only gather anchors when the server is actually verified; otherwise a
+    // stale or missing CA path must not block an accept-any connection.
+    let roots = if params.ssl_verify {
+        load_trust_roots(params.ssl_ca.trim())?
+    } else {
+        RootCertStore::empty()
+    };
 
     let client_certs = load_client_certs(params.ssl_cert.trim())?;
     let client_key = load_client_key(params.ssl_key.trim())?;
@@ -994,6 +1007,14 @@ mod tests {
     fn no_verify_builds_without_ca() {
         let mut p = params(true);
         p.ssl_verify = false;
+        assert!(build_tls_transport(&p).is_ok());
+    }
+
+    #[test]
+    fn no_verify_ignores_ca_path() {
+        let mut p = params(true);
+        p.ssl_verify = false;
+        p.ssl_ca = "definitely-not-there.pem".into();
         assert!(build_tls_transport(&p).is_ok());
     }
 }

@@ -31,15 +31,15 @@ scripts/              构建、打包与发布脚本
 | 模块 | 职责 |
 |---|---|
 | `model` | `PayloadFormat`、`Skin`、`ConnStatus`、`LogRecord`、Client ID 生成、数值钳制（Keep Alive 1..65535、Timeout 1..300、QoS 0..2、定时 1..3600） |
-| `config` | `ConnectionConfig` / `PublishPreset` / `AutoReplyRule` / `AppConfig` 及 serde 默认值；`mqttc.json` 读写；旧版单连接迁移；`active_id` 修复；预设/规则补齐；原子写（临时文件 + rename，Windows 回退直写） |
+| `config` | `ConnectionConfig` / `PublishPreset`（含 `pinned`）/ `AutoReplyRule` / `AppConfig`（含 `custom_palette`、`font_scale`）及 serde 默认值；`mqttc.json` 读写；旧版单连接迁移；`active_id` 修复；预设/规则补齐；原子写（临时文件 + rename，Windows 回退直写） |
 | `payload` | text / json / base64 / hex 编解码，hex 容错（空格、逗号、冒号、连字符），JSON 美化，日志渲染 |
 | `filter` | MQTT `+` / `#` 通配符匹配；关键字 / 类型 / 订阅主题筛选 |
 | `i18n` | 进程级 `AtomicU8` 语言 + `t(zh, en)`；工作线程也能调用 |
-| `theme` | 6 套皮肤（System 解析为黑/白）；28 个命名颜色的 `Palette`（RGBA `u32`），各 UI 转成自己的颜色类型 |
+| `theme` | 7 套皮肤（System 解析为黑/白，Custom 由 `custom_palette` 解析）；27 个命名颜色的 `Palette`，`#rrggbb` 覆盖逐槽回退，各 UI 转成自己的颜色类型 |
 | `platform` | 系统深浅色检测：Windows 读注册表（缓存 1s）；macOS `defaults` / Linux `gsettings`（结果缓存 30s，避免频繁起进程） |
 | `mqtt` | `MqttHandle`：rumqttc 0.25.1，3.1.1 与 5.0 双客户端；generation 失效旧线程；通道容量 32；Keep Alive / Clean / Timeout / Will；rustls 自定义 CA、客户端证书、跳过校验 |
 | `logs` | 每连接 `VecDeque<LogRecord>`，上限 `MAX_LOGS = 200`；只存原始字节 `Arc<[u8]>`，切换显示格式时重渲染 |
-| `form` | `FormState`：编辑页与会话页所有字段的字符串/布尔草稿 + 预设行 + 规则行；`from_config` / `apply_to` / 行增删 |
+| `form` | `FormState`：编辑页与会话页所有字段的字符串/布尔草稿 + 预设行 + 规则行；`from_config` / `apply_to` / 行增删；预设置顶与显示排序 |
 | `runtime` | `AppRuntime`：配置、表单、每连接 `ConnRuntime`、页面状态、偏好；动作入口与自动回复/定时发布状态机 |
 | `export` | 日志导出到 exe 同目录 `logs/`（CSV / 文本，文件名带时间戳） |
 | `cli` | `--bench --bench-scenario s1..s4 --bench-quit-after N --config <path>` 解析 |
@@ -114,14 +114,14 @@ GPUI 的取舍（规则/预设编辑页只读等）在 [PARITY.md](PARITY.md) �
 ## 6. 测试
 
 ```text
-cargo test -p mqttc-core          # 47 项：编解码、通配符、筛选、配置迁移/往返、皮肤/语言、自动回复、表单钳制、200 上限
+cargo test -p mqttc-core          # 68 项：编解码、通配符、筛选、配置迁移/往返、皮肤/自定义配色、字号钳制、自动回复、表单钳制、200 上限
 cargo test -p mqttc-core --test broker_e2e        # 3 项：双协议连接、订阅、发布、断开
 cargo test -p mqttc-core --test broker_roundtrip  # 5 项 + 1 #[ignore] TLS：连接/订阅/发布/接收/自动回复/定时/重连/200 上限
-cargo test -p mqttc-iced          # 六个页面构建冒烟
+cargo test -p mqttc-iced          # 13 项：页面构建、预设折叠、大字号、删除确认等
 ```
 
 本地集成测试使用 `tools/test-broker` 的 `start_broker`（rumqttd 0.20 内嵌），不使用公网服务；
-TLS 用例需要证书，默认 `#[ignore]`。最近一次运行：47 + 3 + 5 全部通过。
+TLS 用例需要证书，默认 `#[ignore]`。最近一次运行：68 + 3 + 5 + 13 全部通过。
 
 ## 7. 便携性
 
