@@ -123,7 +123,7 @@ If orphan tags remain, list them with `git ls-remote --tags origin` and run
 
    The release title is always `mqttc v<version>`; do not add a subtitle such as
    “ — 简单轻便的 MQTT 调试客户端”. The `--generate-notes` body created by CI is only a
-   temporary placeholder; replace it with bilingual notes before announcing the release.
+   temporary placeholder; replace it with bilingual notes before publishing the release.
 
 ## 4. Artifacts and compatibility
 

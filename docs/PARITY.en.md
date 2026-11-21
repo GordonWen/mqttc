@@ -40,12 +40,11 @@ built from source.
 
 Both builds are feature-complete; the differences are implementation-level:
 
-- **Log rendering**: the early Slint build used a Slint list; egui uses
-  `ScrollArea::show_rows` to lay out only visible rows, while Iced lays out only the
-  newest 80 rows and freezes the current page when scrolled up, with "Show older" to
-  page backwards and "Jump to latest" when new messages arrive. Bubble width follows
-  content (85% cap). Scrollbar styles differ (egui has thin scrollbars; Iced uses
-  `Scrollbar::new()`).
+- **Log rendering**: the early Slint build used a Slint list; egui renders all rows in a
+  `ScrollArea` with `stick_to_bottom`, while Iced lays out only the newest 80 rows and
+  freezes the current page when scrolled up, with "Show older" to page backwards and
+  "Jump to latest" when new messages arrive. Bubble width follows content (85% cap).
+  Scrollbar styles differ (egui has thin scrollbars; Iced uses `Scrollbar::new()`).
 - **Fonts**: no CJK font is bundled; both use system font fallback (egui: fontique; Iced:
   cosmic-text, with the default family chosen per platform as Microsoft YaHei UI /
   PingFang SC). The early Slint build bundled glyph files, which is why it was larger.

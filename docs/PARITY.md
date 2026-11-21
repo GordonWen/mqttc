@@ -37,7 +37,7 @@
 
 两者功能完整，差异只在实现层面：
 
-- **日志渲染**：早期 Slint 版用 Slint 列表；egui 用 `ScrollArea::show_rows` 只布局可见行，
+- **日志渲染**：早期 Slint 版用 Slint 列表；egui 用 `ScrollArea` 渲染全部行并 `stick_to_bottom`，
   Iced 只布局最新 80 条，上滚时冻结当前页并可“显示更早”逐页加载、出现新消息时可“回到最新”。
   气泡宽度按内容自适应（上限 85%）。滚动条样式不同（egui 细滚动条、Iced `Scrollbar::new()`）。
 - **字体**：不打包 CJK 字体，使用系统字体回退（egui: fontique；Iced: cosmic-text，默认族按平台选

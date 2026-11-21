@@ -107,8 +107,8 @@ UI thread                                  worker threads (1 per connection + ti
 | | egui | Iced | GPUI |
 |---|---|---|---|
 | Rendering | glow / OpenGL | tiny-skia software raster | GPU (Windows Direct3D 11 / macOS Metal / Linux Vulkan) |
-| Wakeup | `ctx.request_repaint()` (repaint on event arrival) | 100ms `time::every` tick (only while connected or timers are active) | adaptive ticker: 100ms when busy / 1s when idle on system skin / no tick otherwise |
-| Log list | `ScrollArea::show_rows` virtualization + `stick_to_bottom` | windowed layout of the newest 80 rows + freeze on scroll-up / show older / jump to latest | `uniform_list` fixed-row-height virtualization |
+| Wakeup | `ctx.request_repaint()` (repaint on event arrival) | 100ms tick (busy) / 1s (idle with System skin) / no tick otherwise | adaptive ticker: 100ms when busy / 1s when idle on system skin / no tick otherwise |
+| Log list | `ScrollArea` renders all rows + `stick_to_bottom` | windowed layout of the newest 80 rows + freeze on scroll-up / show older / jump to latest | `uniform_list` fixed-row-height virtualization |
 | CJK font | fontique system fallback (no bundled CJK) | cosmic-text system fallback, default family per platform (YaHei / PingFang) | system font fallback |
 | Dropdown / selection | `ComboBox` | `pick_list` | custom click-to-cycle selector (no popup) |
 | Input | `TextEdit` (passwords via `password(true)`) | `text_input` / `text_editor` | IME `TextInput` ported from the official example (supports password masking) |

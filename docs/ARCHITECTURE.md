@@ -92,8 +92,8 @@ UI 线程                                  工作线程（每连接 1 个 + 定�
 | | egui | Iced | GPUI |
 |---|---|---|---|
 | 渲染 | glow / OpenGL | tiny-skia 软件光栅 | GPU（Windows Direct3D 11 / macOS Metal / Linux Vulkan） |
-| 唤醒 | `ctx.request_repaint()`（事件到达即重绘） | 100ms `time::every` tick（仅连接中/定时开启时） | 自适应 ticker：100ms 忙时 / 1s 系统皮肤空闲 / 否则不 tick |
-| 日志列表 | `ScrollArea::show_rows` 虚拟化 + `stick_to_bottom` | 最新 80 条窗口化布局 + 上滚冻结 / 显示更早 / 回到最新 | `uniform_list` 固定行高虚拟化 |
+| 唤醒 | `ctx.request_repaint()`（事件到达即重绘） | 100ms tick（忙时）/ 1s（跟随系统皮肤空闲）/ 否则不 tick | 自适应 ticker：100ms 忙时 / 1s 系统皮肤空闲 / 否则不 tick |
+| 日志列表 | `ScrollArea` 渲染全部行 + `stick_to_bottom` | 最新 80 条窗口化布局 + 上滚冻结 / 显示更早 / 回到最新 | `uniform_list` 固定行高虚拟化 |
 | 中文字体 | fontique 系统字体回退（不打包 CJK） | cosmic-text 系统回退，默认族按平台选 YaHei / PingFang | 系统字体回退 |
 | 下拉/选择 | `ComboBox` | `pick_list` | 自绘点击循环选择器（无弹出层） |
 | 输入 | `TextEdit`（密码 `password(true)`） | `text_input` / `text_editor` | 从官方 example 移植的 IME `TextInput`（支持密码遮罩） |

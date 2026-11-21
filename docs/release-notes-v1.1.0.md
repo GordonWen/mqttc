@@ -2,7 +2,7 @@
 
 [中文](#中文) | [English](#english)
 
-一个简单轻便易用的 MQTT 调试客户端。免安装，解压即用。
+一个简单轻便易用的 MQTT 调试客户端，支持 Windows、Linux 和 macOS。免安装，解压即用。
 
 ## 中文
 
@@ -20,9 +20,9 @@
 
 ### 更新的内容
 
-- **长会话更流畅**：日志列表只绘制最新 80 条，向上滚动可“显示更早”，新消息到达时
-  “回到最新”；10 msg/s 流式接收时单核 CPU 从约 34% 降到 1% 以下。搜索、复制、导出
-  仍覆盖全部记录。
+- **长会话更流畅**：日志列表只绘制最新 80 条，顶部可“显示更早”逐页回看，出现新消息时
+  底部可“回到最新”；10 msg/s 流式接收时单核 CPU 从约 34% 降到 1% 以下。搜索、复制、
+  导出仍覆盖全部记录。
 - **收发计数**：会话标题行新增 `收 · N`、`发 · N` 计数，可一键清零；暂停日志时继续计数，
   系统与错误提示不计入。
 - **手动滚动不再被顶走**：滚轮上滚自动冻结当前页并暂停跟随；点“回到最新”或重新勾选
@@ -58,11 +58,14 @@
 - Linux 需要 `libxkbcommon`、Wayland 或 X11、`fontconfig`；详见包内 READ-ME。
 - Windows 包本地构建；每个资产附 `.sha256`，Release 中另有合并的 `SHA256SUMS.txt`。
 
+源码与问题反馈：https://github.com/GordonWen/mqttc · MIT 许可证
+
 ---
 
 ## English
 
-A lightweight, portable MQTT debugging client for Windows, Linux and macOS.
+A lightweight, easy-to-use MQTT debugging client for Windows, Linux and macOS. No
+installation — unzip and run.
 
 ## Downloads
 
@@ -79,9 +82,10 @@ to the executable.
 
 ### Improvements
 
-- **Long sessions stay smooth**: the log list renders only the newest 80 rows, with
-  "Show older" and "Jump to latest" banners; streaming at 10 msg/s drops from ~34% of one
-  core to under 1%. Search, copy and export still cover the full history.
+- **Long sessions stay smooth**: the log list renders only the newest 80 rows, with a
+  "Show older" button at the top to page back and a "Jump to latest" button when new
+  messages arrive; streaming at 10 msg/s drops from ~34% of one core to under 1%. Search,
+  copy and export still cover the full history.
 - **Traffic counters**: the session header shows `In · N` / `Out · N` with a one-click
   reset. Messages keep counting while the list is paused; SYS and error rows are excluded.
 - **Manual scrolling is no longer overridden**: scrolling up freezes the current page and
