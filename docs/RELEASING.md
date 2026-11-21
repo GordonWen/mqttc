@@ -1,5 +1,7 @@
 # 发布流程（维护者）
 
+简体中文 | [English](RELEASING.en.md)
+
 本文记录如何把仓库内容发布到 GitHub，以及 GitHub 端需要做的一次性设置。
 正式发布版本为 **iced 版**（打包后命名为 `mqttc`）；egui / gpui 仅保留源码。
 
@@ -20,7 +22,7 @@ GitHub 仓库 `GordonWen/mqttc`：
 2. Settings → General → Default branch 设为 `main`。
 3. 如 `main` 有分支保护，清空历史前临时允许 force-push，完成后恢复。
 4. 删除旧 Release、tag、旧分支（见第 2 节）。
-5. 建议的仓库描述：`简单轻便易用的 MQTT 调试客户端（Rust + Iced，便携免安装）`。
+5. 仓库描述：`A lightweight, cross-platform MQTT debugging client (Rust + Iced, portable, ~29 MB RAM)`。
    Topics：`mqtt`、`mqtt-client`、`rust`、`iced`、`portable`、`desktop`。
 6. 未签名构建不需要任何 secret；后续做 macOS 签名/公证时再加 Apple 相关 secrets。
 

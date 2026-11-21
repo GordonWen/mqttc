@@ -1,5 +1,7 @@
 # 基准测试与对比报告
 
+简体中文 | [English](BENCHMARK.en.md)
+
 本报告比较四款程序在同一台机器、同一份配置、同一个本地 Broker 下的内存、CPU、可执行文件体积。
 四款程序中的 iced 是本仓库的发布版本，egui / gpui 作为源码内对照，Slint 版是发布前的性能基线。
 原始 CSV 与完整明细在本地 `bench/out/`（已被 `.gitignore` 忽略），可用

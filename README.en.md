@@ -30,7 +30,7 @@ xattr -dr com.apple.quarantine mqttc.app
 
 The release build uses iced with tiny-skia software rendering: no GPU dependency, and no
 bundled CJK fonts. Measured on Windows x64 release builds (median of 3 independent
-processes; see the [benchmark report](docs/BENCHMARK.md)):
+processes; see the [benchmark report](docs/BENCHMARK.en.md)):
 
 | Scenario | Working set | Comparison |
 |---|---|---|
@@ -117,10 +117,10 @@ MQTT, logs, filtering, i18n, runtime), so they can be compared side by side:
 | `mqttc-egui` | egui / eframe 0.37 | OpenGL | 96–111 MB | 8.22 MB | Development alternative |
 | `mqttc-gpui` | GPUI 0.2.2 | Direct3D 11 | 47–49 MB | 9.38 MB | Exploratory; some edit pages are read-only |
 
-GPUI differences are documented in [docs/PARITY.md](docs/PARITY.md); architecture,
+GPUI differences are documented in [docs/PARITY.en.md](docs/PARITY.en.md); architecture,
 build and test details for all three are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); full comparison data is in
-[docs/BENCHMARK.md](docs/BENCHMARK.md). These documents are currently in Chinese.
+[docs/ARCHITECTURE.en.md](docs/ARCHITECTURE.en.md); full comparison data is in
+[docs/BENCHMARK.en.md](docs/BENCHMARK.en.md).
 
 ## Tests
 
@@ -140,7 +140,7 @@ public services.
   [`.github/workflows/release.yml`](.github/workflows/release.yml) when a `v*` tag is
   pushed and attached to the same GitHub Release.
 
-Maintainer steps are in [docs/RELEASING.md](docs/RELEASING.md).
+Maintainer steps are in [docs/RELEASING.en.md](docs/RELEASING.en.md).
 
 ## Layout
 

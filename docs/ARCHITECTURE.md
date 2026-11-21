@@ -1,5 +1,7 @@
 # 架构说明
 
+简体中文 | [English](ARCHITECTURE.en.md)
+
 本文描述 workspace 结构、共享核心 `mqttc-core` 的职责划分、线程与事件模型，以及三套 UI
 如何以最小差异接入同一份业务逻辑。
 
@@ -96,7 +98,7 @@ UI 线程                                  工作线程（每连接 1 个 + 定�
 | 下拉/选择 | `ComboBox` | `pick_list` | 自绘点击循环选择器（无弹出层） |
 | 输入 | `TextEdit`（密码 `password(true)`） | `text_input` / `text_editor` | 从官方 example 移植的 IME `TextInput`（支持密码遮罩） |
 | 页面结构 | 侧栏全局页 + 会话内订阅卡 | 侧栏 4 页 + 会话标签（日志 / 订阅 / 自动回复 / 预设） | 侧栏全局页 |
-| 标题栏 | 原生标题栏 | 原生标题栏 | 自绘 `TitlebarOptions` |
+| 标题栏 | 原生标题栏 | 无边框 + 自绘标题栏 | 自绘 `TitlebarOptions` |
 
 GPUI 的取舍（规则/预设编辑页只读等）在 [PARITY.md](PARITY.md) 中逐条记录。
 
