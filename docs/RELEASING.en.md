@@ -113,8 +113,12 @@ If orphan tags remain, list them with `git ls-remote --tags origin` and run
 6. Edit the release notes (optional):
 
    ```powershell
-   gh release edit v<version> --notes-file docs\release-notes-v<version>.md
+   gh release edit v<version> --title "mqttc v<version>" `
+     --notes-file docs\release-notes-v<version>.md
    ```
+
+   The release title is always `mqttc v<version>`; do not add a subtitle such as
+   “ — 简单轻便的 MQTT 调试客户端”.
 
 ## 4. Artifacts and compatibility
 

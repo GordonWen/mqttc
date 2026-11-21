@@ -106,8 +106,11 @@ gh release list -R GordonWen/mqttc --json tagName -q '.[].tagName' |
 6. 编辑 Release 说明（可选）：
 
    ```powershell
-   gh release edit v<version> --notes-file docs\release-notes-v<version>.md
+   gh release edit v<version> --title "mqttc v<version>" `
+     --notes-file docs\release-notes-v<version>.md
    ```
+
+   Release 标题固定为 `mqttc v<version>`，不添加“ — 简单轻便的 MQTT 调试客户端”等副标题。
 
 ## 4. 产物与兼容性
 
