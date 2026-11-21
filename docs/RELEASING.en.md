@@ -110,7 +110,11 @@ If orphan tags remain, list them with `git ls-remote --tags origin` and run
    gh release upload v<version> $tmp --clobber
    ```
 
-6. Edit the release notes (optional):
+6. Edit the release notes (Chinese + English required):
+
+   `docs/release-notes-v<version>.md` must contain both Chinese and English: Chinese
+   first, then `---`, then English. You can put `[中文](#中文) | [English](#english)`
+   navigation at the top.
 
    ```powershell
    gh release edit v<version> --title "mqttc v<version>" `
@@ -118,7 +122,8 @@ If orphan tags remain, list them with `git ls-remote --tags origin` and run
    ```
 
    The release title is always `mqttc v<version>`; do not add a subtitle such as
-   “ — 简单轻便的 MQTT 调试客户端”.
+   “ — 简单轻便的 MQTT 调试客户端”. The `--generate-notes` body created by CI is only a
+   temporary placeholder; replace it with bilingual notes before announcing the release.
 
 ## 4. Artifacts and compatibility
 

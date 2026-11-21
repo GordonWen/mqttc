@@ -103,7 +103,10 @@ gh release list -R GordonWen/mqttc --json tagName -q '.[].tagName' |
    gh release upload v<version> $tmp --clobber
    ```
 
-6. 编辑 Release 说明（可选）：
+6. 编辑 Release 说明（必须中英文）：
+
+   `docs/release-notes-v<version>.md` 同时包含中文和英文：先写中文部分，再用 `---`
+   分隔并写英文部分；文件顶部可放 `[中文](#中文) | [English](#english)` 导航。
 
    ```powershell
    gh release edit v<version> --title "mqttc v<version>" `
@@ -111,6 +114,7 @@ gh release list -R GordonWen/mqttc --json tagName -q '.[].tagName' |
    ```
 
    Release 标题固定为 `mqttc v<version>`，不添加“ — 简单轻便的 MQTT 调试客户端”等副标题。
+   CI 通过 `--generate-notes` 创建的正文只是临时占位，发布前必须替换成双语说明。
 
 ## 4. 产物与兼容性
 
