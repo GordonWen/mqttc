@@ -27,6 +27,7 @@ use mqttc_core::payload;
 use mqttc_core::runtime::AppRuntime;
 use mqttc_core::theme::{to_hex, PaletteField, Rgb};
 
+use crate::max_width;
 use crate::style::{rgb, ButtonKind, Colors};
 
 type El<'a> = iced::Element<'a, Msg>;
@@ -47,6 +48,11 @@ const LOG_RENDER_ROWS: usize = 80;
 /// Widget id of the log list: scroll events identify a manual review, and
 /// "回到最新" snaps this list back to the end.
 const LOG_SCROLL_ID: &str = "log-scroll";
+
+/// Widest share of the log list a bubble may reach. Bubbles shrink to their
+/// content below this, so short messages stay narrow while long payloads get
+/// a line length the whole panel can offer.
+const LOG_BUBBLE_MAX: f32 = 0.85;
 
 // ------------------------------------------------------------- font scale
 
@@ -2724,6 +2730,7 @@ impl App {
     }
 
     fn log_bubble(&self, c: &Colors, log: &LogRecord) -> El<'_> {
+        let c = *c;
         let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
         let (bg, topic_color, body_color, right) = match log.kind.as_str() {
             "RECV" => (c.recv_bg, c.recv_topic, c.recv_payload, false),
@@ -2742,6 +2749,33 @@ impl App {
                 payload::sanitize_display_text(&log.topic)
             )
         };
+        let bytes = human_bytes(log.payload.len());
+        let copy_text = self.log_body_text(log);
+        let copy_label = t("复制", "Copy");
+        let detail_label = t("详情", "Detail");
+        let seq = log.seq;
+
+        let flags = log.flags();
+        let props = log.props_text();
+        let mut meta = flags;
+        if !props.is_empty() {
+            if !meta.is_empty() {
+                meta.push_str(" · ");
+            }
+            meta.push_str(&props);
+        }
+        if truncated {
+            if !meta.is_empty() {
+                meta.push_str(" · ");
+            }
+            meta.push_str(&t("预览已截断", "preview truncated"));
+        }
+        let meta_line = (!meta.is_empty())
+            .then(|| payload::sanitize_display_text(&meta).into_owned());
+
+        // The bubble follows its content: `max_width` reads the width the row
+        // offers during layout and caps the line at `LOG_BUBBLE_MAX` of it.
+        // Short messages stay narrow instead of stretching into a wide block.
         let mut header = row![text(topic_line)
             .size(fs(10.5))
             .color(topic_color)
@@ -2749,39 +2783,22 @@ impl App {
         .spacing(6)
         .align_y(Alignment::Center);
         header = header
-            .push(Space::new().width(Length::Fill))
-            .push(text(human_bytes(log.payload.len())).size(fs(10.0)).color(c.text_faint))
+            .push(Space::new().width(10.0))
+            .push(text(bytes).size(fs(10.0)).color(c.text_faint))
             .push(
-                button(text(t("复制", "Copy")).size(fs(10.0)))
+                button(text(copy_label).size(fs(10.0)))
                     .padding([1, 6])
                     .style(c.ghost_button())
-                    .on_press(Msg::Copy(self.log_body_text(log))),
+                    .on_press(Msg::Copy(copy_text)),
             )
             .push(
-                button(text(t("详情", "Detail")).size(fs(10.0)))
+                button(text(detail_label).size(fs(10.0)))
                     .padding([1, 6])
                     .style(c.ghost_button())
-                    .on_press(Msg::OpenLog(log.seq)),
+                    .on_press(Msg::OpenLog(seq)),
             );
-
-        let flags = log.flags();
-        let props = log.props_text();
         let mut content = column![header].spacing(2);
-        if !flags.is_empty() || !props.is_empty() || truncated {
-            let mut meta = flags;
-            if !props.is_empty() {
-                if !meta.is_empty() {
-                    meta.push_str(" · ");
-                }
-                meta.push_str(&props);
-            }
-            if truncated {
-                if !meta.is_empty() {
-                    meta.push_str(" · ");
-                }
-                meta.push_str(&t("预览已截断", "preview truncated"));
-            }
-            let meta = payload::sanitize_display_text(&meta).into_owned();
+        if let Some(meta) = meta_line {
             content = content.push(text(meta).size(fs(10.0)).color(c.text_faint));
         }
         content = content.push(
@@ -2791,10 +2808,11 @@ impl App {
                 .color(body_color)
                 .wrapping(Wrapping::WordOrGlyph),
         );
-        let bubble = container(content)
-            .padding([7, 9])
-            .max_width(520)
-            .style(c.bubble(bg));
+        let bubble = max_width::max_width(
+            container(content).padding([7, 9]).style(c.bubble(bg)),
+            LOG_BUBBLE_MAX,
+            180.0,
+        );
 
         let mut row_children: Vec<El> = Vec::new();
         if right {
