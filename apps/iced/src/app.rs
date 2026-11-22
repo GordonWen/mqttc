@@ -470,17 +470,20 @@ pub enum Msg {
     LogLimit(i32),
     OpenLog(u64),
     CloseLog,
+    /// Detail-page format picker (local to the open row, not persisted).
+    DetailFormat(i32),
     /// Widen the rendered tail window by one page (older rows stay in the store).
     ShowOlderLogs,
     ClearLogs,
-    Copy(String),
     /// Render the full payload only when the user actually copies it.
-    CopyLog(u64),
+    CopyLog(u64, i32),
     /// Right-click on a bubble's topic line: copy just the topic.
     CopyTopic(u64),
     /// Right-click on a bubble's payload: copy the rendered body.
     CopyBody(u64),
     CopyRow,
+    /// Copy the open detail row as one exported log line.
+    CopyDetailRow,
     FocusSearch,
     DroppedFile(PathBuf),
     Skin(i32),
@@ -782,6 +785,7 @@ struct Bench {
 enum CopyFlash {
     Topic,
     Payload,
+    Message,
 }
 
 pub struct App {
@@ -799,6 +803,9 @@ pub struct App {
     preview_cache: RefCell<HashMap<u64, (i32, String)>>,
     /// Expanded row shown instead of the log list. Cleared on tab / connection change.
     detail_seq: Option<u64>,
+    /// Format index for the open detail page; reseeded from the global log
+    /// format each time a row is opened.
+    detail_format: i32,
     /// Number of newest visible rows currently rendered (see [`LOG_RENDER_ROWS`]).
     log_window: usize,
     /// Rows pinned on screen while auto-scroll is off. Copied out of the store
@@ -902,6 +909,7 @@ impl App {
             dirty_at: None,
             preview_cache: RefCell::new(HashMap::new()),
             detail_seq: None,
+            detail_format: 0,
             log_window: LOG_RENDER_ROWS,
             log_freeze: None,
             log_scroll_y: None,
@@ -998,7 +1006,10 @@ impl App {
 
     /// One row in the same shape as the exported log, for the clipboard.
     fn row_text(&self, log: &LogRecord) -> String {
-        let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
+        self.row_text_fmt(log, PayloadFormat::from_index(self.rt.prefs.log_format))
+    }
+
+    fn row_text_fmt(&self, log: &LogRecord, fmt: PayloadFormat) -> String {
         mqttc_core::export::log_line(log, fmt)
     }
 
@@ -1006,7 +1017,9 @@ impl App {
     fn current_row_text(&self) -> Option<String> {
         if let Some(seq) = self.detail_seq {
             if let Some(log) = self.row_by_seq(seq) {
-                return Some(self.row_text(log));
+                return Some(
+                    self.row_text_fmt(log, PayloadFormat::from_index(self.detail_format)),
+                );
             }
         }
         self.rt
@@ -1098,9 +1111,13 @@ impl App {
                 }
             }
             Msg::CancelDelete => self.pending_delete = None,
-            Msg::Copy(text) => return iced::clipboard::write(text),
-            Msg::CopyLog(seq) => {
-                if let Some(text) = self.row_by_seq(seq).map(|log| self.log_body_text(log)) {
+            Msg::CopyLog(seq, fmt) => {
+                let fmt = PayloadFormat::from_index(fmt);
+                if let Some(text) = self
+                    .row_by_seq(seq)
+                    .map(|log| self.log_body_text_fmt(log, fmt))
+                {
+                    self.copy_flash = Some((CopyFlash::Payload, Instant::now() + COPY_FLASH));
                     return iced::clipboard::write(text);
                 }
             }
@@ -1121,6 +1138,16 @@ impl App {
             }
             Msg::CopyRow => {
                 if let Some(text) = self.current_row_text() {
+                    return iced::clipboard::write(text);
+                }
+            }
+            Msg::CopyDetailRow => {
+                let text = self.detail_seq.and_then(|seq| {
+                    let log = self.row_by_seq(seq)?;
+                    Some(self.row_text_fmt(log, PayloadFormat::from_index(self.detail_format)))
+                });
+                if let Some(text) = text {
+                    self.copy_flash = Some((CopyFlash::Message, Instant::now() + COPY_FLASH));
                     return iced::clipboard::write(text);
                 }
             }
@@ -1211,8 +1238,12 @@ impl App {
                     self.preview_cache.borrow_mut().clear();
                 }
             }
-            Msg::OpenLog(seq) => self.detail_seq = Some(seq),
+            Msg::OpenLog(seq) => {
+                self.detail_seq = Some(seq);
+                self.detail_format = self.rt.prefs.log_format;
+            }
             Msg::CloseLog => self.detail_seq = None,
+            Msg::DetailFormat(value) => self.detail_format = value,
             Msg::ShowOlderLogs => {
                 if let Some(rows) = self.log_freeze.as_mut() {
                     if let Some(first) = rows.first().map(|log| log.seq) {
@@ -2577,16 +2608,7 @@ impl App {
         } else {
             Space::new().width(0).into()
         };
-        let copy_note: El<'_> = match self.copy_flash {
-            Some((kind, until)) if Instant::now() < until => {
-                let label = match kind {
-                    CopyFlash::Topic => t("已复制 Topic", "Topic copied"),
-                    CopyFlash::Payload => t("已复制内容", "Payload copied"),
-                };
-                text(label).size(fs(11.0)).color(c.accent).into()
-            }
-            _ => Space::new().width(0).into(),
-        };
+        let copy_note = self.copy_note(c);
 
         let toolbar = column![
             row![
@@ -2798,7 +2820,10 @@ impl App {
 
     /// Full display text of one row's payload (no preview cap).
     fn log_body_text(&self, log: &LogRecord) -> String {
-        let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
+        self.log_body_text_fmt(log, PayloadFormat::from_index(self.rt.prefs.log_format))
+    }
+
+    fn log_body_text_fmt(&self, log: &LogRecord, fmt: PayloadFormat) -> String {
         if log.is_payload_kind() {
             payload::render_payload(&log.payload, fmt)
         } else {
@@ -2907,6 +2932,21 @@ impl App {
         row(row_children).width(Length::Fill).into()
     }
 
+    /// Transient confirmation after a copy action; empty when none is pending.
+    fn copy_note(&self, c: &Colors) -> El<'static> {
+        match self.copy_flash {
+            Some((kind, until)) if Instant::now() < until => {
+                let label = match kind {
+                    CopyFlash::Topic => t("已复制 Topic", "Topic copied"),
+                    CopyFlash::Payload => t("已复制 Payload", "Payload copied"),
+                    CopyFlash::Message => t("已复制整条", "Message copied"),
+                };
+                text(label).size(fs(11.0)).color(c.accent).into()
+            }
+            _ => Space::new().width(0).into(),
+        }
+    }
+
     fn detail_back(&self, c: &Colors) -> El<'static> {
         button(text(t("← 返回日志", "← Back to logs")).size(fs(12.0)))
             .padding([4, 8])
@@ -2936,7 +2976,7 @@ impl App {
             .into();
         };
 
-        let fmt = PayloadFormat::from_index(self.rt.prefs.log_format);
+        let fmt = PayloadFormat::from_index(self.detail_format);
         let (body, cut) = if log.is_payload_kind() {
             payload::preview_payload(&log.payload, fmt, payload::LOG_DETAIL_BYTES)
         } else {
@@ -2957,14 +2997,22 @@ impl App {
             text(human_bytes(log.payload.len()))
                 .size(fs(11.0))
                 .color(c.text_faint),
-            button(text(t("复制内容", "Copy payload")).size(fs(11.0)))
+            text(t("格式", "Format"))
+                .size(fs(11.0))
+                .color(c.text_faint),
+            pick(c, &format_opts(), self.detail_format, Msg::DetailFormat),
+            button(text(t("复制Topic", "Copy topic")).size(fs(11.0)))
                 .padding([3, 8])
                 .style(c.ghost_button())
-                .on_press(Msg::CopyLog(log.seq)),
-            button(text(t("复制整行", "Copy row")).size(fs(11.0)))
+                .on_press(Msg::CopyTopic(log.seq)),
+            button(text(t("复制Payload", "Copy payload")).size(fs(11.0)))
                 .padding([3, 8])
                 .style(c.ghost_button())
-                .on_press(Msg::Copy(self.row_text(log))),
+                .on_press(Msg::CopyLog(log.seq, self.detail_format)),
+            button(text(t("复制整条Msg", "Copy message")).size(fs(11.0)))
+                .padding([3, 8])
+                .style(c.ghost_button())
+                .on_press(Msg::CopyDetailRow),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -2986,10 +3034,17 @@ impl App {
                 .color(c.text_faint)
                 .into()
         };
+        let meta_row = row![
+            meta_line,
+            Space::new().width(Length::Fill),
+            self.copy_note(c)
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
 
         let mut panel = column![
             header,
-            meta_line,
+            meta_row,
             scrollable(
                 container(
                     text(body)
@@ -4407,6 +4462,11 @@ mod tests {
         let seq = app.rt.visible_logs().last().unwrap().seq;
 
         app.detail_seq = Some(seq);
+        {
+            let _page = app.view();
+        }
+        // Detail-page format switching (Hex) must render without the global pref.
+        app.detail_format = 2;
         {
             let _page = app.view();
         }
