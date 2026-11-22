@@ -140,6 +140,45 @@ fn v311_roundtrip_preset_and_auto_reply() {
 }
 
 #[test]
+fn overlapping_subscriptions_log_one_recv() {
+    let port = 21909;
+    let _broker = start_broker(port);
+    assert!(wait_for_port(port, Duration::from_secs(10)), "broker did not listen");
+
+    let mut rt = app(port, "3.1.1");
+    // A second filter that also matches mqttc/it/hello, at a different QoS.
+    rt.config.connections[0]
+        .subscriptions
+        .push(SubscriptionConfig {
+            topic: "mqttc/it/hello".into(),
+            qos: 1,
+            ..SubscriptionConfig::default()
+        });
+    assert!(rt.connect());
+    assert!(pump_until(&mut rt, 10, connected), "never reached Connected");
+
+    assert!(rt.publish_form(), "publish failed");
+    assert!(
+        pump_until(&mut rt, 10, |rt| has_log(rt, "RECV", "mqttc/it/hello", b"hello")),
+        "hello was not delivered"
+    );
+    // Let the broker's second copy arrive and drain it.
+    std::thread::sleep(Duration::from_millis(400));
+    rt.poll();
+
+    let rows = rt
+        .visible_logs()
+        .iter()
+        .filter(|log| {
+            log.kind == "RECV" && log.topic == "mqttc/it/hello" && log.payload.as_ref() == b"hello"
+        })
+        .count();
+    assert_eq!(rows, 1, "one publish must log one RECV row");
+    assert_eq!(rt.active_counts().0, 1, "one publish must count once");
+    rt.disconnect();
+}
+
+#[test]
 fn v5_connect_publish_receive() {
     let broker = start_broker_dual(21902, 21903);
     assert!(wait_for_port(21903, Duration::from_secs(10)), "v5 listener missing");

@@ -33,6 +33,11 @@ use crate::theme::{self, CustomPalette, Palette, PaletteField};
 const PERSIST_DEBOUNCE: Duration = Duration::from_millis(400);
 /// Give up after this many consecutive failures; the user can always click Connect.
 const RECONNECT_MAX_ATTEMPTS: u32 = 8;
+/// A broker may forward one publish once per matching subscription. Copies are
+/// written back to back, so only fold an identical RECV inside this window.
+const RECV_FOLD_WINDOW: Duration = Duration::from_millis(250);
+/// Distinct in-flight messages remembered for copy folding.
+const RECV_FOLD_SLOTS: usize = 8;
 
 /// 1s, 2s, 4s … capped at 30s. Exposed for tests and status hints.
 pub fn reconnect_delay(attempt: u32) -> Duration {
@@ -134,6 +139,84 @@ struct ViewCache {
     scanned_through: Option<u64>,
 }
 
+/// Identifies one logical inbound publish. QoS and packet id are left out on
+/// purpose: copies delivered for different subscriptions may use different QoS
+/// and every copy gets its own packet id.
+fn recv_fingerprint(topic: &str, payload: &[u8], meta: &LogMeta) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    topic.hash(&mut hasher);
+    payload.hash(&mut hasher);
+    meta.retain.hash(&mut hasher);
+    meta.dup.hash(&mut hasher);
+    meta.props.hash(&mut hasher);
+    meta.expiry.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Remembers RECV rows whose broker copies have not all arrived yet.
+#[derive(Default)]
+struct RecvFold {
+    /// Fingerprint → (first accepted, copies still expected) within
+    /// [`RECV_FOLD_WINDOW`]. Retained sets can interleave topics, so several
+    /// groups are tracked instead of only the latest row.
+    pending: HashMap<u64, (Instant, usize)>,
+}
+
+impl RecvFold {
+    fn clear(&mut self) {
+        self.pending.clear();
+    }
+
+    /// Returns true when this packet is another copy of a row already logged.
+    fn absorb(&mut self, fingerprint: u64, copies: usize, now: Instant) -> bool {
+        self.pending
+            .retain(|_, (at, _)| now.duration_since(*at) <= RECV_FOLD_WINDOW);
+        if let Some((_, remaining)) = self.pending.get_mut(&fingerprint) {
+            if *remaining > 0 {
+                *remaining -= 1;
+                return true;
+            }
+        }
+        if copies > 1 {
+            if self.pending.len() >= RECV_FOLD_SLOTS {
+                if let Some(oldest) = self
+                    .pending
+                    .iter()
+                    .min_by_key(|(_, (at, _))| *at)
+                    .map(|(key, _)| *key)
+                {
+                    self.pending.remove(&oldest);
+                }
+            }
+            self.pending.insert(fingerprint, (now, copies - 1));
+        }
+        false
+    }
+}
+
+/// How many distinct saved filters match `topic`; that is the number of copies
+/// the broker can deliver for one publish. Falls back to 1 when unknown.
+fn matching_subscription_count(config: &AppConfig, conn_id: &str, topic: &str) -> usize {
+    let Some(conn) = config.connections.iter().find(|conn| conn.id == conn_id) else {
+        return 1;
+    };
+    let mut count = 0;
+    for (index, sub) in conn.subscriptions.iter().enumerate() {
+        let filter = sub.topic.trim();
+        if filter.is_empty() || !crate::filter::topic_matches_filter(topic, filter) {
+            continue;
+        }
+        let seen = conn.subscriptions[..index]
+            .iter()
+            .any(|prev| prev.topic.trim() == filter);
+        if !seen {
+            count += 1;
+        }
+    }
+    count.max(1)
+}
+
 /// Live MQTT client, logs, and timed-publish worker for one saved connection.
 pub struct ConnRuntime {
     pub mqtt: MqttHandle,
@@ -166,6 +249,8 @@ pub struct ConnRuntime {
     pub rule_hits: Vec<u64>,
     /// Last reply time per rule index, for `min_interval_secs`.
     pub rule_last: Vec<Option<Instant>>,
+    /// Broker copies of recent inbound publishes, folded into one log row.
+    recv_fold: RecvFold,
 }
 
 impl Default for ConnRuntime {
@@ -194,6 +279,7 @@ impl ConnRuntime {
             next_reconnect: None,
             rule_hits: Vec::new(),
             rule_last: Vec::new(),
+            recv_fold: RecvFold::default(),
         }
     }
 }
@@ -1393,6 +1479,30 @@ impl AppRuntime {
         self.reconnect_state().is_some()
     }
 
+    /// Brokers forward one publish once per matching subscription. Fold the
+    /// extra copies so the log row, the counter and auto reply see it once.
+    fn absorb_subscription_copy(
+        &mut self,
+        conn_id: &str,
+        topic: &str,
+        payload: &[u8],
+        meta: &LogMeta,
+    ) -> bool {
+        let copies = matching_subscription_count(&self.config, conn_id, topic);
+        // Single-filter connections never fold, so skip hashing their payloads.
+        let has_pending = self
+            .runtime(conn_id)
+            .map(|rt| !rt.recv_fold.pending.is_empty())
+            .unwrap_or(false);
+        if copies < 2 && !has_pending {
+            return false;
+        }
+        let fingerprint = recv_fingerprint(topic, payload, meta);
+        self.runtime_mut(conn_id)
+            .recv_fold
+            .absorb(fingerprint, copies, Instant::now())
+    }
+
     fn handle_mqtt_event(&mut self, conn_id: &str, event: UiEvent) -> Option<i32> {
         match event {
             UiEvent::Connected => {
@@ -1404,6 +1514,7 @@ impl AppRuntime {
                     runtime.manual_stop = false;
                     runtime.rule_hits.clear();
                     runtime.rule_last.clear();
+                    runtime.recv_fold.clear();
                 }
                 self.push_log(
                     conn_id,
@@ -1428,6 +1539,7 @@ impl AppRuntime {
                     let runtime = self.runtime_mut(conn_id);
                     runtime.status = ConnStatus::Disconnected;
                     runtime.last_auto_reply = None;
+                    runtime.recv_fold.clear();
                 }
                 if previous != ConnStatus::Disconnected && !reason.is_empty() {
                     self.push_log(
@@ -1464,19 +1576,17 @@ impl AppRuntime {
                 props,
                 expiry,
             } => {
-                self.push_log_meta(
-                    conn_id,
-                    "RECV",
-                    &topic,
-                    payload.clone(),
-                    LogMeta {
-                        qos: Some(qos),
-                        retain,
-                        dup,
-                        props,
-                        expiry,
-                    },
-                );
+                let meta = LogMeta {
+                    qos: Some(qos),
+                    retain,
+                    dup,
+                    props,
+                    expiry,
+                };
+                if self.absorb_subscription_copy(conn_id, &topic, &payload, &meta) {
+                    return None;
+                }
+                self.push_log_meta(conn_id, "RECV", &topic, payload.clone(), meta);
                 self.maybe_auto_reply(conn_id, &topic, &payload);
             }
             UiEvent::Reason {
@@ -2016,6 +2126,93 @@ mod tests {
             reply_payload: "pong".into(),
             ..AutoReplyRule::default()
         }
+    }
+
+    fn subscribe(rt: &mut AppRuntime, filters: &[(&str, u8)]) {
+        rt.config.connections[0].subscriptions = filters
+            .iter()
+            .map(|(topic, qos)| SubscriptionConfig {
+                topic: (*topic).into(),
+                qos: *qos,
+                ..SubscriptionConfig::default()
+            })
+            .collect();
+    }
+
+    fn recv(rt: &mut AppRuntime, topic: &str, payload: &[u8], qos: u8) {
+        let id = rt.active_id().unwrap();
+        rt.handle_mqtt_event(
+            &id,
+            UiEvent::Recv {
+                topic: topic.into(),
+                payload: payload.to_vec(),
+                qos,
+                retain: false,
+                dup: false,
+                props: Vec::new(),
+                expiry: None,
+            },
+        );
+    }
+
+    #[test]
+    fn overlapping_subscriptions_fold_broker_copies() {
+        let mut rt = runtime_with_conn();
+        subscribe(&mut rt, &[("a/#", 0), ("a/b", 1)]);
+
+        recv(&mut rt, "a/b", b"x", 0);
+        // The copy for the QoS 1 filter differs only in QoS; it still folds.
+        recv(&mut rt, "a/b", b"x", 1);
+        assert_eq!(rt.visible_logs().len(), 1);
+        assert_eq!(rt.active_counts(), (1, 0));
+
+        // A different payload opens a new row with its own single copy.
+        recv(&mut rt, "a/b", b"y", 0);
+        recv(&mut rt, "a/b", b"y", 1);
+        assert_eq!(rt.visible_logs().len(), 2);
+        assert_eq!(rt.active_counts(), (2, 0));
+    }
+
+    #[test]
+    fn three_matching_filters_fold_two_copies() {
+        let mut rt = runtime_with_conn();
+        subscribe(&mut rt, &[("a/#", 0), ("a/+", 0), ("a/b", 0)]);
+        recv(&mut rt, "a/b", b"x", 0);
+        recv(&mut rt, "a/b", b"x", 0);
+        recv(&mut rt, "a/b", b"x", 0);
+        assert_eq!(rt.visible_logs().len(), 1);
+        assert_eq!(rt.active_counts(), (1, 0));
+    }
+
+    #[test]
+    fn single_subscription_keeps_identical_publishes() {
+        let mut rt = runtime_with_conn();
+        subscribe(&mut rt, &[("a/#", 0)]);
+        recv(&mut rt, "a/b", b"x", 0);
+        recv(&mut rt, "a/b", b"x", 0);
+        assert_eq!(rt.visible_logs().len(), 2);
+        assert_eq!(rt.active_counts(), (2, 0));
+    }
+
+    #[test]
+    fn stale_copy_budget_expires() {
+        let mut rt = runtime_with_conn();
+        subscribe(&mut rt, &[("a/#", 0), ("a/b", 0)]);
+        recv(&mut rt, "a/b", b"x", 0);
+
+        let id = rt.active_id().unwrap();
+        for (at, _) in rt
+            .runtimes
+            .get_mut(&id)
+            .unwrap()
+            .recv_fold
+            .pending
+            .values_mut()
+        {
+            *at = Instant::now() - Duration::from_secs(1);
+        }
+        recv(&mut rt, "a/b", b"x", 0);
+        assert_eq!(rt.active_counts(), (2, 0));
     }
 
     #[test]
