@@ -957,6 +957,13 @@ impl AppRuntime {
         };
     }
 
+    /// Clear the subscription-row topic filter.
+    pub fn clear_sub_filter(&mut self) {
+        if let Some(id) = self.active_id() {
+            self.runtime_mut(&id).active_sub_topic.clear();
+        }
+    }
+
     // ------------------------------------------------------------- publish
 
     /// Bottom "Publish" button.
@@ -2085,6 +2092,9 @@ mod tests {
         rt.set_log_filter(String::new());
         rt.toggle_sub_filter("a/#");
         assert_eq!(rt.visible_logs().len(), 1);
+        rt.clear_sub_filter();
+        assert_eq!(rt.visible_logs().len(), 2);
+        rt.toggle_sub_filter("a/#");
         rt.toggle_sub_filter("a/#");
         assert_eq!(rt.visible_logs().len(), 2);
     }

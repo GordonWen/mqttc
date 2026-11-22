@@ -455,6 +455,8 @@ pub enum Msg {
     Unsubscribe(usize),
     FlipSubOption(usize, bool),
     ToggleSub(String),
+    /// Cancel the subscription-row topic filter from the log toolbar.
+    ClearSubFilter,
     Publish,
     /// Ctrl+Enter from anywhere, including the payload editor. The editor also
     /// turns Enter into a newline, so the shortcut restores the pre-edit text.
@@ -1207,6 +1209,7 @@ impl App {
                 self.rt.flip_sub_option(index, no_local);
             }
             Msg::ToggleSub(topic) => self.rt.toggle_sub_filter(&topic),
+            Msg::ClearSubFilter => self.rt.clear_sub_filter(),
             Msg::Publish => {
                 // The form is hidden while the preset palette is open; a
                 // publish must not send an invisible topic/payload.
@@ -2576,7 +2579,7 @@ impl App {
             .on_press_maybe(connected.then_some(Msg::Subscribe));
 
         let status_hint = if connected {
-            t("点击条目筛选 RECV/SEND", "Click a row to filter RECV/SEND")
+            t("点击订阅条目按 Topic 筛选日志", "Click a subscription to filter logs by topic")
         } else {
             t("未连接，连接后即可订阅", "Connect first to subscribe")
         };
@@ -2659,6 +2662,23 @@ impl App {
             Space::new().width(0).into()
         };
         let copy_note = self.copy_note(c);
+        // Active subscription-row filter: click the chip to clear it.
+        let sub_filter = self.rt.active_sub_topic();
+        let filter_chip: El<'_> = if sub_filter.is_empty() {
+            Space::new().width(0).into()
+        } else {
+            button(
+                text(t(
+                    &format!("筛选：{sub_filter}  ×"),
+                    &format!("Filter: {sub_filter}  ×"),
+                ))
+                .size(fs(11.0)),
+            )
+            .padding([3, 8])
+            .style(c.button_kind(ButtonKind::Selected))
+            .on_press(Msg::ClearSubFilter)
+            .into()
+        };
 
         let toolbar = column![
             row![
@@ -2684,6 +2704,7 @@ impl App {
             .spacing(6)
             .align_y(Alignment::Center),
             row![
+                filter_chip,
                 pause_label,
                 Space::new().width(Length::Fill),
                 copy_note,
