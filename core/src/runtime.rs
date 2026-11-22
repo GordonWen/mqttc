@@ -4,6 +4,7 @@
 //! [`RuntimeEvent`]s into an [`EventSink`], so all config/log mutation happens
 //! on the UI thread and behaviour is identical across the egui / Iced / GPUI ports.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -115,10 +116,30 @@ impl PrefsState {
     }
 }
 
+/// Identifies the inputs that can change which rows pass the log filters.
+#[derive(PartialEq, Eq)]
+struct ViewKey {
+    format: i32,
+    kind_filter: i32,
+    filter: String,
+    topic: String,
+}
+
+#[derive(Default)]
+struct ViewCache {
+    key: Option<ViewKey>,
+    /// Seqs of matching rows, oldest first; seqs are contiguous per store.
+    seqs: Vec<u64>,
+    /// Last seq already tested against the current key.
+    scanned_through: Option<u64>,
+}
+
 /// Live MQTT client, logs, and timed-publish worker for one saved connection.
 pub struct ConnRuntime {
     pub mqtt: MqttHandle,
     pub logs: LogStore,
+    /// Incremental filter result; rebuilt only when the filter inputs change.
+    view_cache: RefCell<ViewCache>,
     pub status: ConnStatus,
     /// Bumped on stop/reconnect so the previous timed-publish thread exits.
     pub timed_generation: Arc<AtomicU64>,
@@ -158,6 +179,7 @@ impl ConnRuntime {
         Self {
             mqtt: MqttHandle::new(),
             logs: LogStore::new(),
+            view_cache: RefCell::new(ViewCache::default()),
             status: ConnStatus::Disconnected,
             timed_generation: Arc::new(AtomicU64::new(0)),
             timed_running: false,
@@ -1759,6 +1781,11 @@ impl AppRuntime {
     }
 
     /// Logs that pass the keyword / kind / subscription filters, oldest first.
+    ///
+    /// The result is cached incrementally: a new row is tested once, and the
+    /// full history is only rescanned when the format / kind / keyword / topic
+    /// filters change. Without this, a keyword filter re-rendered and
+    /// lowercased every retained payload on each 100 ms tick.
     pub fn visible_logs(&self) -> Vec<&LogRecord> {
         let Some(id) = self.active_id() else {
             return Vec::new();
@@ -1767,12 +1794,56 @@ impl AppRuntime {
             return Vec::new();
         };
         let format = PayloadFormat::from_index(self.prefs.log_format);
+        let kind_filter = self.prefs.log_kind_filter;
         let filter = self.prefs.log_filter.trim().to_lowercase();
-        let active_topic = runtime.active_sub_topic.clone();
-        runtime
-            .logs
-            .iter()
-            .filter(|log| log_matches(log, format, &filter, self.prefs.log_kind_filter, &active_topic))
+        let topic = runtime.active_sub_topic.clone();
+        let key = ViewKey {
+            format: self.prefs.log_format,
+            kind_filter,
+            filter: filter.clone(),
+            topic: topic.clone(),
+        };
+
+        let mut cache = runtime.view_cache.borrow_mut();
+        if cache.key.as_ref() != Some(&key) {
+            cache.key = Some(key);
+            cache.seqs.clear();
+            cache.scanned_through = None;
+        }
+
+        let first = runtime.logs.first_seq();
+        let last = runtime.logs.last_seq();
+        match first {
+            Some(first_seq) => cache.seqs.retain(|&seq| seq >= first_seq),
+            None => cache.seqs.clear(),
+        }
+
+        if let Some(last_seq) = last {
+            let start = cache
+                .scanned_through
+                .map_or(first.unwrap_or(0), |seq| seq.saturating_add(1))
+                .max(first.unwrap_or(0));
+            if start <= last_seq {
+                let mut matched = Vec::new();
+                for seq in start..=last_seq {
+                    let Some(log) = runtime.logs.get_by_seq(seq) else {
+                        continue;
+                    };
+                    if log_matches(log, format, &filter, kind_filter, &topic) {
+                        matched.push(seq);
+                    }
+                }
+                cache.seqs.extend(matched);
+                cache.scanned_through = Some(last_seq);
+            }
+        } else {
+            cache.scanned_through = None;
+        }
+
+        let seqs = cache.seqs.clone();
+        drop(cache);
+        seqs.into_iter()
+            .filter_map(|seq| runtime.logs.get_by_seq(seq))
             .collect()
     }
 
@@ -2016,6 +2087,45 @@ mod tests {
         assert_eq!(rt.visible_logs().len(), 1);
         rt.toggle_sub_filter("a/#");
         assert_eq!(rt.visible_logs().len(), 2);
+    }
+
+    #[test]
+    fn visible_cache_tracks_appends_and_eviction() {
+        let mut rt = runtime_with_conn();
+        let id = rt.active_id().unwrap();
+        rt.set_log_limit(4);
+        for (kind, payload) in [
+            ("RECV", "match-1"),
+            ("RECV", "other"),
+            ("RECV", "match-2"),
+        ] {
+            rt.push_log(&id, kind, "t", payload.as_bytes().to_vec());
+        }
+        rt.set_log_filter("match".into());
+        assert_eq!(rt.visible_logs().len(), 2);
+
+        // A cached view must notice rows appended after the last scan.
+        rt.push_log(&id, "RECV", "t", b"match-3".to_vec());
+        assert_eq!(rt.visible_logs().len(), 3);
+
+        // The store clamps the limit to 50, so fill it before forcing eviction.
+        let limit = rt.config.log_limit;
+        for i in 0..limit - 4 {
+            rt.push_log(&id, "RECV", "t", format!("filler-{i}").into_bytes());
+        }
+        assert_eq!(rt.visible_logs().len(), 3);
+
+        // Eviction only drops from the front; cached seqs below it disappear.
+        rt.push_log(&id, "RECV", "t", b"other-2".to_vec());
+        let logs = rt.visible_logs();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].payload.as_ref(), b"match-2");
+        assert_eq!(logs[1].payload.as_ref(), b"match-3");
+
+        rt.push_log(&id, "RECV", "t", b"match-4".to_vec());
+        let logs = rt.visible_logs();
+        assert_eq!(logs.len(), 3);
+        assert_eq!(logs[2].payload.as_ref(), b"match-4");
     }
 
     #[test]

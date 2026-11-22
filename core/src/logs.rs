@@ -99,6 +99,22 @@ impl LogStore {
         self.items.iter().find(|log| log.seq == seq)
     }
 
+    /// Smallest and largest seq currently retained; seqs are contiguous.
+    pub fn first_seq(&self) -> Option<u64> {
+        self.items.front().map(|log| log.seq)
+    }
+
+    pub fn last_seq(&self) -> Option<u64> {
+        self.items.back().map(|log| log.seq)
+    }
+
+    /// O(1) lookup: eviction only removes from the front, so seq maps directly
+    /// to an offset from the oldest retained row.
+    pub fn get_by_seq(&self, seq: u64) -> Option<&LogRecord> {
+        let offset = seq.checked_sub(self.first_seq()?)? as usize;
+        self.items.get(offset).filter(|log| log.seq == seq)
+    }
+
     /// Cheap snapshot for export; payloads are shared `Arc`s.
     pub fn to_vec(&self) -> Vec<LogRecord> {
         self.items.iter().cloned().collect()
