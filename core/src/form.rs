@@ -24,7 +24,6 @@ pub struct PresetRow {
     pub qos: i32,
     pub retain: bool,
     pub format: i32,
-    pub pinned: bool,
 }
 
 impl Default for PresetRow {
@@ -36,7 +35,6 @@ impl Default for PresetRow {
             qos: 0,
             retain: false,
             format: 0,
-            pinned: false,
         }
     }
 }
@@ -49,7 +47,6 @@ impl PresetRow {
         preset.qos = self.qos.clamp(0, 2) as u8;
         preset.retain = self.retain;
         preset.format = PayloadFormat::from_index(self.format).to_key().to_string();
-        preset.pinned = self.pinned;
     }
 }
 
@@ -194,7 +191,6 @@ impl FormState {
                 qos: preset.qos.min(2) as i32,
                 retain: preset.retain,
                 format: PayloadFormat::from_key(&preset.format).to_index(),
-                pinned: preset.pinned,
             })
             .collect();
         self.rules = cfg
@@ -344,25 +340,26 @@ impl FormState {
         }
     }
 
-    /// Publish order: pinned presets first, each group in edit-list order.
-    ///
-    /// Returns original indices so callers can still publish by index while
-    /// the presets page keeps its stable editing order.
-    pub fn preset_display_order(&self) -> Vec<usize> {
-        let mut order: Vec<usize> = (0..self.presets.len()).collect();
-        order.sort_by_key(|&index| !self.presets[index].pinned);
-        order
+    /// Move a preset one slot up (-1) or down (+1) in list order.
+    pub fn move_preset(&mut self, index: usize, delta: isize) -> bool {
+        let len = self.presets.len();
+        let target = index as isize + delta;
+        if index >= len || target < 0 || target >= len as isize {
+            return false;
+        }
+        self.presets.swap(index, target as usize);
+        true
     }
 
-    /// Flip the pin flag of one preset. Returns false for a stale index.
-    pub fn toggle_preset_pin(&mut self, index: usize) -> bool {
-        match self.presets.get_mut(index) {
-            Some(preset) => {
-                preset.pinned = !preset.pinned;
-                true
-            }
-            None => false,
+    /// Move a preset to an absolute slot in list order (top = 0).
+    pub fn move_preset_to(&mut self, index: usize, target: usize) -> bool {
+        let len = self.presets.len();
+        if index >= len || target >= len || index == target {
+            return false;
         }
+        let preset = self.presets.remove(index);
+        self.presets.insert(target, preset);
+        true
     }
 
     pub fn add_rule(&mut self) -> usize {
@@ -415,7 +412,6 @@ mod tests {
             qos: 1,
             retain: true,
             format: "json".into(),
-            pinned: true,
         });
         cfg.auto_reply_rules.push(AutoReplyRule {
             enabled: true,
@@ -444,7 +440,6 @@ mod tests {
         assert_eq!(back.publish_presets.len(), 1);
         assert_eq!(back.publish_presets[0].format, "json");
         assert!(back.publish_presets[0].retain);
-        assert!(back.publish_presets[0].pinned);
         assert_eq!(back.auto_reply_rules.len(), 1);
         assert_eq!(back.auto_reply_rules[0].match_topic, "in/#");
         assert_eq!(back.auto_reply_rules[0].min_interval_secs, 5);
@@ -479,18 +474,29 @@ mod tests {
     }
 
     #[test]
-    fn pinned_presets_sort_first() {
+    fn presets_reorder_in_list_order() {
         let mut form = FormState::default();
-        form.add_preset();
-        form.add_preset();
-        form.add_preset();
-        form.presets[1].pinned = true;
-        form.presets[2].pinned = true;
-        assert_eq!(form.preset_display_order(), vec![1, 2, 0]);
+        for name in ["a", "b", "c", "d"] {
+            let index = form.add_preset();
+            form.presets[index].name = name.into();
+        }
+        let names = |form: &FormState| -> Vec<String> {
+            form.presets.iter().map(|p| p.name.clone()).collect()
+        };
 
-        assert!(form.toggle_preset_pin(1));
-        assert_eq!(form.preset_display_order(), vec![2, 0, 1]);
-        assert!(!form.toggle_preset_pin(9));
+        assert!(form.move_preset(1, 1));
+        assert_eq!(names(&form), ["a", "c", "b", "d"]);
+        assert!(!form.move_preset(0, -1));
+        assert!(!form.move_preset(3, 1));
+        assert!(!form.move_preset(9, 1));
+
+        assert!(form.move_preset_to(2, 0));
+        assert_eq!(names(&form), ["b", "a", "c", "d"]);
+        assert!(form.move_preset_to(1, 3));
+        assert_eq!(names(&form), ["b", "c", "d", "a"]);
+        assert!(!form.move_preset_to(0, 0));
+        assert!(!form.move_preset_to(0, 9));
+        assert!(!form.move_preset_to(9, 0));
     }
 
     #[test]

@@ -33,7 +33,7 @@ scripts/              构建、打包与发布脚本
 | 模块 | 职责 |
 |---|---|
 | `model` | `PayloadFormat`、`Skin`、`ConnStatus`、`LogRecord`、Client ID 生成、数值钳制（Keep Alive 1..65535、Timeout 1..300、QoS 0..2、定时 1..3600） |
-| `config` | `ConnectionConfig` / `PublishPreset`（含 `pinned`）/ `AutoReplyRule` / `AppConfig`（含 `custom_palette`、`font_scale`）及 serde 默认值；`mqttc.json` 读写；旧版单连接迁移；`active_id` 修复；预设/规则补齐；原子写（临时文件 + rename，Windows 回退直写） |
+| `config` | `ConnectionConfig` / `PublishPreset`（按列表顺序，可手动调序）/ `AutoReplyRule` / `AppConfig`（含 `custom_palette`、`font_scale`）及 serde 默认值；`mqttc.json` 读写；旧版单连接迁移；`active_id` 修复；预设/规则补齐；原子写（临时文件 + rename，Windows 回退直写） |
 | `payload` | text / json / base64 / hex 编解码，hex 容错（空格、逗号、冒号、连字符），JSON 美化，日志渲染 |
 | `filter` | MQTT `+` / `#` 通配符匹配；关键字 / 类型 / 订阅主题筛选 |
 | `i18n` | 进程级 `AtomicU8` 语言 + `t(zh, en)`；工作线程也能调用 |

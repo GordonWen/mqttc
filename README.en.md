@@ -162,7 +162,8 @@ docs/                BENCHMARK / ARCHITECTURE / PARITY / RELEASING
 `mqttc.json` is compatible with earlier Slint versions. It stores the connection list
 (`connections`), the active connection (`active_id`), appearance (`skin`,
 `custom_palette`, `font_scale`, `language`), log preferences (`log_format`,
-`auto_scroll`) and more; presets support the `pinned` flag. The file is created on first
+`auto_scroll`) and more; presets keep list order and can be reordered in the "Publish
+presets" tab. The file is created on first
 run when missing, and legacy single-connection configs are migrated automatically. Writes
 are atomic (temporary file + rename), and text edits are debounced by 400 ms.
 

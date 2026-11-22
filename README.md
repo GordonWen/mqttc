@@ -143,7 +143,7 @@ docs/                BENCHMARK / ARCHITECTURE / PARITY / RELEASING
 
 `mqttc.json` 与早期 Slint 版本格式兼容：包含连接列表（`connections`）、当前连接
 （`active_id`）、外观（`skin`、`custom_palette`、`font_scale`、`language`）、
-日志偏好（`log_format`、`auto_scroll`）等；预设支持 `pinned` 置顶字段。
+日志偏好（`log_format`、`auto_scroll`）等；预设按列表顺序排列，可在“预设发布”页调整。
 首次运行若不存在会自动创建；旧版单连接配置会自动迁移。写入采用临时文件 + rename
 的原子写，文本编辑做 400ms 防抖。
 

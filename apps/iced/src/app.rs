@@ -103,6 +103,11 @@ enum Icon {
     /// The same pushpin turned needle-down while the window stays on top; the
     /// changed silhouette reads at a glance next to the colour shift.
     PinDown,
+    /// Preset-row reordering: one step up/down, or jump to the top/bottom.
+    ArrowUp,
+    ArrowDown,
+    MoveTop,
+    MoveBottom,
 }
 
 struct IconCanvas {
@@ -128,6 +133,8 @@ impl IconCanvas {
             // Rotated to point straight down, the diagonal glyph's tip would
             // reach past the cell, so the turned variant is drawn smaller.
             Icon::PinDown => (1.05, 6.15),
+            Icon::ArrowUp | Icon::ArrowDown => (1.3, 5.6),
+            Icon::MoveTop | Icon::MoveBottom => (1.2, 6.0),
         };
         Self {
             icon,
@@ -311,6 +318,40 @@ impl canvas::Program<Msg> for IconCanvas {
                     },
                 );
             }
+            Icon::ArrowUp | Icon::ArrowDown | Icon::MoveTop | Icon::MoveBottom => {
+                let up = matches!(self.icon, Icon::ArrowUp | Icon::MoveTop);
+                let jump = matches!(self.icon, Icon::MoveTop | Icon::MoveBottom);
+                let half_w = r * 0.58;
+                let half_h = r * 0.34;
+                // One chevron with its point offset `y` from the glyph centre.
+                let chevron = |y: f32| {
+                    Path::new(|b| {
+                        let (tip, tail) = if up {
+                            (y - half_h, y + half_h)
+                        } else {
+                            (y + half_h, y - half_h)
+                        };
+                        b.move_to(Point::new(cx - half_w, cy + tail));
+                        b.line_to(Point::new(cx, cy + tip));
+                        b.line_to(Point::new(cx + half_w, cy + tail));
+                    })
+                };
+                if jump {
+                    // Two stacked chevrons plus a bar at the destination edge:
+                    // "jump all the way up / down" instead of one step.
+                    let bar = if up { -r * 0.70 } else { r * 0.70 };
+                    frame.stroke(&line(-r * 0.70, bar, r * 0.70, bar), round);
+                    let (near, far) = if up {
+                        (-r * 0.20, r * 0.22)
+                    } else {
+                        (r * 0.20, -r * 0.22)
+                    };
+                    frame.stroke(&chevron(near), round);
+                    frame.stroke(&chevron(far), round);
+                } else {
+                    frame.stroke(&chevron(0.0), round);
+                }
+            }
         }
         vec![frame.into_geometry()]
     }
@@ -464,8 +505,11 @@ pub enum Msg {
     PublishPreset(usize),
     /// Fold the remaining preset buttons open below the publish form.
     TogglePresetPalette,
-    /// Pin or unpin one preset so it sorts first in the publish strip.
-    TogglePresetPin(usize),
+    /// Reorder one preset row: to the top, one step up, one step down, bottom.
+    PresetMoveTop(usize),
+    PresetMoveUp(usize),
+    PresetMoveDown(usize),
+    PresetMoveBottom(usize),
     Format,
     Timed,
     GenId,
@@ -977,6 +1021,12 @@ impl App {
         Task::none()
     }
 
+    /// Flush a preset reorder from the draft form into the saved connection.
+    fn persist_presets(&mut self) {
+        self.rt.apply_form();
+        self.rt.persist();
+    }
+
     fn reload_form(&mut self) {
         self.rt.apply_form();
         self.editor = text_editor::Content::with_text(&self.rt.form.pub_payload);
@@ -1249,10 +1299,25 @@ impl App {
                     self.presets_open = !self.presets_open;
                 }
             }
-            Msg::TogglePresetPin(index) => {
-                if self.rt.form.toggle_preset_pin(index) {
-                    self.rt.apply_form();
-                    self.rt.persist();
+            Msg::PresetMoveTop(index) => {
+                if self.rt.form.move_preset_to(index, 0) {
+                    self.persist_presets();
+                }
+            }
+            Msg::PresetMoveUp(index) => {
+                if self.rt.form.move_preset(index, -1) {
+                    self.persist_presets();
+                }
+            }
+            Msg::PresetMoveDown(index) => {
+                if self.rt.form.move_preset(index, 1) {
+                    self.persist_presets();
+                }
+            }
+            Msg::PresetMoveBottom(index) => {
+                let last = self.rt.form.presets.len().saturating_sub(1);
+                if self.rt.form.move_preset_to(index, last) {
+                    self.persist_presets();
                 }
             }
             Msg::Format => {
@@ -2460,7 +2525,7 @@ impl App {
             self.tab_button(
                 c,
                 SessionTab::Presets,
-                t("预设回复", "Preset replies"),
+                t("预设发布", "Publish presets"),
                 Some(self.rt.form.presets.len())
             ),
             Space::new().width(Length::Fill),
@@ -3175,7 +3240,7 @@ impl App {
     /// Header strip: as many presets as fit at their natural widths, with the
     /// fold toggle kept at the far right.
     fn quick_presets(&self, c: &Colors, available: f32) -> El<'_> {
-        let order = self.rt.form.preset_display_order();
+        let order: Vec<usize> = (0..self.rt.form.presets.len()).collect();
         let widths: Vec<f32> = order
             .iter()
             .map(|&index| {
@@ -3213,7 +3278,7 @@ impl App {
     /// Folded-open preset grid, shown in place of the publish form so long
     /// lists get the whole card body instead of a horizontal scroll.
     fn preset_palette(&self, c: &Colors) -> El<'_> {
-        let order = self.rt.form.preset_display_order();
+        let order: Vec<usize> = (0..self.rt.form.presets.len()).collect();
         let widths: Vec<(usize, f32)> = order
             .iter()
             .map(|&index| {
@@ -3253,8 +3318,8 @@ impl App {
             self.hint(
                 c,
                 t(
-                    "点击预设立即发布；在“发送预设”页点 ☆ 可置顶",
-                    "Click a preset to publish; pin one with ☆ in the Presets tab"
+                    "点击预设立即发布；可在“预设发布”页用行首箭头调整顺序",
+                    "Click a preset to publish; reorder them with the arrows in the Publish presets tab"
                 )
                 .to_string(),
             ),
@@ -3793,29 +3858,43 @@ impl App {
 
     fn page_presets(&self, c: &Colors) -> El<'_> {
         let mut list = column![].spacing(8);
+        let count = self.rt.form.presets.len();
         for (index, preset) in self.rt.form.presets.iter().enumerate() {
             let card = container(
                 column![
                     row![
-                        tooltip(
-                            button(text(if preset.pinned { "★" } else { "☆" }).size(fs(13.0)))
-                                .padding([3, 7])
-                                .style(c.button_kind(if preset.pinned {
-                                    ButtonKind::Selected
-                                } else {
-                                    ButtonKind::Ghost
-                                }))
-                                .on_press(Msg::TogglePresetPin(index)),
-                            container(
-                                text(t("置顶 / 取消置顶", "Pin / unpin"))
-                                    .size(fs(11.0))
-                                    .color(c.text_primary)
-                            )
-                            .padding([4, 7])
-                            .style(c.inset()),
-                            tooltip::Position::Top,
-                        )
-                        .delay(Duration::from_millis(300)),
+                        row![
+                            reorder_button(
+                                c,
+                                Icon::MoveTop,
+                                index > 0,
+                                ("移动到最顶", "Move to top"),
+                                Msg::PresetMoveTop(index),
+                            ),
+                            reorder_button(
+                                c,
+                                Icon::ArrowUp,
+                                index > 0,
+                                ("上移一位", "Move up"),
+                                Msg::PresetMoveUp(index),
+                            ),
+                            reorder_button(
+                                c,
+                                Icon::ArrowDown,
+                                index + 1 < count,
+                                ("下移一位", "Move down"),
+                                Msg::PresetMoveDown(index),
+                            ),
+                            reorder_button(
+                                c,
+                                Icon::MoveBottom,
+                                index + 1 < count,
+                                ("移动到最低", "Move to bottom"),
+                                Msg::PresetMoveBottom(index),
+                            ),
+                        ]
+                        .spacing(1)
+                        .align_y(Alignment::Center),
                         text_input(l("名称", "Name"), &preset.name)
                             .size(fs(13.0))
                             .padding([5, 7])
@@ -3836,10 +3915,24 @@ impl App {
                             .style(c.checkbox_style())
                             .on_toggle(move |v| Msg::PresetRetain(index, v)),
                         pick(c, &format_opts(), preset.format, move |v| Msg::PresetFormat(index, v)),
-                        button(text(t("发送", "Send")).size(fs(12.0)))
-                            .padding([4, 8])
-                            .style(c.primary_button())
-                            .on_press(Msg::PublishPreset(index)),
+                        tooltip(
+                            button(text(t("发送", "Send")).size(fs(12.0)))
+                                .padding([4, 8])
+                                .style(c.primary_button())
+                                .on_press(Msg::PublishPreset(index)),
+                            container(
+                                text(t(
+                                    "立即发布该条的 Topic / 内容 / QoS / Retain",
+                                    "Publish this row's topic, payload, QoS and retain now"
+                                ))
+                                .size(fs(11.0))
+                                .color(c.text_primary),
+                            )
+                            .padding([4, 7])
+                            .style(c.inset()),
+                            tooltip::Position::Top,
+                        )
+                        .delay(Duration::from_millis(300)),
                         button(text("×").size(fs(13.0)))
                             .padding([3, 7])
                             .style(c.danger_button())
@@ -3870,7 +3963,7 @@ impl App {
         scrollable(
             column![
                 row![
-                    self.section(c, &t("发送预设", "Publish presets")),
+                    self.section(c, &t("预设列表", "Preset list")),
                     Space::new().width(Length::Fill),
                     button(text(t("新增预设", "Add preset")).size(fs(12.0)))
                         .padding([5, 10])
@@ -3883,8 +3976,8 @@ impl App {
                 self.hint(
                     c,
                     t(
-                        "★ 置顶的预设排在发布框最前；每行仍可直接发送",
-                        "Pinned (★) presets lead the publish strip; each row can still send"
+                        "预设按列表顺序显示在发布框；行首箭头可调整位置",
+                        "Presets appear in list order in the publish strip; use the row arrows to reorder"
                     )
                 ),
             ]
@@ -4084,6 +4177,37 @@ fn ellipsize(input: &str, max_units: usize) -> (String, bool) {
     (out, true)
 }
 
+/// Compact icon button for the four reorder controls at the head of a preset
+/// row. Disabled at the list boundary so nothing moves in vain.
+fn reorder_button<'a>(
+    c: &Colors,
+    icon: Icon,
+    enabled: bool,
+    tip: (&'static str, &'static str),
+    msg: Msg,
+) -> El<'a> {
+    let color = if enabled { c.text_primary } else { c.text_faint };
+    let button = button(
+        container(IconCanvas::new(icon, color).widget(12.0))
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(22.0))
+            .align_x(Alignment::Center)
+            .align_y(Alignment::Center),
+    )
+    .padding(0)
+    .style(c.button_kind(ButtonKind::Ghost));
+    let button = if enabled { button.on_press(msg) } else { button };
+    tooltip(
+        button,
+        container(text(t(tip.0, tip.1)).size(fs(11.0)).color(c.text_primary))
+            .padding([4, 7])
+            .style(c.inset()),
+        tooltip::Position::Top,
+    )
+    .delay(Duration::from_millis(300))
+    .into()
+}
+
 /// Display caption plus the full text when the caption had to be shortened.
 fn preset_caption(
     preset: &PresetRow,
@@ -4095,13 +4219,8 @@ fn preset_caption(
     } else {
         preset.name.trim().to_string()
     };
-    let full = if preset.pinned {
-        format!("★ {base}")
-    } else {
-        base
-    };
-    let (shown, truncated) = ellipsize(&full, max_units);
-    (shown, truncated.then_some(full))
+    let (shown, truncated) = ellipsize(&base, max_units);
+    (shown, truncated.then_some(base))
 }
 
 fn l(zh: &'static str, en: &'static str) -> &'static str {
@@ -4382,7 +4501,7 @@ mod tests {
     }
 
     /// Preset captions shorten by display width and keep the full text for the
-    /// hover tooltip; pinned entries carry the ★ prefix.
+    /// hover tooltip.
     #[test]
     fn preset_caption_ellipsizes_long_names() {
         let mut preset = PresetRow {
@@ -4398,15 +4517,10 @@ mod tests {
         let (shown, full) = preset_caption(&preset, 0, 12);
         assert_eq!(shown, "OTA");
         assert!(full.is_none());
-
-        preset.name = "OTA".into();
-        preset.pinned = true;
-        let (shown, _) = preset_caption(&preset, 0, 12);
-        assert_eq!(shown, "★ OTA");
     }
 
-    /// With the fold open, every preset (including the empty-name fallback and
-    /// the pinned-first order) must build without touching the runtime.
+    /// With the fold open, every preset (including the empty-name fallback)
+    /// must build without touching the runtime.
     #[test]
     fn preset_palette_builds() {
         let mut app = App::for_test();
@@ -4419,7 +4533,6 @@ mod tests {
                 },
                 topic: format!("demo/{index}"),
                 payload: "x".into(),
-                pinned: index == 7,
                 ..Default::default()
             })
             .collect();
@@ -4438,6 +4551,32 @@ mod tests {
         assert!(app.presets_open);
         let _ = app.update(Msg::TogglePresetPalette);
         assert!(!app.presets_open);
+    }
+
+    /// The four row arrows act on the shared form state and keep plain list
+    /// order (no special pinned-first pass).
+    #[test]
+    fn preset_move_messages_reorder_the_list() {
+        let mut app = App::for_test();
+        app.rt.form.presets = ["a", "b", "c"]
+            .iter()
+            .map(|name| PresetRow {
+                name: (*name).into(),
+                ..Default::default()
+            })
+            .collect();
+        let names = |app: &App| -> Vec<String> {
+            app.rt.form.presets.iter().map(|p| p.name.clone()).collect()
+        };
+
+        let _ = app.update(Msg::PresetMoveTop(2));
+        assert_eq!(names(&app), ["c", "a", "b"]);
+        let _ = app.update(Msg::PresetMoveDown(0));
+        assert_eq!(names(&app), ["a", "c", "b"]);
+        let _ = app.update(Msg::PresetMoveUp(2));
+        assert_eq!(names(&app), ["a", "b", "c"]);
+        let _ = app.update(Msg::PresetMoveBottom(0));
+        assert_eq!(names(&app), ["b", "c", "a"]);
     }
 
     /// Buttons follow their names: two-character names stay narrow, long ones

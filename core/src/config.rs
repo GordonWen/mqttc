@@ -44,9 +44,6 @@ pub struct PublishPreset {
     pub retain: bool,
     #[serde(default = "default_payload_format")]
     pub format: String,
-    /// Pinned presets sort ahead of the rest in the publish strip.
-    #[serde(default)]
-    pub pinned: bool,
 }
 
 impl Default for PublishPreset {
@@ -58,7 +55,6 @@ impl Default for PublishPreset {
             qos: 0,
             retain: false,
             format: default_payload_format(),
-            pinned: false,
         }
     }
 }
@@ -629,7 +625,6 @@ mod tests {
             qos: 1,
             retain: true,
             format: "hex".to_string(),
-            pinned: true,
         });
         conn.auto_reply_echo = "rematch".to_string();
         conn.auto_reply_rules.push(AutoReplyRule {
@@ -681,7 +676,6 @@ mod tests {
         assert_eq!(back.connections[0].publish_presets[0].qos, 1);
         assert!(back.connections[0].publish_presets[0].retain);
         assert_eq!(back.connections[0].publish_presets[0].format, "hex");
-        assert!(back.connections[0].publish_presets[0].pinned);
         assert_eq!(back.connections[0].auto_reply_echo, "rematch");
         assert_eq!(back.connections[0].auto_reply_rules.len(), 1);
         assert!(back.connections[0].auto_reply_rules[0].enabled);
@@ -710,7 +704,6 @@ mod tests {
                 qos: 9,
                 retain: false,
                 format: String::new(),
-                pinned: false,
             },
             PublishPreset {
                 name: "b".into(),

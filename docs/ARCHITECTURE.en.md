@@ -37,7 +37,7 @@ behavioral differences lives in the core, with a single implementation:
 | Module | Responsibility |
 |---|---|
 | `model` | `PayloadFormat`, `Skin`, `ConnStatus`, `LogRecord`, Client ID generation, numeric clamping (Keep Alive 1..65535, Timeout 1..300, QoS 0..2, timed 1..3600) |
-| `config` | `ConnectionConfig` / `PublishPreset` (including `pinned`) / `AutoReplyRule` / `AppConfig` (including `custom_palette`, `font_scale`) and serde defaults; reading and writing `mqttc.json`; legacy single-connection migration; `active_id` repair; preset/rule backfill; atomic writes (temporary file + rename, direct-write fallback on Windows) |
+| `config` | `ConnectionConfig` / `PublishPreset` (list order, manually reorderable) / `AutoReplyRule` / `AppConfig` (including `custom_palette`, `font_scale`) and serde defaults; reading and writing `mqttc.json`; legacy single-connection migration; `active_id` repair; preset/rule backfill; atomic writes (temporary file + rename, direct-write fallback on Windows) |
 | `payload` | text / json / base64 / hex codecs, tolerant hex parsing (spaces, commas, colons, hyphens), JSON pretty-printing, log rendering |
 | `filter` | MQTT `+` / `#` wildcard matching; keyword / type / subscribed-topic filtering |
 | `i18n` | process-level `AtomicU8` language + `t(zh, en)`; callable from worker threads |

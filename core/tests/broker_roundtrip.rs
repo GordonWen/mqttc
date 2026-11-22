@@ -105,7 +105,6 @@ fn v311_roundtrip_preset_and_auto_reply() {
         qos: 0,
         retain: false,
         format: 0,
-        pinned: false,
     }];
     assert!(rt.publish_preset(0), "preset publish failed");
     assert!(
