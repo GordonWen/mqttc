@@ -54,6 +54,9 @@ const LOG_SCROLL_ID: &str = "log-scroll";
 /// a line length the whole panel can offer.
 const LOG_BUBBLE_MAX: f32 = 0.85;
 
+/// How long the toolbar confirms a right-click copy before clearing it.
+const COPY_FLASH: Duration = Duration::from_millis(1600);
+
 // ------------------------------------------------------------- font scale
 
 thread_local! {
@@ -471,6 +474,12 @@ pub enum Msg {
     ShowOlderLogs,
     ClearLogs,
     Copy(String),
+    /// Render the full payload only when the user actually copies it.
+    CopyLog(u64),
+    /// Right-click on a bubble's topic line: copy just the topic.
+    CopyTopic(u64),
+    /// Right-click on a bubble's payload: copy the rendered body.
+    CopyBody(u64),
     CopyRow,
     FocusSearch,
     DroppedFile(PathBuf),
@@ -768,6 +777,13 @@ struct Bench {
     announced: bool,
 }
 
+/// Which right-click copy a toolbar notice is confirming.
+#[derive(Clone, Copy, PartialEq)]
+enum CopyFlash {
+    Topic,
+    Payload,
+}
+
 pub struct App {
     rt: AppRuntime,
     page: i32,
@@ -795,6 +811,8 @@ pub struct App {
     /// sits at 0 when it follows the stream, so a growing offset means the
     /// user scrolled up (wheel or scrollbar) and auto-scroll must stop.
     log_scroll_y: Option<f32>,
+    /// Transient toolbar confirmation for a right-click copy, with its expiry.
+    copy_flash: Option<(CopyFlash, Instant)>,
     /// Connection id waiting for a delete confirmation.
     pending_delete: Option<String>,
     /// “更多颜色” folded open in the custom-palette editor.
@@ -887,6 +905,7 @@ impl App {
             log_window: LOG_RENDER_ROWS,
             log_freeze: None,
             log_scroll_y: None,
+            copy_flash: None,
             pending_delete: None,
             more_colors: false,
             swatch_field: None,
@@ -912,7 +931,7 @@ impl App {
                 .active_id()
                 .map(|id| self.rt.status_of(&id) != ConnStatus::Disconnected)
                 .unwrap_or(false);
-        let every = if busy || self.dirty_at.is_some() {
+        let every = if busy || self.dirty_at.is_some() || self.copy_flash.is_some() {
             Some(Duration::from_millis(100))
         } else if self.rt.prefs.skin_choice == 0 {
             Some(Duration::from_secs(1))
@@ -1080,6 +1099,26 @@ impl App {
             }
             Msg::CancelDelete => self.pending_delete = None,
             Msg::Copy(text) => return iced::clipboard::write(text),
+            Msg::CopyLog(seq) => {
+                if let Some(text) = self.row_by_seq(seq).map(|log| self.log_body_text(log)) {
+                    return iced::clipboard::write(text);
+                }
+            }
+            Msg::CopyTopic(seq) => {
+                if let Some(log) = self.row_by_seq(seq) {
+                    let topic = payload::sanitize_display_text(&log.topic).into_owned();
+                    if !topic.is_empty() {
+                        self.copy_flash = Some((CopyFlash::Topic, Instant::now() + COPY_FLASH));
+                        return iced::clipboard::write(topic);
+                    }
+                }
+            }
+            Msg::CopyBody(seq) => {
+                if let Some(text) = self.row_by_seq(seq).map(|log| self.log_body_text(log)) {
+                    self.copy_flash = Some((CopyFlash::Payload, Instant::now() + COPY_FLASH));
+                    return iced::clipboard::write(text);
+                }
+            }
             Msg::CopyRow => {
                 if let Some(text) = self.current_row_text() {
                     return iced::clipboard::write(text);
@@ -1512,6 +1551,12 @@ impl App {
             }
         }
         self.rt.maybe_persist();
+
+        if let Some((_, until)) = self.copy_flash {
+            if Instant::now() >= until {
+                self.copy_flash = None;
+            }
+        }
 
         if self.rt.prefs.skin_choice == 0 && self.rt.refresh_system_skin() {
             // Palette changed; nothing else to do until the next frame.
@@ -2532,6 +2577,16 @@ impl App {
         } else {
             Space::new().width(0).into()
         };
+        let copy_note: El<'_> = match self.copy_flash {
+            Some((kind, until)) if Instant::now() < until => {
+                let label = match kind {
+                    CopyFlash::Topic => t("已复制 Topic", "Topic copied"),
+                    CopyFlash::Payload => t("已复制内容", "Payload copied"),
+                };
+                text(label).size(fs(11.0)).color(c.accent).into()
+            }
+            _ => Space::new().width(0).into(),
+        };
 
         let toolbar = column![
             row![
@@ -2559,7 +2614,8 @@ impl App {
             row![
                 pause_label,
                 Space::new().width(Length::Fill),
-                button(text(t("复制末行", "Copy last")).size(fs(11.0)))
+                copy_note,
+                button(text(t("复制最新记录", "Copy latest record")).size(fs(11.0)))
                     .padding([4, 9])
                     .style(c.ghost_button())
                     .on_press(Msg::CopyRow),
@@ -2771,8 +2827,6 @@ impl App {
             )
         };
         let bytes = human_bytes(log.payload.len());
-        let copy_text = self.log_body_text(log);
-        let copy_label = t("复制", "Copy");
         let detail_label = t("详情", "Detail");
         let seq = log.seq;
 
@@ -2797,21 +2851,24 @@ impl App {
         // The bubble follows its content: `max_width` reads the width the row
         // offers during layout and caps the line at `LOG_BUBBLE_MAX` of it.
         // Short messages stay narrow instead of stretching into a wide block.
-        let mut header = row![text(topic_line)
+        // Right-click copies just the topic; the payload body below copies the
+        // message itself. Left-click behaviour and wheel scrolling stay as-is.
+        let topic_text = text(topic_line)
             .size(fs(10.5))
             .color(topic_color)
-            .wrapping(Wrapping::WordOrGlyph)]
-        .spacing(6)
-        .align_y(Alignment::Center);
+            .wrapping(Wrapping::WordOrGlyph);
+        let topic_el: El<'_> = if log.topic.is_empty() {
+            topic_text.into()
+        } else {
+            mouse_area(topic_text)
+                .on_right_press(Msg::CopyTopic(seq))
+                .interaction(iced::mouse::Interaction::Pointer)
+                .into()
+        };
+        let mut header = row![topic_el].spacing(6).align_y(Alignment::Center);
         header = header
             .push(Space::new().width(10.0))
             .push(text(bytes).size(fs(10.0)).color(c.text_faint))
-            .push(
-                button(text(copy_label).size(fs(10.0)))
-                    .padding([1, 6])
-                    .style(c.ghost_button())
-                    .on_press(Msg::Copy(copy_text)),
-            )
             .push(
                 button(text(detail_label).size(fs(10.0)))
                     .padding([1, 6])
@@ -2823,11 +2880,15 @@ impl App {
             content = content.push(text(meta).size(fs(10.0)).color(c.text_faint));
         }
         content = content.push(
-            text(body)
-                .size(fs(12.5))
-                .font(mono_font())
-                .color(body_color)
-                .wrapping(Wrapping::WordOrGlyph),
+            mouse_area(
+                text(body)
+                    .size(fs(12.5))
+                    .font(mono_font())
+                    .color(body_color)
+                    .wrapping(Wrapping::WordOrGlyph),
+            )
+            .on_right_press(Msg::CopyBody(seq))
+            .interaction(iced::mouse::Interaction::Pointer),
         );
         let bubble = max_width::max_width(
             container(content).padding([7, 9]).style(c.bubble(bg)),
@@ -2899,7 +2960,7 @@ impl App {
             button(text(t("复制内容", "Copy payload")).size(fs(11.0)))
                 .padding([3, 8])
                 .style(c.ghost_button())
-                .on_press(Msg::Copy(self.log_body_text(log))),
+                .on_press(Msg::CopyLog(log.seq)),
             button(text(t("复制整行", "Copy row")).size(fs(11.0)))
                 .padding([3, 8])
                 .style(c.ghost_button())
