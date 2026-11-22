@@ -456,6 +456,9 @@ pub enum Msg {
     FlipSubOption(usize, bool),
     ToggleSub(String),
     Publish,
+    /// Ctrl+Enter from anywhere, including the payload editor. The editor also
+    /// turns Enter into a newline, so the shortcut restores the pre-edit text.
+    PublishShortcut,
     PublishPreset(usize),
     /// Fold the remaining preset buttons open below the publish form.
     TogglePresetPalette,
@@ -788,6 +791,16 @@ enum CopyFlash {
     Message,
 }
 
+/// What the payload editor's last Enter edit changed, so the Ctrl+Enter
+/// shortcut can undo it before publishing. The focused editor sees the
+/// keystroke first, so its newline must be rolled back.
+struct EnterUndo {
+    at: Instant,
+    text: String,
+    /// Enter replaced a selection; a plain Backspace cannot restore it.
+    replaced_selection: bool,
+}
+
 pub struct App {
     rt: AppRuntime,
     page: i32,
@@ -801,6 +814,8 @@ pub struct App {
     /// Inline previews keyed by `LogRecord::seq` (format tag, rendered text).
     /// Cleared on connection switch / clear / format change.
     preview_cache: RefCell<HashMap<u64, (i32, String)>>,
+    /// Undo record for the payload editor's last Enter edit; see [`EnterUndo`].
+    editor_enter: Option<EnterUndo>,
     /// Expanded row shown instead of the log list. Cleared on tab / connection change.
     detail_seq: Option<u64>,
     /// Format index for the open detail page; reseeded from the global log
@@ -908,6 +923,7 @@ impl App {
             bench,
             dirty_at: None,
             preview_cache: RefCell::new(HashMap::new()),
+            editor_enter: None,
             detail_seq: None,
             detail_format: 0,
             log_window: LOG_RENDER_ROWS,
@@ -1192,9 +1208,31 @@ impl App {
             }
             Msg::ToggleSub(topic) => self.rt.toggle_sub_filter(&topic),
             Msg::Publish => {
-                // The form is hidden while the preset palette is open; an
-                // Enter press should not publish an invisible topic/payload.
+                // The form is hidden while the preset palette is open; a
+                // publish must not send an invisible topic/payload.
                 if !self.presets_open {
+                    self.rt.apply_form();
+                    self.rt.publish_form();
+                }
+            }
+            Msg::PublishShortcut => {
+                if !self.presets_open {
+                    // The focused editor handles the same keystroke first and
+                    // turns it into a newline; undo that edit before publishing.
+                    if let Some(undo) = self.editor_enter.take() {
+                        if undo.at.elapsed() < Duration::from_millis(200) {
+                            if undo.replaced_selection {
+                                self.editor =
+                                    text_editor::Content::with_text(&undo.text);
+                                self.rt.form.pub_payload = undo.text;
+                            } else {
+                                self.editor.perform(text_editor::Action::Edit(
+                                    text_editor::Edit::Backspace,
+                                ));
+                                self.rt.form.pub_payload = self.editor.text();
+                            }
+                        }
+                    }
                     self.rt.apply_form();
                     self.rt.publish_form();
                 }
@@ -1555,6 +1593,18 @@ impl App {
                 return self.touched();
             }
             Msg::PubEdit(action) => {
+                if matches!(
+                    &action,
+                    text_editor::Action::Edit(text_editor::Edit::Enter)
+                ) {
+                    self.editor_enter = Some(EnterUndo {
+                        at: Instant::now(),
+                        text: self.editor.text(),
+                        replaced_selection: self.editor.selection().is_some(),
+                    });
+                } else if self.editor_enter.is_some() {
+                    self.editor_enter = None;
+                }
                 let is_edit = action.is_edit();
                 self.editor.perform(action);
                 if is_edit {
@@ -3271,7 +3321,7 @@ impl App {
             // row, leaving the log area that much taller.
             self.hint(
                 c,
-                t("Enter 或 Ctrl+Enter 发布", "Enter or Ctrl+Enter publishes").to_string(),
+                t("Ctrl+Enter 发布", "Ctrl+Enter publishes").to_string(),
             ),
             button(text(t("发布", "Publish")).size(fs(12.0)))
                 .padding([5, 14])
@@ -3900,10 +3950,10 @@ fn open_url(url: &'static str) {
 }
 
 /// Global shortcuts + window file drops. Ctrl-modified keys are handled even
-/// while an input has focus; bare Enter only when no widget consumed it.
+/// while an input has focus.
 fn event_message(
     event: iced::Event,
-    status: iced::event::Status,
+    _status: iced::event::Status,
     _window: iced::window::Id,
 ) -> Option<Msg> {
     use iced::keyboard::{key::Named, Event as KeyEvent, Key};
@@ -3931,11 +3981,8 @@ fn event_message(
             return Some(Msg::ClearLogs);
         }
         if key == Key::Named(Named::Enter) {
-            return Some(Msg::Publish);
+            return Some(Msg::PublishShortcut);
         }
-    }
-    if status == iced::event::Status::Ignored && key == Key::Named(Named::Enter) {
-        return Some(Msg::Publish);
     }
     None
 }
@@ -4486,6 +4533,42 @@ mod tests {
         {
             let _page = app.view();
         }
+    }
+
+    /// Ctrl+Enter publishes; the focused editor handles the same keystroke
+    /// first (inserting a newline), so the shortcut must undo that edit.
+    #[test]
+    fn publish_shortcut_undoes_the_editor_enter() {
+        let mut app = App::for_test();
+        let before = app.editor.text();
+        let _ = app.update(Msg::PubEdit(text_editor::Action::Edit(
+            text_editor::Edit::Enter,
+        )));
+        assert_ne!(app.editor.text(), before);
+        let _ = app.update(Msg::PublishShortcut);
+        assert_eq!(app.editor.text(), before);
+
+        // A stale Enter is a real line break and must stay.
+        let _ = app.update(Msg::PubEdit(text_editor::Action::Edit(
+            text_editor::Edit::Enter,
+        )));
+        app.editor_enter = Some(EnterUndo {
+            at: Instant::now() - Duration::from_secs(1),
+            text: before.clone(),
+            replaced_selection: false,
+        });
+        let _ = app.update(Msg::PublishShortcut);
+        assert_ne!(app.editor.text(), before);
+
+        // A selection replaced by the editor's Enter is restored as well.
+        app.editor = text_editor::Content::with_text("hello");
+        let _ = app.update(Msg::PubEdit(text_editor::Action::SelectAll));
+        let _ = app.update(Msg::PubEdit(text_editor::Action::Edit(
+            text_editor::Edit::Enter,
+        )));
+        assert_eq!(app.editor.text(), "\n");
+        let _ = app.update(Msg::PublishShortcut);
+        assert_eq!(app.editor.text(), "hello");
     }
 
     /// Auto-scroll off pins the visible page by value, not by index: once the
