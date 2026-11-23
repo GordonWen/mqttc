@@ -61,7 +61,7 @@ Both builds are feature-complete; the differences are implementation-level:
   macOS / Linux call `defaults` / `gsettings` and cache the result for 30 seconds. The
   early Slint build used Slint's built-in detection.
 - **Session-page additions**: Iced's session header shows received / sent counts for the
-  current connection with a reset button, and names the preset tab "Preset replies";
+  current connection with a reset button, and names the preset tab "Publish presets";
   egui / GPUI show no traffic counters. All three share the same log-limit setting.
 - **Multi-line payloads**: both egui and Iced provide multi-line editors; Hex / Base64
   tolerance rules match the early version.

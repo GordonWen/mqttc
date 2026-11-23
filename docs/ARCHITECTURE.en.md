@@ -45,7 +45,7 @@ behavioral differences lives in the core, with a single implementation:
 | `platform` | system dark/light detection: Windows reads the registry (cached for 1s); macOS `defaults` / Linux `gsettings` (result cached for 30s to avoid frequent process spawning) |
 | `mqtt` | `MqttHandle`: rumqttc 0.25.1, dual 3.1.1 and 5.0 clients; generation invalidates old threads; channel capacity 32; Keep Alive / Clean / Timeout / Will; rustls custom CA, client certificate, skip verification |
 | `logs` | one `VecDeque<LogRecord>` per connection, default cap `MAX_LOGS = 200` (adjustable 50–2000 in settings); stores only raw bytes as `Arc<[u8]>` and re-renders when the display format changes |
-| `form` | `FormState`: string/boolean drafts for every field on the edit and session pages, plus preset rows and rule rows; `from_config` / `apply_to` / row add and remove; preset pinning and display ordering |
+| `form` | `FormState`: string/boolean drafts for every field on the edit and session pages, plus preset rows and rule rows; `from_config` / `apply_to` / row add and remove; preset move up/down/top/bottom |
 | `runtime` | `AppRuntime`: config, forms, per-connection `ConnRuntime`, page state, preferences; action entry points and the auto-reply / timed-publish state machines |
 | `export` | log export to `logs/` next to the exe (CSV / text, timestamped filenames) |
 | `cli` | parsing for `--bench --bench-scenario s1..s4 --bench-quit-after N --config <path>` |
@@ -112,7 +112,7 @@ UI thread                                  worker threads (1 per connection + ti
 | CJK font | fontique system fallback (no bundled CJK) | cosmic-text system fallback, default family per platform (YaHei / PingFang) | system font fallback |
 | Dropdown / selection | `ComboBox` | `pick_list` | custom click-to-cycle selector (no popup) |
 | Input | `TextEdit` (passwords via `password(true)`) | `text_input` / `text_editor` | IME `TextInput` ported from the official example (supports password masking) |
-| Page structure | global sidebar pages + subscription card in the session | 4 sidebar pages + session tabs (logs / subscriptions / auto-reply / preset replies) | global sidebar pages |
+| Page structure | global sidebar pages + subscription card in the session | 4 sidebar pages + session tabs (logs / subscriptions / auto-reply / publish presets) | global sidebar pages |
 | Title bar | native title bar | frameless + custom-drawn title bar (with always-on-top pushpin) | custom-drawn `TitlebarOptions` |
 
 GPUI trade-offs (read-only rule/preset edit pages, etc.) are documented item by item in
@@ -137,7 +137,7 @@ GPUI trade-offs (read-only rule/preset edit pages, etc.) are documented item by 
 ## 6. Tests
 
 ```text
-cargo test -p mqttc-core          # 70 tests: codecs, wildcards, filtering, config migration/round-trip, skins/custom palette, font clamping, auto-reply, form clamping, 200 cap
+cargo test -p mqttc-core          # 75 tests: codecs, wildcards, filtering, config migration/round-trip, skins/custom palette, font clamping, auto-reply, form clamping, 200 cap
 cargo test -p mqttc-core --test broker_e2e        # 3 tests: dual-protocol connect, subscribe, publish, disconnect
 cargo test -p mqttc-core --test broker_roundtrip  # 5 tests + 1 #[ignore] TLS: connect/subscribe/publish/receive/auto-reply/timed/reconnect/200 cap
 cargo test -p mqttc-iced          # 15 tests: page construction, preset collapsing, large font, delete confirmation, etc.

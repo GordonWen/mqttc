@@ -12,9 +12,9 @@ Get the latest build from [Releases](https://github.com/GordonWen/mqttc/releases
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 x64 | `mqttc-v1.1.0-windows-x64.zip` | Unzip and run `mqttc.exe` |
-| Linux x64 | `mqttc-v1.1.0-linux-x64.tar.gz` | Requires glibc 2.35+, libxkbcommon, Wayland or X11 |
-| macOS 11+ | `mqttc-v1.1.0-macos-universal.zip` | Universal (Apple Silicon + Intel); unsigned |
+| Windows 10/11 x64 | `mqttc-v1.2.0-windows-x64.zip` | Unzip and run `mqttc.exe` |
+| Linux x64 | `mqttc-v1.2.0-linux-x64.tar.gz` | Requires glibc 2.35+, libxkbcommon, Wayland or X11 |
+| macOS 11+ | `mqttc-v1.2.0-macos-universal.zip` | Universal (Apple Silicon + Intel); unsigned |
 
 `mqttc.json` and exported `logs/` live next to the executable. Nothing is written to the
 registry or the user profile, so the whole folder can travel on a USB stick.
@@ -50,25 +50,30 @@ processes; see the [benchmark report](docs/BENCHMARK.en.md)):
 - MQTT 3.1.1 and 5.0; QoS 0/1/2, Clean Session, Keep Alive, connect timeout, Last Will
 - TLS: system roots, custom CA (trust that CA only), client certificate / private key,
   skip certificate verification
-- Session tabs: Logs / Subscriptions / Auto-reply / Preset replies, all scoped to the
+- Session tabs: Logs / Subscriptions / Auto-reply / Publish presets, all scoped to the
   current connection
-- Subscriptions: `+` / `#` wildcards, per-QoS subscribe, QoS shown in the list, click a
-  subscription to use it as a log filter
+- Subscriptions: `+` / `#` wildcards, per-QoS subscribe, QoS shown in the list; click a
+  subscription to filter logs by topic, and clear the filter chip to show everything again
 - Publish: convert between Text / JSON / Base64 / Hex, pretty-print JSON, QoS and retain
-  flag
+  flag; long text wraps, a scrollbar appears once it exceeds four lines, Ctrl+Enter
+  publishes and Enter inserts a newline
 - Timed publish: 1–3600 s interval
-- Preset sending: send several publish presets with one click; pin frequently used ones,
-  and the preset bar collapses automatically when names do not fit
+- Preset sending: send several publish presets with one click; move rows up, down, to the
+  top or to the bottom, and the preset bar collapses automatically when names do not fit
 - Auto-reply: match by subscribed topic / keyword / payload content; the first matching
   rule in order replies
 - Chat-style logs: sent/received bubbles, system events, error hints; bubble width adapts to
   content; only the newest 80 rows are laid out, with "Show older" and "Jump to latest";
   search, type filters, display-format switch, auto-scroll, freeze while scrolled up,
-  export, clear; large payload previews are truncated and can be expanded up to 16 KB
+  export, clear; right-click a bubble to copy its topic or payload, and the detail page
+  switches format and copies topic, payload or the whole message; large payload previews
+  are truncated and can be expanded up to 16 KB
 - The session header shows received / sent counts with a one-click reset; the log buffer can
   pause capture and adjust its history limit in settings; export the current filtered
   results or all records, with the connection name and a millisecond timestamp in the
   filename
+- Overlapping subscriptions log one row: a message matching several subscriptions is shown,
+  counted and auto-replied once
 - Chinese and English UI; 7 skins: follow system / dark / light / blue / green / purple /
   custom (27 adjustable color slots)
 - 4 UI text sizes that scale the whole window proportionally; frameless window with a
@@ -127,7 +132,7 @@ build and test details for all three are in
 
 ```bash
 cargo test -p mqttc-core        # codec, wildcards, filtering, config migration, auto-reply, form clamping
-cargo test -p mqttc-iced        # 15 page build smoke tests
+cargo test -p mqttc-iced        # 17 page build smoke tests
 cargo test -p mqttc-core --test broker_roundtrip   # end-to-end with embedded rumqttd broker
 ```
 

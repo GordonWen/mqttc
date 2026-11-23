@@ -41,7 +41,7 @@ scripts/              构建、打包与发布脚本
 | `platform` | 系统深浅色检测：Windows 读注册表（缓存 1s）；macOS `defaults` / Linux `gsettings`（结果缓存 30s，避免频繁起进程） |
 | `mqtt` | `MqttHandle`：rumqttc 0.25.1，3.1.1 与 5.0 双客户端；generation 失效旧线程；通道容量 32；Keep Alive / Clean / Timeout / Will；rustls 自定义 CA、客户端证书、跳过校验 |
 | `logs` | 每连接 `VecDeque<LogRecord>`，默认上限 `MAX_LOGS = 200`（设置可调 50–2000）；只存原始字节 `Arc<[u8]>`，切换显示格式时重渲染 |
-| `form` | `FormState`：编辑页与会话页所有字段的字符串/布尔草稿 + 预设行 + 规则行；`from_config` / `apply_to` / 行增删；预设置顶与显示排序 |
+| `form` | `FormState`：编辑页与会话页所有字段的字符串/布尔草稿 + 预设行 + 规则行；`from_config` / `apply_to` / 行增删；预设上下移动与置顶/置底 |
 | `runtime` | `AppRuntime`：配置、表单、每连接 `ConnRuntime`、页面状态、偏好；动作入口与自动回复/定时发布状态机 |
 | `export` | 日志导出到 exe 同目录 `logs/`（CSV / 文本，文件名带时间戳） |
 | `cli` | `--bench --bench-scenario s1..s4 --bench-quit-after N --config <path>` 解析 |
@@ -97,7 +97,7 @@ UI 线程                                  工作线程（每连接 1 个 + 定�
 | 中文字体 | fontique 系统字体回退（不打包 CJK） | cosmic-text 系统回退，默认族按平台选 YaHei / PingFang | 系统字体回退 |
 | 下拉/选择 | `ComboBox` | `pick_list` | 自绘点击循环选择器（无弹出层） |
 | 输入 | `TextEdit`（密码 `password(true)`） | `text_input` / `text_editor` | 从官方 example 移植的 IME `TextInput`（支持密码遮罩） |
-| 页面结构 | 侧栏全局页 + 会话内订阅卡 | 侧栏 4 页 + 会话标签（日志 / 订阅 / 自动回复 / 预设回复） | 侧栏全局页 |
+| 页面结构 | 侧栏全局页 + 会话内订阅卡 | 侧栏 4 页 + 会话标签（日志 / 订阅 / 自动回复 / 预设发布） | 侧栏全局页 |
 | 标题栏 | 原生标题栏 | 无边框 + 自绘标题栏（含置顶图钉） | 自绘 `TitlebarOptions` |
 
 GPUI 的取舍（规则/预设编辑页只读等）在 [PARITY.md](PARITY.md) 中逐条记录。
@@ -116,10 +116,10 @@ GPUI 的取舍（规则/预设编辑页只读等）在 [PARITY.md](PARITY.md) �
 ## 6. 测试
 
 ```text
-cargo test -p mqttc-core          # 70 项：编解码、通配符、筛选、配置迁移/往返、皮肤/自定义配色、字号钳制、自动回复、表单钳制、200 上限
+cargo test -p mqttc-core          # 75 项：编解码、通配符、筛选、配置迁移/往返、皮肤/自定义配色、字号钳制、自动回复、表单钳制、200 上限
 cargo test -p mqttc-core --test broker_e2e        # 3 项：双协议连接、订阅、发布、断开
 cargo test -p mqttc-core --test broker_roundtrip  # 5 项 + 1 #[ignore] TLS：连接/订阅/发布/接收/自动回复/定时/重连/200 上限
-cargo test -p mqttc-iced          # 15 项：页面构建、预设折叠、大字号、删除确认等
+cargo test -p mqttc-iced          # 17 项：页面构建、预设折叠、大字号、删除确认等
 ```
 
 本地集成测试使用 `tools/test-broker` 的 `start_broker`（rumqttd 0.20 内嵌），不使用公网服务；
