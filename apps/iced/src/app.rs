@@ -48,6 +48,12 @@ const LOG_RENDER_ROWS: usize = 80;
 /// Widget id of the log list: scroll events identify a manual review, and
 /// "回到最新" snaps this list back to the end.
 const LOG_SCROLL_ID: &str = "log-scroll";
+/// Widget id of the payload editor's viewport. Wheel lines are translated to
+/// this list so its scrollbar mirrors the log list instead of scrolling text
+/// inside the editor's own fixed-height field.
+const PUB_SCROLL_ID: &str = "pub-scroll";
+/// Payload editor text size; wheel translation uses the matching line height.
+const PUB_EDITOR_TEXT_SIZE: f32 = 12.5;
 
 /// Widest share of the log list a bubble may reach. Bubbles shrink to their
 /// content below this, so short messages stay narrow while long payloads get
@@ -1032,6 +1038,28 @@ impl App {
         self.editor = text_editor::Content::with_text(&self.rt.form.pub_payload);
     }
 
+    /// Whether the payload caret sits at the very end of the text.
+    fn editor_at_end(&self) -> bool {
+        let cursor = self.editor.cursor();
+        let last = self.editor.line_count().saturating_sub(1);
+        cursor.position.line == last
+            && self
+                .editor
+                .line(cursor.position.line)
+                .is_some_and(|line| cursor.position.column >= line.text.len())
+    }
+
+    /// Snap the payload viewport to the end after typing at the end.
+    fn snap_pub_editor(&self) -> Task<Msg> {
+        iced::widget::operation::snap_to(
+            iced::widget::Id::new(PUB_SCROLL_ID),
+            iced::widget::operation::RelativeOffset {
+                x: None,
+                y: Some(1.0),
+            },
+        )
+    }
+
     /// Back to one page of rows. With auto-scroll off, pin the newest page so
     /// a filter or session switch does not slide with the incoming stream.
     fn reset_log_window(&mut self) {
@@ -1661,6 +1689,19 @@ impl App {
                 return self.touched();
             }
             Msg::PubEdit(action) => {
+                // The editor grows inside the scrollable viewport, so its own
+                // wheel scrolling would move text inside the clipped field.
+                // Forward wheel lines to the viewport so its bar is used.
+                if let text_editor::Action::Scroll { lines } = action {
+                    let line_height = fs(PUB_EDITOR_TEXT_SIZE) * 1.3;
+                    return iced::widget::operation::scroll_by(
+                        iced::widget::Id::new(PUB_SCROLL_ID),
+                        iced::widget::operation::AbsoluteOffset {
+                            x: 0.0,
+                            y: lines as f32 * line_height,
+                        },
+                    );
+                }
                 if matches!(
                     &action,
                     text_editor::Action::Edit(text_editor::Edit::Enter)
@@ -1674,10 +1715,19 @@ impl App {
                     self.editor_enter = None;
                 }
                 let is_edit = action.is_edit();
+                let follow = matches!(
+                    &action,
+                    text_editor::Action::Edit(_) | text_editor::Action::Move(_)
+                );
                 self.editor.perform(action);
+                let snap = follow && self.editor_at_end();
                 if is_edit {
                     self.rt.form.pub_payload = self.editor.text();
-                    return self.touched();
+                    let task = self.touched();
+                    return if snap { self.snap_pub_editor() } else { task };
+                }
+                if snap {
+                    return self.snap_pub_editor();
                 }
             }
         }
@@ -3419,26 +3469,54 @@ impl App {
         .width(Length::Fill);
 
         let body: El<'_> = if palette_open {
-            self.preset_palette(c)
+            container(self.preset_palette(c))
+                .width(Length::Fill)
+                .padding(Padding {
+                    right: 8.0,
+                    ..Padding::default()
+                })
+                .into()
         } else {
-            column![
-                topic_row,
-                props_row,
-                // 81 = 2 * 8 padding + 4 * 16.25 line height (12.5 * 1.3):
-                // the text area must hold a whole number of lines, otherwise
-                // tiny-skia draws the partial edge lines outside the field and
-                // they overlap the widgets above/below.
-                text_editor(&self.editor)
-                    .height(81)
-                    .padding(8)
-                    .size(fs(12.5))
-                    .font(mono_font())
-                    .style(c.editor_style())
-                    .on_action(Msg::PubEdit),
-                timed_row,
-            ]
-            .spacing(6)
-            .into()
+            let rows = container(column![topic_row, props_row].spacing(6))
+                .width(Length::Fill)
+                .padding(Padding {
+                    right: 8.0,
+                    ..Padding::default()
+                });
+            // The viewport keeps four text lines (81 = 2 * 8 padding + 4 *
+            // 16.25 line height at 12.5 pt). A `Stack` holds that height as a
+            // backdrop instead of passing it to the scrollable as a minimum:
+            // with a fixed scrollable height the editor would be clamped to
+            // 81 there and then add its own padding, making the content 97 px
+            // and the scrollbar permanently visible. Here the editor shrinks
+            // to `min_height` + padding, so the bar only shows once the text
+            // really overflows.
+            let editor = Stack::with_children([
+                Space::new().width(Length::Fill).height(81).into(),
+                scrollable(
+                    text_editor(&self.editor)
+                        .wrapping(Wrapping::WordOrGlyph)
+                        .padding(Padding {
+                            top: 8.0,
+                            right: 14.0,
+                            bottom: 8.0,
+                            left: 8.0,
+                        })
+                        .min_height(65.0)
+                        .size(fs(PUB_EDITOR_TEXT_SIZE))
+                        .font(mono_font())
+                        .style(c.editor_style())
+                        .on_action(Msg::PubEdit),
+                )
+                .id(iced::widget::Id::new(PUB_SCROLL_ID))
+                .height(Length::Shrink)
+                .into(),
+            ]);
+            let timed = container(timed_row).width(Length::Fill).padding(Padding {
+                right: 8.0,
+                ..Padding::default()
+            });
+            column![rows, editor, timed].spacing(6).into()
         };
 
         let colors = *c;
@@ -3452,20 +3530,30 @@ impl App {
         })
         .height(Length::Shrink);
 
-        container(
-            column![
-                row![
-                    self.section(c, &t("发布", "Publish")),
-                    quick,
-                ]
-                .align_y(Alignment::Center),
-                body,
+        let header = container(
+            row![
+                self.section(c, &t("发布", "Publish")),
+                quick,
             ]
-            .spacing(6),
+            .align_y(Alignment::Center),
         )
-        .padding(10)
-        .style(c.inset())
-        .into()
+        .width(Length::Fill)
+        .padding(Padding {
+            right: 8.0,
+            ..Padding::default()
+        });
+
+        container(column![header, body].spacing(6))
+            // Same asymmetric padding as the log card, so both scrollbars hug
+            // the card border at the same x position.
+            .padding(Padding {
+                top: 10.0,
+                right: 2.0,
+                bottom: 10.0,
+                left: 10.0,
+            })
+            .style(c.inset())
+            .into()
     }
 
     /// One row of the custom-palette editor: chip, name, hex box, reset.
