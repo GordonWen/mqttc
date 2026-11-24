@@ -111,11 +111,6 @@ enum Icon {
     /// The same pushpin turned needle-down while the window stays on top; the
     /// changed silhouette reads at a glance next to the colour shift.
     PinDown,
-    /// Preset-row reordering: one step up/down, or jump to the top/bottom.
-    ArrowUp,
-    ArrowDown,
-    MoveTop,
-    MoveBottom,
 }
 
 struct IconCanvas {
@@ -141,8 +136,6 @@ impl IconCanvas {
             // Rotated to point straight down, the diagonal glyph's tip would
             // reach past the cell, so the turned variant is drawn smaller.
             Icon::PinDown => (1.05, 6.15),
-            Icon::ArrowUp | Icon::ArrowDown => (1.3, 5.6),
-            Icon::MoveTop | Icon::MoveBottom => (1.2, 6.0),
         };
         Self {
             icon,
@@ -325,40 +318,6 @@ impl canvas::Program<Msg> for IconCanvas {
                         rule: canvas::fill::Rule::EvenOdd,
                     },
                 );
-            }
-            Icon::ArrowUp | Icon::ArrowDown | Icon::MoveTop | Icon::MoveBottom => {
-                let up = matches!(self.icon, Icon::ArrowUp | Icon::MoveTop);
-                let jump = matches!(self.icon, Icon::MoveTop | Icon::MoveBottom);
-                let half_w = r * 0.58;
-                let half_h = r * 0.34;
-                // One chevron with its point offset `y` from the glyph centre.
-                let chevron = |y: f32| {
-                    Path::new(|b| {
-                        let (tip, tail) = if up {
-                            (y - half_h, y + half_h)
-                        } else {
-                            (y + half_h, y - half_h)
-                        };
-                        b.move_to(Point::new(cx - half_w, cy + tail));
-                        b.line_to(Point::new(cx, cy + tip));
-                        b.line_to(Point::new(cx + half_w, cy + tail));
-                    })
-                };
-                if jump {
-                    // Two stacked chevrons plus a bar at the destination edge:
-                    // "jump all the way up / down" instead of one step.
-                    let bar = if up { -r * 0.70 } else { r * 0.70 };
-                    frame.stroke(&line(-r * 0.70, bar, r * 0.70, bar), round);
-                    let (near, far) = if up {
-                        (-r * 0.20, r * 0.22)
-                    } else {
-                        (r * 0.20, -r * 0.22)
-                    };
-                    frame.stroke(&chevron(near), round);
-                    frame.stroke(&chevron(far), round);
-                } else {
-                    frame.stroke(&chevron(0.0), round);
-                }
             }
         }
         vec![frame.into_geometry()]
@@ -598,6 +557,7 @@ pub enum Msg {
     AddRule,
     DelRule(usize),
     MoveRule(usize, isize),
+    MoveRuleTo(usize, usize),
     RuleEnabled(usize, bool),
     RuleRetain(usize, bool),
     RuleNum(usize, i32),
@@ -1569,6 +1529,9 @@ impl App {
             }
             Msg::MoveRule(index, delta) => {
                 self.rt.move_rule(index, delta);
+            }
+            Msg::MoveRuleTo(index, target) => {
+                self.rt.move_rule_to(index, target);
             }
             Msg::ResetRuleStats => self.rt.reset_rule_stats(),
             Msg::RuleInterval(index, value) => {
@@ -3972,16 +3935,15 @@ impl App {
                         ))
                         .size(fs(10.0))
                         .color(c.text_faint),
-                        button(text("↑").size(fs(12.0)))
-                            .padding([2, 5])
-                            .style(c.ghost_button())
-                            .on_press_maybe((index > 0).then_some(Msg::MoveRule(index, -1))),
-                        button(text("↓").size(fs(12.0)))
-                            .padding([2, 5])
-                            .style(c.ghost_button())
-                            .on_press_maybe(
-                                (index + 1 < total).then_some(Msg::MoveRule(index, 1)),
-                            ),
+                        reorder_controls(
+                            c,
+                            index,
+                            total,
+                            Msg::MoveRuleTo(index, 0),
+                            Msg::MoveRule(index, -1),
+                            Msg::MoveRule(index, 1),
+                            Msg::MoveRuleTo(index, total.saturating_sub(1)),
+                        ),
                         button(text("×").size(fs(13.0)))
                             .padding([3, 7])
                             .style(c.danger_button())
@@ -4064,8 +4026,8 @@ impl App {
                 self.hint(
                     c,
                     t(
-                        "按顺序匹配，首条可回复的规则生效；间隔秒数内同一规则不会重复回复，↑↓ 调整优先级",
-                        "Rules run in order; a rule inside its interval is skipped so later rules can answer. ↑↓ reorders",
+                        "按顺序匹配，首条可回复的规则生效；间隔秒数内同一规则不会重复回复，四个箭头可逐位移动或置顶/置底",
+                        "Rules run in order; a rule inside its interval is skipped so later rules can answer. The four arrows step or jump to either end",
                     )
                 ),
             ]
@@ -4083,38 +4045,6 @@ impl App {
             let card = container(
                 column![
                     row![
-                        row![
-                            reorder_button(
-                                c,
-                                Icon::MoveTop,
-                                index > 0,
-                                ("移动到最顶", "Move to top"),
-                                Msg::PresetMoveTop(index),
-                            ),
-                            reorder_button(
-                                c,
-                                Icon::ArrowUp,
-                                index > 0,
-                                ("上移一位", "Move up"),
-                                Msg::PresetMoveUp(index),
-                            ),
-                            reorder_button(
-                                c,
-                                Icon::ArrowDown,
-                                index + 1 < count,
-                                ("下移一位", "Move down"),
-                                Msg::PresetMoveDown(index),
-                            ),
-                            reorder_button(
-                                c,
-                                Icon::MoveBottom,
-                                index + 1 < count,
-                                ("移动到最低", "Move to bottom"),
-                                Msg::PresetMoveBottom(index),
-                            ),
-                        ]
-                        .spacing(1)
-                        .align_y(Alignment::Center),
                         text_input(l("名称", "Name"), &preset.name)
                             .size(fs(13.0))
                             .padding([5, 7])
@@ -4135,6 +4065,29 @@ impl App {
                             .style(c.checkbox_style())
                             .on_toggle(move |v| Msg::PresetRetain(index, v)),
                         pick(c, &format_opts(), preset.format, move |v| Msg::PresetFormat(index, v)),
+                        reorder_controls(
+                            c,
+                            index,
+                            count,
+                            Msg::PresetMoveTop(index),
+                            Msg::PresetMoveUp(index),
+                            Msg::PresetMoveDown(index),
+                            Msg::PresetMoveBottom(index),
+                        ),
+                        button(text("×").size(fs(13.0)))
+                            .padding([3, 7])
+                            .style(c.danger_button())
+                            .on_press(Msg::DelPreset(index)),
+                    ]
+                    .spacing(5)
+                    .align_y(Alignment::Center),
+                    row![
+                        text_input(l("内容", "Payload"), &preset.payload)
+                            .size(fs(13.0))
+                            .padding([5, 7])
+                            .width(Length::Fill)
+                            .style(c.input_style())
+                            .on_input(move |v| Msg::PresetText(index, PresetTextField::Payload, v)),
                         tooltip(
                             button(text(t("发送", "Send")).size(fs(12.0)))
                                 .padding([4, 8])
@@ -4153,19 +4106,9 @@ impl App {
                             tooltip::Position::Top,
                         )
                         .delay(Duration::from_millis(300)),
-                        button(text("×").size(fs(13.0)))
-                            .padding([3, 7])
-                            .style(c.danger_button())
-                            .on_press(Msg::DelPreset(index)),
                     ]
                     .spacing(5)
                     .align_y(Alignment::Center),
-                    text_input(l("内容", "Payload"), &preset.payload)
-                        .size(fs(13.0))
-                        .padding([5, 7])
-                        .width(Length::Fill)
-                        .style(c.input_style())
-                        .on_input(move |v| Msg::PresetText(index, PresetTextField::Payload, v)),
                 ]
                 .spacing(5),
             )
@@ -4196,8 +4139,8 @@ impl App {
                 self.hint(
                     c,
                     t(
-                        "预设按列表顺序显示在发布框；行首箭头可调整位置",
-                        "Presets appear in list order in the publish strip; use the row arrows to reorder"
+                        "预设按列表顺序显示在发布框；行首四个箭头可逐位移动或直接置顶/置底",
+                        "Presets appear in list order in the publish strip; the four row arrows step or jump to either end"
                     )
                 ),
             ]
@@ -4399,23 +4342,40 @@ fn ellipsize(input: &str, max_units: usize) -> (String, bool) {
 
 /// Compact icon button for the four reorder controls at the head of a preset
 /// row. Disabled at the list boundary so nothing moves in vain.
-fn reorder_button<'a>(
+fn reorder_controls<'a>(
     c: &Colors,
-    icon: Icon,
+    index: usize,
+    total: usize,
+    top: Msg,
+    up: Msg,
+    down: Msg,
+    bottom: Msg,
+) -> El<'a> {
+    let can_up = index > 0;
+    let can_down = index + 1 < total;
+    row![
+        reorder_text_button(c, "↑↑", can_up, ("移动到最顶", "Move to top"), top),
+        reorder_text_button(c, "↑", can_up, ("上移一位", "Move up"), up),
+        reorder_text_button(c, "↓", can_down, ("下移一位", "Move down"), down),
+        reorder_text_button(c, "↓↓", can_down, ("移动到最低", "Move to bottom"), bottom),
+    ]
+    .spacing(2)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// Shared ghost-button metrics so preset and rule rows line up identically.
+fn reorder_text_button<'a>(
+    c: &Colors,
+    glyph: &'static str,
     enabled: bool,
     tip: (&'static str, &'static str),
     msg: Msg,
 ) -> El<'a> {
     let color = if enabled { c.text_primary } else { c.text_faint };
-    let button = button(
-        container(IconCanvas::new(icon, color).widget(12.0))
-            .width(Length::Fixed(20.0))
-            .height(Length::Fixed(22.0))
-            .align_x(Alignment::Center)
-            .align_y(Alignment::Center),
-    )
-    .padding(0)
-    .style(c.button_kind(ButtonKind::Ghost));
+    let button = button(text(glyph).size(fs(12.0)).color(color))
+        .padding([2, 5])
+        .style(c.button_kind(ButtonKind::Ghost));
     let button = if enabled { button.on_press(msg) } else { button };
     tooltip(
         button,
@@ -4796,6 +4756,36 @@ mod tests {
         let _ = app.update(Msg::PresetMoveUp(2));
         assert_eq!(names(&app), ["a", "b", "c"]);
         let _ = app.update(Msg::PresetMoveBottom(0));
+        assert_eq!(names(&app), ["b", "c", "a"]);
+    }
+
+    /// The auto-reply page uses the same four arrows as the preset list.
+    #[test]
+    fn rule_move_messages_reorder_the_list() {
+        let mut app = App::for_test();
+        app.rt.form.rules = ["a", "b", "c"]
+            .iter()
+            .map(|name| mqttc_core::form::RuleRow {
+                match_topic: (*name).into(),
+                ..Default::default()
+            })
+            .collect();
+        let names = |app: &App| -> Vec<String> {
+            app.rt
+                .form
+                .rules
+                .iter()
+                .map(|rule| rule.match_topic.clone())
+                .collect()
+        };
+
+        let _ = app.update(Msg::MoveRuleTo(2, 0));
+        assert_eq!(names(&app), ["c", "a", "b"]);
+        let _ = app.update(Msg::MoveRule(0, 1));
+        assert_eq!(names(&app), ["a", "c", "b"]);
+        let _ = app.update(Msg::MoveRule(2, -1));
+        assert_eq!(names(&app), ["a", "b", "c"]);
+        let _ = app.update(Msg::MoveRuleTo(0, 2));
         assert_eq!(names(&app), ["b", "c", "a"]);
     }
 

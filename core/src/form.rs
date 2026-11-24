@@ -434,6 +434,17 @@ impl FormState {
         self.rules.swap(index, target as usize);
         true
     }
+
+    /// Move a rule to an absolute slot in list order (top = 0).
+    pub fn move_rule_to(&mut self, index: usize, target: usize) -> bool {
+        let len = self.rules.len();
+        if index >= len || target >= len || index == target {
+            return false;
+        }
+        let rule = self.rules.remove(index);
+        self.rules.insert(target, rule);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -568,6 +579,32 @@ mod tests {
         assert!(!form.move_preset_to(0, 0));
         assert!(!form.move_preset_to(0, 9));
         assert!(!form.move_preset_to(9, 0));
+    }
+
+    #[test]
+    fn rules_reorder_in_list_order() {
+        let mut form = FormState::default();
+        for name in ["a", "b", "c", "d"] {
+            let index = form.add_rule();
+            form.rules[index].match_topic = name.into();
+        }
+        let names = |form: &FormState| -> Vec<String> {
+            form.rules.iter().map(|r| r.match_topic.clone()).collect()
+        };
+
+        assert!(form.move_rule(1, 1));
+        assert_eq!(names(&form), ["a", "c", "b", "d"]);
+        assert!(!form.move_rule(0, -1));
+        assert!(!form.move_rule(3, 1));
+        assert!(!form.move_rule(9, 1));
+
+        assert!(form.move_rule_to(2, 0));
+        assert_eq!(names(&form), ["b", "a", "c", "d"]);
+        assert!(form.move_rule_to(1, 3));
+        assert_eq!(names(&form), ["b", "c", "d", "a"]);
+        assert!(!form.move_rule_to(0, 0));
+        assert!(!form.move_rule_to(0, 9));
+        assert!(!form.move_rule_to(9, 0));
     }
 
     #[test]

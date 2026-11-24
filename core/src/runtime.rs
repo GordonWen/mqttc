@@ -1170,6 +1170,21 @@ impl AppRuntime {
         if !self.form.move_rule(index, delta) {
             return false;
         }
+        self.finish_rule_move();
+        true
+    }
+
+    /// Move an auto-reply rule to an absolute slot (top = 0).
+    pub fn move_rule_to(&mut self, index: usize, target: usize) -> bool {
+        self.apply_form();
+        if !self.form.move_rule_to(index, target) {
+            return false;
+        }
+        self.finish_rule_move();
+        true
+    }
+
+    fn finish_rule_move(&mut self) {
         self.apply_form();
         if let Some(id) = self.active_id() {
             let runtime = self.runtime_mut(&id);
@@ -1177,7 +1192,6 @@ impl AppRuntime {
             runtime.rule_last.clear();
         }
         self.persist();
-        true
     }
 
     /// Reply count per rule for the active connection, indexed like `form.rules`.
