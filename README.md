@@ -109,7 +109,8 @@ cargo build --release -p mqttc-iced
 | `mqttc-gpui` | GPUI 0.2.2 | Direct3D 11 | 47–49 MB | 9.38 MB | 探索性，少量编辑页只读 |
 
 GPUI 的差异见 [docs/PARITY.md](docs/PARITY.md)；三者的架构、构建与测试说明见
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；完整对比数据见
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；协议校验、确认状态与手动 ACK 见
+[docs/PROTOCOL.md](docs/PROTOCOL.md)；完整对比数据见
 [docs/BENCHMARK.md](docs/BENCHMARK.md)。
 
 ## 测试
@@ -118,6 +119,7 @@ GPUI 的差异见 [docs/PARITY.md](docs/PARITY.md)；三者的架构、构建与
 cargo test -p mqttc-core        # 编解码、通配符、筛选、配置迁移、自动回复、表单钳制
 cargo test -p mqttc-iced        # 17 个页面构建冒烟
 cargo test -p mqttc-core --test broker_roundtrip   # 内嵌 rumqttd Broker 端到端
+cargo test -p mqttc-core --test fault_injection    # 延迟/丢失/乱序 PUBACK、重复投递、手动 ACK
 ```
 
 本地集成测试使用 `tools/test-broker`（内嵌 rumqttd），不依赖公网服务。
@@ -137,11 +139,11 @@ core/                mqttc-core：配置、MQTT、日志、筛选、i18n、表�
 apps/iced/           发布版 UI（Iced）
 apps/egui/           egui/eframe 实现
 apps/gpui/           GPUI 实现
-tools/test-broker/   内嵌 rumqttd 的本地测试 Broker
+tools/test-broker/   内嵌 rumqttd 的本地测试 Broker + 故障注入服务端
 tools/bench/         基准场景、采样脚本与 fixture
 scripts/             构建、打包与发布脚本
 assets/              图标与来源说明
-docs/                BENCHMARK / ARCHITECTURE / PARITY / RELEASING
+docs/                BENCHMARK / ARCHITECTURE / PARITY / PROTOCOL / RELEASING
 ```
 
 ## 配置

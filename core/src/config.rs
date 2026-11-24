@@ -100,6 +100,21 @@ pub struct ConnectionConfig {
     pub keep_alive: u16,
     #[serde(default = "default_clean_session")]
     pub clean_session: bool,
+    /// MQTT 5 CONNECT properties. 0 means "omit from CONNECT".
+    #[serde(default)]
+    pub session_expiry: u32,
+    #[serde(default)]
+    pub receive_max: u16,
+    #[serde(default)]
+    pub max_packet_size: u32,
+    #[serde(default)]
+    pub topic_alias_max: u16,
+    /// Hold inbound PUBACK / PUBREC until the UI confirms (both protocols).
+    #[serde(default)]
+    pub manual_acks: bool,
+    /// Also write TLS session secrets to `logs/tls-keys.log`.
+    #[serde(default)]
+    pub tls_keylog: bool,
     /// Retry with exponential backoff after an unexpected disconnect.
     #[serde(default = "default_true")]
     pub auto_reconnect: bool,
@@ -369,6 +384,12 @@ impl ConnectionConfig {
             pub_expiry: 0,
             keep_alive: default_keep_alive(),
             clean_session: default_clean_session(),
+            session_expiry: 0,
+            receive_max: 0,
+            max_packet_size: 0,
+            topic_alias_max: 0,
+            manual_acks: false,
+            tls_keylog: false,
             auto_reconnect: default_true(),
             connect_timeout: default_connect_timeout(),
             will_topic: String::new(),

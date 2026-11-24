@@ -23,10 +23,13 @@ use crate::form::FormState;
 use crate::i18n::{self, Lang};
 use crate::logs::LogStore;
 use crate::model::{
-    clamp_log_limit, default_client_id, parse_timed_interval, ConnStatus, LogMeta, LogRecord,
-    PayloadFormat, Skin,
+    clamp_log_limit, default_client_id, parse_timed_interval, AckInfo, AckState, ConnStatus,
+    LogMeta, LogRecord, PayloadFormat, Skin,
 };
-use crate::mqtt::{qos_from_u8, ConnectParams, MqttHandle, ProtocolVersion, PublishOptions, UiEvent};
+use crate::mqtt::{
+    qos_from_u8, AckStage, BrokerCaps, ConnectParams, MqttHandle, ProtocolVersion,
+    PublishOptions, UiEvent,
+};
 use crate::payload;
 use crate::theme::{self, CustomPalette, Palette, PaletteField};
 
@@ -38,11 +41,70 @@ const RECONNECT_MAX_ATTEMPTS: u32 = 8;
 const RECV_FOLD_WINDOW: Duration = Duration::from_millis(250);
 /// Distinct in-flight messages remembered for copy folding.
 const RECV_FOLD_SLOTS: usize = 8;
+/// How long a QoS 1/2 SEND row waits for its broker ack before we flag the
+/// result as unknown. The row stays put: mqttc never retransmits on its own.
+const ACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// 1s, 2s, 4s … capped at 30s. Exposed for tests and status hints.
 pub fn reconnect_delay(attempt: u32) -> Duration {
     let shift = attempt.saturating_sub(1).min(5);
     Duration::from_secs((1u64 << shift).min(30))
+}
+
+/// One line describing the CONNACK limits the UI/checks rely on.
+fn caps_summary(caps: &BrokerCaps) -> String {
+    let mut parts = Vec::new();
+    parts.push(if caps.session_present {
+        i18n::t("会话已恢复", "session present")
+    } else {
+        i18n::t("新会话", "new session")
+    });
+    if caps.v5 {
+        parts.push(i18n::t(
+            &format!("最大 QoS {}", caps.max_qos),
+            &format!("max QoS {}", caps.max_qos),
+        ));
+    }
+    if !caps.retain_available {
+        parts.push(i18n::t("不支持 Retain", "retain unsupported"));
+    }
+    if !caps.wildcard_available {
+        parts.push(i18n::t("不支持通配符", "no wildcards"));
+    }
+    if !caps.shared_available {
+        parts.push(i18n::t("不支持共享订阅", "no shared subs"));
+    }
+    if let Some(max) = caps.max_packet_size {
+        parts.push(i18n::t(
+            &format!("最大报文 {max} B"),
+            &format!("max packet {max} B"),
+        ));
+    }
+    if let Some(max) = caps.receive_maximum {
+        parts.push(i18n::t(
+            &format!("接收上限 {max}"),
+            &format!("receive max {max}"),
+        ));
+    }
+    if let Some(max) = caps.topic_alias_max {
+        parts.push(i18n::t(
+            &format!("Topic Alias 上限 {max}"),
+            &format!("topic alias max {max}"),
+        ));
+    }
+    if let Some(keep_alive) = caps.server_keep_alive {
+        parts.push(i18n::t(
+            &format!("Server Keep Alive {keep_alive}s"),
+            &format!("server keep alive {keep_alive}s"),
+        ));
+    }
+    if let Some(id) = &caps.assigned_client_id {
+        parts.push(i18n::t(
+            &format!("分配 Client ID: {id}"),
+            &format!("assigned client id: {id}"),
+        ));
+    }
+    parts.join(" · ")
 }
 
 /// Worker → UI messages. `conn_id` is carried so one queue can serve every session.
@@ -251,6 +313,18 @@ pub struct ConnRuntime {
     pub rule_last: Vec<Option<Instant>>,
     /// Broker copies of recent inbound publishes, folded into one log row.
     recv_fold: RecvFold,
+    /// CONNACK capabilities; permissive defaults until a handshake arrives.
+    pub caps: BrokerCaps,
+    /// This session holds inbound QoS 1/2 packets until the user confirms.
+    pub manual_acks: bool,
+    /// SEND rows waiting for rumqttc's `Outgoing::Publish(pkid)` event.
+    pending_pub: VecDeque<u64>,
+    /// Broker packet id → SEND row.
+    pub_by_pkid: HashMap<u16, u64>,
+    /// Written-at time per outgoing packet id (ack elapsed + timeout).
+    ack_at: HashMap<u16, Instant>,
+    /// Inbound packet id → RECV row awaiting a manual ack.
+    incoming_by_pkid: HashMap<u16, u64>,
 }
 
 impl Default for ConnRuntime {
@@ -280,6 +354,12 @@ impl ConnRuntime {
             rule_hits: Vec::new(),
             rule_last: Vec::new(),
             recv_fold: RecvFold::default(),
+            caps: BrokerCaps::default(),
+            manual_acks: false,
+            pending_pub: VecDeque::new(),
+            pub_by_pkid: HashMap::new(),
+            ack_at: HashMap::new(),
+            incoming_by_pkid: HashMap::new(),
         }
     }
 }
@@ -766,11 +846,18 @@ impl AppRuntime {
             format!("用户 {}", cfg.username)
         };
         self.stop_timed(&id);
+        self.mark_acks_lost(&id);
         {
             let runtime = self.runtime_mut(&id);
             runtime.status = ConnStatus::Connecting;
             runtime.last_auto_reply = None;
             runtime.manual_stop = false;
+            runtime.caps = BrokerCaps::default();
+            runtime.manual_acks = cfg.manual_acks;
+            runtime.pending_pub.clear();
+            runtime.pub_by_pkid.clear();
+            runtime.ack_at.clear();
+            runtime.incoming_by_pkid.clear();
             if reset_backoff {
                 runtime.reconnect_attempt = 0;
                 runtime.next_reconnect = None;
@@ -845,8 +932,46 @@ impl AppRuntime {
             ssl_ca: cfg.ssl_ca.clone(),
             ssl_cert: cfg.ssl_cert.clone(),
             ssl_key: cfg.ssl_key.clone(),
+            session_expiry: (cfg.session_expiry > 0).then_some(cfg.session_expiry),
+            receive_maximum: (cfg.receive_max > 0).then_some(cfg.receive_max),
+            max_packet_size: (cfg.max_packet_size > 0).then_some(cfg.max_packet_size),
+            topic_alias_max: (cfg.topic_alias_max > 0).then_some(cfg.topic_alias_max),
+            manual_acks: cfg.manual_acks,
+            tls_keylog: cfg.tls_keylog,
             protocol,
         };
+
+        if cfg.ssl && cfg.tls_keylog {
+            let path = config::log_dir().join("tls-keys.log");
+            self.push_log(
+                &id,
+                "SYS",
+                "",
+                i18n::t(
+                    &format!(
+                        "已启用 TLS 密钥日志: {}（文件含会话密钥，请勿外传）",
+                        path.display()
+                    ),
+                    &format!(
+                        "TLS key log enabled: {} (contains session secrets, do not share)",
+                        path.display()
+                    ),
+                )
+                .into_bytes(),
+            );
+        }
+        if cfg.manual_acks {
+            self.push_log(
+                &id,
+                "SYS",
+                "",
+                i18n::t(
+                    "手动确认模式：QoS 1/2 消息需在日志行点击“确认”后才回 PUBACK/PUBREC",
+                    "Manual ack mode: QoS 1/2 messages wait for a row's Ack button before PUBACK/PUBREC",
+                )
+                .into_bytes(),
+            );
+        }
 
         let sink = self.sink.clone();
         let conn_id = id.clone();
@@ -865,6 +990,7 @@ impl AppRuntime {
         self.apply_form();
         let Some(id) = self.active_id() else { return };
         self.stop_timed(&id);
+        self.mark_acks_lost(&id);
         {
             let runtime = self.runtime_mut(&id);
             runtime.mqtt.disconnect();
@@ -873,6 +999,10 @@ impl AppRuntime {
             runtime.manual_stop = true;
             runtime.reconnect_attempt = 0;
             runtime.next_reconnect = None;
+            runtime.pending_pub.clear();
+            runtime.pub_by_pkid.clear();
+            runtime.ack_at.clear();
+            runtime.incoming_by_pkid.clear();
         }
         self.push_log(&id, "SYS", "", i18n::t("已断开连接", "Disconnected").into_bytes());
         self.persist();
@@ -900,6 +1030,10 @@ impl AppRuntime {
         let qos = self.form.sub_qos.clamp(0, 2) as u8;
         let no_local = self.form.sub_no_local;
         let rap = self.form.sub_retain_as_published;
+        if let Some(err) = self.subscribe_check(&id, &topic, no_local) {
+            self.push_log(&id, "ERR", &topic, err.into_bytes());
+            return;
+        }
         let mqtt = self.runtime_mut(&id).mqtt.clone();
         match mqtt.subscribe_with_options(&topic, qos_from_u8(qos), no_local, rap) {
             Ok(()) => {
@@ -941,6 +1075,32 @@ impl AppRuntime {
         }
     }
 
+    /// Reject filters the CONNACK says the broker cannot handle, before the
+    /// SUBSCRIBE goes out (servers may close the link otherwise).
+    fn subscribe_check(&self, conn_id: &str, topic: &str, no_local: bool) -> Option<String> {
+        let caps = &self.runtimes.get(conn_id)?.caps;
+        let shared = topic.starts_with("$share/");
+        if !caps.wildcard_available && (topic.contains('+') || topic.contains('#')) {
+            return Some(i18n::t(
+                "Broker 声明不支持通配符订阅",
+                "Broker reports wildcard subscriptions unsupported",
+            ));
+        }
+        if shared && !caps.shared_available {
+            return Some(i18n::t(
+                "Broker 声明不支持共享订阅",
+                "Broker reports shared subscriptions unsupported",
+            ));
+        }
+        if shared && caps.v5 && no_local {
+            return Some(i18n::t(
+                "共享订阅不能启用 No Local（MQTT 5 规范要求为 0）",
+                "Shared subscriptions cannot use No Local (MQTT 5 requires 0)",
+            ));
+        }
+        None
+    }
+
     /// Flip one MQTT 5 option on a saved subscription. Re-subscribes when connected
     /// so the broker applies the new option immediately.
     pub fn flip_sub_option(&mut self, index: usize, no_local: bool) -> bool {
@@ -957,6 +1117,10 @@ impl AppRuntime {
         let sub = sub.clone();
         let connected = self.is_connected(&id);
         if connected {
+            if let Some(err) = self.subscribe_check(&id, &sub.topic, sub.no_local) {
+                self.push_log(&id, "ERR", &sub.topic, err.into_bytes());
+                return false;
+            }
             let mqtt = self.runtime_mut(&id).mqtt.clone();
             if let Err(err) = mqtt.subscribe_with_options(
                 &sub.topic,
@@ -1098,21 +1262,25 @@ impl AppRuntime {
                 return false;
             }
         };
+        let qos = preset.qos.min(2);
+        if let Some(err) = self.publish_check(&id, &topic, qos, preset.retain, payload.len(), 0) {
+            self.push_log(&id, "ERR", &topic, err.into_bytes());
+            return false;
+        }
         let mqtt = self.runtime_mut(&id).mqtt.clone();
         match mqtt.publish(
             &topic,
-            qos_from_u8(preset.qos.min(2)),
+            qos_from_u8(qos),
             preset.retain,
             payload.clone(),
         ) {
             Ok(()) => {
-                self.push_log_meta(
+                self.push_send(
                     &id,
-                    "SEND",
                     &topic,
                     payload,
                     LogMeta {
-                        qos: Some(preset.qos.min(2)),
+                        qos: Some(qos),
                         retain: preset.retain,
                         ..LogMeta::default()
                     },
@@ -1202,13 +1370,28 @@ impl AppRuntime {
             (cfg.pub_props.clone(), cfg.pub_expiry)
         };
         let options = publish_options(&props_text, expiry);
+        let props_len = options
+            .user_properties
+            .iter()
+            .map(|(k, v)| k.len() + v.len() + 4)
+            .sum::<usize>();
+        if let Some(err) = self.publish_check(
+            conn_id,
+            &topic,
+            qos,
+            retain,
+            payload.len(),
+            props_len,
+        ) {
+            self.push_log(conn_id, "ERR", &topic, err.into_bytes());
+            return Err(());
+        }
         let mqtt = self.runtime_mut(conn_id).mqtt.clone();
         match mqtt.publish_with_options(&topic, qos_from_u8(qos), retain, payload.clone(), &options)
         {
             Ok(()) => {
-                self.push_log_meta(
+                self.push_send(
                     conn_id,
-                    "SEND",
                     &topic,
                     payload,
                     LogMeta {
@@ -1366,6 +1549,7 @@ impl AppRuntime {
                 }
             }
         }
+        self.ack_tick();
         self.maybe_persist();
         self.reconnect_tick();
         summary
@@ -1505,7 +1689,7 @@ impl AppRuntime {
 
     fn handle_mqtt_event(&mut self, conn_id: &str, event: UiEvent) -> Option<i32> {
         match event {
-            UiEvent::Connected => {
+            UiEvent::Connected { caps } => {
                 {
                     let runtime = self.runtime_mut(conn_id);
                     runtime.status = ConnStatus::Connected;
@@ -1515,6 +1699,22 @@ impl AppRuntime {
                     runtime.rule_hits.clear();
                     runtime.rule_last.clear();
                     runtime.recv_fold.clear();
+                    runtime.caps = caps.clone();
+                }
+                let summary = caps_summary(&caps);
+                self.push_log(
+                    conn_id,
+                    "SYS",
+                    "",
+                    format!("CONNACK: {summary}").into_bytes(),
+                );
+                for (key, value) in &caps.extra {
+                    self.push_log(
+                        conn_id,
+                        "SYS",
+                        "",
+                        format!("CONNACK {key}: {value}").into_bytes(),
+                    );
                 }
                 self.push_log(
                     conn_id,
@@ -1528,6 +1728,7 @@ impl AppRuntime {
                 }
             }
             UiEvent::Disconnected { reason } => {
+                self.mark_acks_lost(conn_id);
                 let was_timed = self
                     .runtimes
                     .get(conn_id)
@@ -1575,6 +1776,7 @@ impl AppRuntime {
                 dup,
                 props,
                 expiry,
+                pkid,
             } => {
                 let meta = LogMeta {
                     qos: Some(qos),
@@ -1586,8 +1788,102 @@ impl AppRuntime {
                 if self.absorb_subscription_copy(conn_id, &topic, &payload, &meta) {
                     return None;
                 }
-                self.push_log_meta(conn_id, "RECV", &topic, payload.clone(), meta);
+                let manual = qos > 0
+                    && pkid != 0
+                    && self
+                        .runtime(conn_id)
+                        .map(|rt| rt.manual_acks)
+                        .unwrap_or(false);
+                let seq = self.push_log_meta_seq(conn_id, "RECV", &topic, payload.clone(), meta);
+                if let (true, Some(seq)) = (manual, seq) {
+                    let runtime = self.runtime_mut(conn_id);
+                    let mut ack = AckInfo::new(AckState::PendingAck);
+                    ack.pkid = Some(pkid);
+                    ack.qos = Some(qos);
+                    runtime.logs.set_ack(seq, Some(ack));
+                    runtime.incoming_by_pkid.insert(pkid, seq);
+                }
                 self.maybe_auto_reply(conn_id, &topic, &payload);
+            }
+            UiEvent::PublishPkid { pkid } => {
+                let runtime = self.runtime_mut(conn_id);
+                let Some(seq) = runtime.pending_pub.pop_front() else {
+                    return None;
+                };
+                let qos = runtime
+                    .logs
+                    .find(seq)
+                    .and_then(|log| log.qos)
+                    .unwrap_or(1);
+                let mut ack = AckInfo::new(AckState::AwaitingAck);
+                ack.pkid = Some(pkid);
+                ack.qos = Some(qos);
+                runtime.logs.set_ack(seq, Some(ack));
+                runtime.pub_by_pkid.insert(pkid, seq);
+                runtime.ack_at.insert(pkid, Instant::now());
+            }
+            UiEvent::Ack {
+                pkid,
+                stage,
+                ok,
+                reason,
+            } => {
+                let runtime = self.runtime_mut(conn_id);
+                let Some(seq) = runtime.pub_by_pkid.get(&pkid).copied() else {
+                    return None;
+                };
+                match stage {
+                    AckStage::PubRec if ok => {
+                        // QoS 2 first phase: rumqttc already queued PUBREL.
+                        runtime.logs.with_ack(seq, |slot| {
+                            if let Some(ack) = slot {
+                                ack.state = AckState::AwaitingComp;
+                            }
+                        });
+                    }
+                    AckStage::PubRec => {
+                        let elapsed = runtime
+                            .ack_at
+                            .remove(&pkid)
+                            .map(|at| at.elapsed().as_millis() as u64);
+                        runtime.pub_by_pkid.remove(&pkid);
+                        runtime.logs.with_ack(seq, |slot| {
+                            if let Some(ack) = slot {
+                                ack.state = AckState::Rejected;
+                                ack.elapsed_ms = elapsed;
+                                ack.reason = reason;
+                            }
+                        });
+                    }
+                    AckStage::PubAck | AckStage::PubComp => {
+                        let elapsed = runtime
+                            .ack_at
+                            .remove(&pkid)
+                            .map(|at| at.elapsed().as_millis() as u64);
+                        runtime.pub_by_pkid.remove(&pkid);
+                        runtime.logs.with_ack(seq, |slot| {
+                            if let Some(ack) = slot {
+                                ack.state = if ok {
+                                    AckState::Acked
+                                } else {
+                                    AckState::Rejected
+                                };
+                                ack.elapsed_ms = elapsed;
+                                ack.reason = reason;
+                            }
+                        });
+                    }
+                }
+            }
+            UiEvent::ManualComp { pkid } => {
+                let runtime = self.runtime_mut(conn_id);
+                if let Some(seq) = runtime.incoming_by_pkid.remove(&pkid) {
+                    runtime.logs.with_ack(seq, |slot| {
+                        if let Some(ack) = slot {
+                            ack.state = AckState::Acked;
+                        }
+                    });
+                }
             }
             UiEvent::Reason {
                 name,
@@ -1646,6 +1942,10 @@ impl AppRuntime {
         }
         let mqtt = self.runtime_mut(conn_id).mqtt.clone();
         for sub in subs {
+            if let Some(err) = self.subscribe_check(conn_id, &sub.topic, sub.no_local) {
+                self.push_log(conn_id, "ERR", &sub.topic, err.into_bytes());
+                continue;
+            }
             match mqtt.subscribe_with_options(
                 &sub.topic,
                 qos_from_u8(sub.qos),
@@ -1733,13 +2033,13 @@ impl AppRuntime {
                 return;
             }
         };
+        let qos = rule.qos.min(2);
+        if let Some(err) = self.publish_check(conn_id, &reply_topic, qos, rule.retain, reply_bytes.len(), 0) {
+            self.push_log(conn_id, "ERR", &reply_topic, err.into_bytes());
+            return;
+        }
         let mqtt = self.runtime_mut(conn_id).mqtt.clone();
-        match mqtt.publish(
-            &reply_topic,
-            qos_from_u8(rule.qos.min(2)),
-            rule.retain,
-            reply_bytes.clone(),
-        ) {
+        match mqtt.publish(&reply_topic, qos_from_u8(qos), rule.retain, reply_bytes.clone()) {
             Ok(()) => {
                 {
                     let runtime = self.runtime_mut(conn_id);
@@ -1753,13 +2053,12 @@ impl AppRuntime {
                     runtime.rule_hits[rule_idx] = runtime.rule_hits[rule_idx].saturating_add(1);
                     runtime.rule_last[rule_idx] = Some(now);
                 }
-                self.push_log_meta(
+                self.push_send(
                     conn_id,
-                    "SEND",
                     &reply_topic,
                     reply_bytes,
                     LogMeta {
-                        qos: Some(rule.qos.min(2)),
+                        qos: Some(qos),
                         retain: rule.retain,
                         ..LogMeta::default()
                     },
@@ -1784,6 +2083,19 @@ impl AppRuntime {
         payload: Vec<u8>,
         meta: LogMeta,
     ) {
+        let _ = self.push_log_meta_seq(conn_id, kind, topic, payload, meta);
+    }
+
+    /// Same as [`Self::push_log_meta`] but returns the row sequence so publish
+    /// paths can attach ack state. `None` when the paused capture dropped it.
+    fn push_log_meta_seq(
+        &mut self,
+        conn_id: &str,
+        kind: &str,
+        topic: &str,
+        payload: Vec<u8>,
+        meta: LogMeta,
+    ) -> Option<u64> {
         let runtime = self.runtime_mut(conn_id);
         match kind {
             "RECV" => runtime.recv_count = runtime.recv_count.saturating_add(1),
@@ -1792,9 +2104,183 @@ impl AppRuntime {
         }
         if runtime.logs_paused && (kind == "RECV" || kind == "SEND") {
             runtime.paused_dropped = runtime.paused_dropped.saturating_add(1);
-            return;
+            return None;
         }
-        runtime.logs.push_meta(kind, topic, payload, meta);
+        Some(runtime.logs.push_meta(kind, topic, payload, meta))
+    }
+
+    /// Log one outgoing publish and start tracking its delivery stage. QoS 0
+    /// ends at "sent"; QoS 1/2 wait for rumqttc to expose the packet id.
+    fn push_send(
+        &mut self,
+        conn_id: &str,
+        topic: &str,
+        payload: Vec<u8>,
+        meta: LogMeta,
+    ) -> Option<u64> {
+        let qos = meta.qos.unwrap_or(0);
+        let seq = self.push_log_meta_seq(conn_id, "SEND", topic, payload, meta)?;
+        let runtime = self.runtime_mut(conn_id);
+        if qos == 0 {
+            let mut ack = AckInfo::new(AckState::Sent);
+            ack.qos = Some(0);
+            runtime.logs.set_ack(seq, Some(ack));
+        } else {
+            let mut ack = AckInfo::new(AckState::Queued);
+            ack.qos = Some(qos);
+            runtime.logs.set_ack(seq, Some(ack));
+            runtime.pending_pub.push_back(seq);
+        }
+        Some(seq)
+    }
+
+    /// Refuse publishes the CONNACK says this broker will not accept, instead
+    /// of letting the broker drop the link. Size is an upper-bound estimate
+    /// (fixed header, topic, packet id, payload, properties).
+    fn publish_check(
+        &self,
+        conn_id: &str,
+        topic: &str,
+        qos: u8,
+        retain: bool,
+        payload_len: usize,
+        props_len: usize,
+    ) -> Option<String> {
+        let caps = &self.runtimes.get(conn_id)?.caps;
+        if retain && !caps.retain_available {
+            return Some(i18n::t(
+                "Broker 声明不支持 Retain，已取消发送",
+                "Broker reports retain unsupported; publish cancelled",
+            ));
+        }
+        if qos > caps.max_qos {
+            return Some(i18n::t(
+                &format!(
+                    "Broker 最大支持 QoS {}，已取消发送",
+                    caps.max_qos
+                ),
+                &format!(
+                    "Broker supports at most QoS {}; publish cancelled",
+                    caps.max_qos
+                ),
+            ));
+        }
+        if let Some(max) = caps.max_packet_size {
+            let remaining = 2 + topic.len() + payload_len + props_len + if qos > 0 { 2 } else { 0 };
+            // Fixed header: 1 type byte + up to 4 length bytes.
+            let size = remaining + 5;
+            if size as u64 > max as u64 {
+                return Some(i18n::t(
+                    &format!(
+                        "报文约 {} B，超过 Broker 上限 {} B，已取消发送",
+                        size, max
+                    ),
+                    &format!(
+                        "Packet is about {size} B, over the broker limit of {max} B; publish cancelled"
+                    ),
+                ));
+            }
+        }
+        None
+    }
+
+    /// Mark every still-unacknowledged SEND row as "result unknown" before the
+    /// link drops or a new session replaces it. Nothing is retransmitted.
+    fn mark_acks_lost(&mut self, conn_id: &str) {
+        let Some(runtime) = self.runtimes.get_mut(conn_id) else {
+            return;
+        };
+        let pending: Vec<u64> = runtime
+            .pending_pub
+            .drain(..)
+            .chain(runtime.pub_by_pkid.drain().map(|(_, seq)| seq))
+            .collect();
+        runtime.ack_at.clear();
+        for seq in pending {
+            runtime.logs.with_ack(seq, |slot| {
+                if let Some(ack) = slot {
+                    if matches!(ack.state, AckState::AwaitingAck | AckState::AwaitingComp) {
+                        ack.state = AckState::Timeout;
+                    }
+                }
+            });
+        }
+        runtime.incoming_by_pkid.clear();
+    }
+
+    /// Flag acks older than [`ACK_TIMEOUT`] while still connected. Called from
+    /// `poll()`; exits immediately when nothing is in flight.
+    fn ack_tick(&mut self) {
+        let now = Instant::now();
+        for runtime in self.runtimes.values_mut() {
+            if runtime.ack_at.is_empty() || runtime.status != ConnStatus::Connected {
+                continue;
+            }
+            let due: Vec<(u16, u64, u64)> = runtime
+                .ack_at
+                .iter()
+                .filter_map(|(pkid, at)| {
+                    let elapsed = now.duration_since(*at);
+                    if elapsed < ACK_TIMEOUT {
+                        return None;
+                    }
+                    let seq = *runtime.pub_by_pkid.get(pkid)?;
+                    Some((*pkid, seq, elapsed.as_millis() as u64))
+                })
+                .collect();
+            for (pkid, seq, ms) in due {
+                runtime.logs.with_ack(seq, |slot| {
+                    if let Some(ack) = slot {
+                        if matches!(ack.state, AckState::AwaitingAck | AckState::AwaitingComp) {
+                            ack.state = AckState::Timeout;
+                            ack.elapsed_ms = Some(ms);
+                        }
+                    }
+                });
+                runtime.ack_at.remove(&pkid);
+                runtime.pub_by_pkid.remove(&pkid);
+            }
+        }
+    }
+
+    /// Manual ack for one inbound QoS 1/2 row (SEND side is unaffected).
+    pub fn manual_ack(&mut self, seq: u64) -> bool {
+        let Some(id) = self.active_id() else {
+            return false;
+        };
+        let Some((pkid, qos)) = self.runtimes.get(&id).and_then(|runtime| {
+            let log = runtime.logs.find(seq)?;
+            let ack = log.ack.as_ref()?;
+            if ack.state != AckState::PendingAck {
+                return None;
+            }
+            Some((ack.pkid?, ack.qos.unwrap_or(1)))
+        }) else {
+            return false;
+        };
+        let mqtt = self.runtime_mut(&id).mqtt.clone();
+        match mqtt.ack_incoming(pkid, qos) {
+            Ok(()) => {
+                let runtime = self.runtime_mut(&id);
+                runtime.incoming_by_pkid.remove(&pkid);
+                runtime.logs.with_ack(seq, |slot| {
+                    if let Some(ack) = slot {
+                        ack.state = AckState::AckSent;
+                    }
+                });
+                true
+            }
+            Err(err) => {
+                self.push_log(&id, "ERR", "", err.into_bytes());
+                false
+            }
+        }
+    }
+
+    pub fn manual_acks_enabled(&self) -> bool {
+        self.active_id()
+            .and_then(|id| self.runtimes.get(&id).map(|rt| rt.manual_acks))
+            .unwrap_or(false)
     }
 
     /// Whether the active connection is freezing data rows. Transient (not persisted).
@@ -2139,6 +2625,225 @@ mod tests {
             .collect();
     }
 
+    fn connected(rt: &mut AppRuntime, manual_acks: bool, caps: BrokerCaps) {
+        let id = rt.active_id().unwrap();
+        rt.config.connections[0].manual_acks = manual_acks;
+        rt.runtime_mut(&id).manual_acks = manual_acks;
+        rt.handle_mqtt_event(&id, UiEvent::Connected { caps });
+    }
+
+    fn last_row(rt: &AppRuntime) -> LogRecord {
+        rt.visible_logs().last().map(|log| (*log).clone()).unwrap()
+    }
+
+    #[test]
+    fn outgoing_qos1_ack_updates_send_row() {
+        let mut rt = runtime_with_conn();
+        connected(&mut rt, false, BrokerCaps::default());
+        let id = rt.active_id().unwrap();
+        let seq = rt
+            .push_send(
+                &id,
+                "a/b",
+                b"hi".to_vec(),
+                LogMeta {
+                    qos: Some(1),
+                    ..LogMeta::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            rt.runtime(&id).unwrap().logs.find(seq).unwrap().ack.as_ref().unwrap().state,
+            AckState::Queued
+        );
+
+        rt.handle_mqtt_event(&id, UiEvent::PublishPkid { pkid: 7 });
+        let ack = rt.runtime(&id).unwrap().logs
+            .find(seq)
+            .unwrap()
+            .ack
+            .clone()
+            .unwrap();
+        assert_eq!(ack.state, AckState::AwaitingAck);
+        assert_eq!(ack.pkid, Some(7));
+
+        rt.handle_mqtt_event(
+            &id,
+            UiEvent::Ack {
+                pkid: 7,
+                stage: AckStage::PubAck,
+                ok: true,
+                reason: None,
+            },
+        );
+        let ack = rt.runtime(&id).unwrap().logs
+            .find(seq)
+            .unwrap()
+            .ack
+            .clone()
+            .unwrap();
+        assert_eq!(ack.state, AckState::Acked);
+        assert!(ack.elapsed_ms.is_some());
+        assert!(rt.runtime(&id).unwrap().logs.find(seq).unwrap().flags().contains(
+            if crate::i18n::is_en() { "acked" } else { "已确认" }
+        ));
+    }
+
+    #[test]
+    fn qos2_walks_pubrec_to_pubcomp() {
+        let mut rt = runtime_with_conn();
+        connected(&mut rt, false, BrokerCaps::default());
+        let id = rt.active_id().unwrap();
+        let seq = rt
+            .push_send(
+                &id,
+                "a",
+                b"x".to_vec(),
+                LogMeta {
+                    qos: Some(2),
+                    ..LogMeta::default()
+                },
+            )
+            .unwrap();
+        rt.handle_mqtt_event(&id, UiEvent::PublishPkid { pkid: 9 });
+        rt.handle_mqtt_event(
+            &id,
+            UiEvent::Ack {
+                pkid: 9,
+                stage: AckStage::PubRec,
+                ok: true,
+                reason: None,
+            },
+        );
+        assert_eq!(
+            rt.runtime(&id).unwrap().logs.find(seq).unwrap().ack.as_ref().unwrap().state,
+            AckState::AwaitingComp
+        );
+        rt.handle_mqtt_event(
+            &id,
+            UiEvent::Ack {
+                pkid: 9,
+                stage: AckStage::PubComp,
+                ok: true,
+                reason: None,
+            },
+        );
+        assert_eq!(
+            rt.runtime(&id).unwrap().logs.find(seq).unwrap().ack.as_ref().unwrap().state,
+            AckState::Acked
+        );
+    }
+
+    #[test]
+    fn missing_ack_times_out_and_link_loss_marks_unknown() {
+        let mut rt = runtime_with_conn();
+        connected(&mut rt, false, BrokerCaps::default());
+        let id = rt.active_id().unwrap();
+        let first = rt
+            .push_send(
+                &id,
+                "a",
+                b"x".to_vec(),
+                LogMeta {
+                    qos: Some(1),
+                    ..LogMeta::default()
+                },
+            )
+            .unwrap();
+        let second = rt
+            .push_send(
+                &id,
+                "b",
+                b"y".to_vec(),
+                LogMeta {
+                    qos: Some(1),
+                    ..LogMeta::default()
+                },
+            )
+            .unwrap();
+        rt.handle_mqtt_event(&id, UiEvent::PublishPkid { pkid: 1 });
+        rt.handle_mqtt_event(&id, UiEvent::PublishPkid { pkid: 2 });
+
+        // Age the first ack past the deadline; the tick flags only that row.
+        rt.runtime_mut(&id).ack_at.insert(1, Instant::now() - ACK_TIMEOUT);
+        rt.ack_tick();
+        assert_eq!(
+            rt.runtime(&id).unwrap().logs.find(first).unwrap().ack.as_ref().unwrap().state,
+            AckState::Timeout
+        );
+        assert_eq!(
+            rt.runtime(&id).unwrap().logs.find(second).unwrap().ack.as_ref().unwrap().state,
+            AckState::AwaitingAck
+        );
+
+        rt.mark_acks_lost(&id);
+        assert_eq!(
+            rt.runtime(&id).unwrap().logs.find(second).unwrap().ack.as_ref().unwrap().state,
+            AckState::Timeout
+        );
+    }
+
+    #[test]
+    fn manual_ack_marks_inbound_rows() {
+        let mut rt = runtime_with_conn();
+        connected(&mut rt, true, BrokerCaps::default());
+        let id = rt.active_id().unwrap();
+        rt.handle_mqtt_event(
+            &id,
+            UiEvent::Recv {
+                topic: "in".into(),
+                payload: b"x".to_vec(),
+                qos: 1,
+                retain: false,
+                dup: false,
+                props: Vec::new(),
+                expiry: None,
+                pkid: 5,
+            },
+        );
+        let row = last_row(&rt);
+        assert_eq!(row.ack.as_ref().unwrap().state, AckState::PendingAck);
+        assert_eq!(row.ack.as_ref().unwrap().pkid, Some(5));
+
+        // QoS 2 completion after the app's PUBREC arrives via ManualComp.
+        rt.handle_mqtt_event(&id, UiEvent::ManualComp { pkid: 5 });
+        assert_eq!(
+            rt.runtime(&id).unwrap().logs.find(row.seq).unwrap().ack.as_ref().unwrap().state,
+            AckState::Acked
+        );
+    }
+
+    #[test]
+    fn connack_limits_block_bad_publish_and_subscribe() {
+        let mut rt = runtime_with_conn();
+        let caps = BrokerCaps {
+            v5: true,
+            max_qos: 1,
+            retain_available: false,
+            max_packet_size: Some(20),
+            wildcard_available: false,
+            shared_available: false,
+            ..BrokerCaps::default()
+        };
+        connected(&mut rt, false, caps);
+        let id = rt.active_id().unwrap();
+
+        assert!(rt
+            .publish_check(&id, "a", 2, false, 4, 0)
+            .is_some());
+        assert!(rt
+            .publish_check(&id, "a", 1, true, 4, 0)
+            .is_some());
+        assert!(rt
+            .publish_check(&id, "a", 1, false, 64, 0)
+            .is_some());
+        assert!(rt.publish_check(&id, "a", 1, false, 4, 0).is_none());
+
+        assert!(rt.subscribe_check(&id, "a/#", false).is_some());
+        assert!(rt.subscribe_check(&id, "$share/g/a", false).is_some());
+        assert!(rt.subscribe_check(&id, "a/b", false).is_none());
+    }
+
     fn recv(rt: &mut AppRuntime, topic: &str, payload: &[u8], qos: u8) {
         let id = rt.active_id().unwrap();
         rt.handle_mqtt_event(
@@ -2151,6 +2856,7 @@ mod tests {
                 dup: false,
                 props: Vec::new(),
                 expiry: None,
+                pkid: 0,
             },
         );
     }

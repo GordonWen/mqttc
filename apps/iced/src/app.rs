@@ -22,7 +22,9 @@ use mqttc_core::cli::BenchOptions;
 use mqttc_core::config::{FONT_SCALE_MAX, FONT_SCALE_MIN};
 use mqttc_core::form::{FormState, PresetRow};
 use mqttc_core::i18n::{is_en, t};
-use mqttc_core::model::{default_client_id, ConnStatus, LogRecord, PayloadFormat, Skin};
+use mqttc_core::model::{
+    default_client_id, AckState, ConnStatus, LogRecord, PayloadFormat, Skin,
+};
 use mqttc_core::payload;
 use mqttc_core::runtime::AppRuntime;
 use mqttc_core::theme::{to_hex, PaletteField, Rgb};
@@ -376,6 +378,11 @@ pub enum Field {
     Password,
     KeepAlive,
     Timeout,
+    /// MQTT 5 CONNECT options (3.1.1 hides these inputs).
+    SessionExpiry,
+    ReceiveMax,
+    MaxPacket,
+    TopicAlias,
     SubTopic,
     WillTopic,
     WillPayload,
@@ -399,6 +406,10 @@ impl Field {
             Self::Password => &f.password,
             Self::KeepAlive => &f.keep_alive,
             Self::Timeout => &f.connect_timeout,
+            Self::SessionExpiry => &f.session_expiry,
+            Self::ReceiveMax => &f.receive_max,
+            Self::MaxPacket => &f.max_packet_size,
+            Self::TopicAlias => &f.topic_alias_max,
             Self::SubTopic => &f.sub_topic,
             Self::WillTopic => &f.will_topic,
             Self::WillPayload => &f.will_payload,
@@ -422,6 +433,10 @@ impl Field {
             Self::Password => f.password = value,
             Self::KeepAlive => f.keep_alive = value,
             Self::Timeout => f.connect_timeout = value,
+            Self::SessionExpiry => f.session_expiry = value,
+            Self::ReceiveMax => f.receive_max = value,
+            Self::MaxPacket => f.max_packet_size = value,
+            Self::TopicAlias => f.topic_alias_max = value,
             Self::SubTopic => f.sub_topic = value,
             Self::WillTopic => f.will_topic = value,
             Self::WillPayload => f.will_payload = value,
@@ -465,6 +480,10 @@ pub enum Flag {
     AutoReconnect,
     Ssl,
     SslVerify,
+    /// Write TLS session keys to logs/tls-keys.log.
+    TlsKeylog,
+    /// Hold inbound QoS 1/2 acks until the row's Ack button.
+    ManualAcks,
     WillRetain,
     PubRetain,
     SubNoLocal,
@@ -478,6 +497,8 @@ impl Flag {
             Self::AutoReconnect => f.auto_reconnect = value,
             Self::Ssl => f.ssl = value,
             Self::SslVerify => f.ssl_verify = value,
+            Self::TlsKeylog => f.tls_keylog = value,
+            Self::ManualAcks => f.manual_acks = value,
             Self::WillRetain => f.will_retain = value,
             Self::PubRetain => f.pub_retain = value,
             Self::SubNoLocal => f.sub_no_local = value,
@@ -523,6 +544,8 @@ pub enum Msg {
     SaveVisibleLogs,
     TogglePause,
     LogLimit(i32),
+    /// Manual ack for one inbound QoS 1/2 row.
+    Ack(u64),
     OpenLog(u64),
     CloseLog,
     /// Detail-page format picker (local to the open row, not persisted).
@@ -1676,6 +1699,9 @@ impl App {
                 }
             }
             Msg::ResetCounts => self.rt.reset_active_counts(),
+            Msg::Ack(seq) => {
+                self.rt.manual_ack(seq);
+            }
             Msg::Field(field, value) => {
                 field.set(&mut self.rt.form, value);
                 return self.touched();
@@ -2322,13 +2348,32 @@ impl App {
         ]
         .spacing(10);
 
-        let advanced = column![
+        // MQTT 5 exposes CONNECT properties that 3.1.1 has no field for; the
+        // form hides them entirely so the same page cannot send ignored options.
+        let v5 = f.protocol == 1;
+        let clean_label = if v5 {
+            t("Clean Start", "Clean start")
+        } else {
+            t("Clean session", "Clean session")
+        };
+        let clean_hint = if v5 {
+            t(
+                "开启时丢弃旧会话；关闭时配合“会话过期”恢复订阅与未确认消息",
+                "On discards the old session; off plus session expiry restores subs and pending messages",
+            )
+        } else {
+            t(
+                "3.1.1 只有 Clean Session：开启时丢弃旧会话",
+                "3.1.1 has only Clean Session: on discards the old session",
+            )
+        };
+        let mut advanced = column![
             self.section(c, &t("高级", "Advanced")),
             row![
                 self.labelled(c, &t("Keep Alive (s)", "Keep alive (s)"), self.input(c, Field::KeepAlive, "60")),
                 self.labelled(c, &t("连接超时 (s)", "Connect timeout (s)"), self.input(c, Field::Timeout, "10")),
                 column![
-                    text(t("Clean session", "Clean session")).size(fs(11.0)).color(c.text_faint),
+                    text(clean_label).size(fs(11.0)).color(c.text_faint),
                     checkbox(f.clean_session)
                         .size(fs(15.0))
                         .style(c.checkbox_style())
@@ -2345,8 +2390,65 @@ impl App {
                 .spacing(3),
             ]
             .spacing(10),
+            self.hint(c, clean_hint.to_string()),
         ]
         .spacing(10);
+        if v5 {
+            advanced = advanced.push(
+                row![
+                    self.labelled(
+                        c,
+                        &t("会话过期 (s)", "Session expiry (s)"),
+                        self.input(c, Field::SessionExpiry, "0 / empty"),
+                    ),
+                    self.labelled(
+                        c,
+                        &t("接收上限", "Receive maximum"),
+                        self.input(c, Field::ReceiveMax, "65535"),
+                    ),
+                    self.labelled(
+                        c,
+                        &t("最大报文 (B)", "Max packet (B)"),
+                        self.input(c, Field::MaxPacket, "1 MiB"),
+                    ),
+                    self.labelled(
+                        c,
+                        &t("Topic Alias 上限", "Topic alias max"),
+                        self.input(c, Field::TopicAlias, "0"),
+                    ),
+                ]
+                .spacing(10),
+            );
+            advanced = advanced.push(self.hint(
+                c,
+                t(
+                    "以上为 MQTT 5 CONNECT 属性，留空表示不携带；由 Broker 在 CONNACK 中确认最终值",
+                    "MQTT 5 CONNECT properties; empty omits them. Final values arrive in CONNACK",
+                )
+                .to_string(),
+            ));
+        }
+        advanced = advanced.push(
+            row![
+                checkbox(f.manual_acks)
+                    .label(t("手动确认 RECV", "Manual ack RECV"))
+                    .size(fs(15.0))
+                    .text_size(fs(12.0))
+                    .style(c.checkbox_style())
+                    .on_toggle(|v| Msg::Flag(Flag::ManualAcks, v)),
+                self.hint(
+                    c,
+                    t(
+                        "QoS 1/2 消息先标记“待手动确认”，点日志行的“确认”后才回复 PUBACK/PUBREC",
+                        "QoS 1/2 rows wait as “manual ack pending”; press Ack on the row to send PUBACK/PUBREC",
+                    )
+                    .to_string(),
+                ),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        );
+        let advanced = advanced;
 
         let tls_note = if !f.ssl {
             t(
@@ -2385,6 +2487,12 @@ impl App {
                     .text_size(fs(12.0))
                     .style(c.checkbox_style())
                     .on_toggle(|v| Msg::Flag(Flag::SslVerify, v)),
+                checkbox(f.tls_keylog)
+                    .label(t("TLS 密钥日志", "TLS key log"))
+                    .size(fs(15.0))
+                    .text_size(fs(12.0))
+                    .style(c.checkbox_style())
+                    .on_toggle(|v| Msg::Flag(Flag::TlsKeylog, v)),
                 // Keep the current trust behaviour in sight, right next to the
                 // checkbox that controls it.
                 text(tls_note)
@@ -2396,6 +2504,14 @@ impl App {
             .spacing(14)
             .align_y(Alignment::Center)
             .width(Length::Fill),
+            self.hint(
+                c,
+                t(
+                    "TLS 密钥日志写入 logs/tls-keys.log（SSLKEYLOGFILE 格式），可配合 Wireshark 解密本机流量；文件含会话密钥，请勿外传",
+                    "TLS key log writes logs/tls-keys.log (SSLKEYLOGFILE format) for Wireshark; it contains session secrets — do not share it",
+                )
+                .to_string(),
+            ),
             self.labelled(c, &t("CA 证书", "CA certificate"), self.input(c, Field::Ca, "path/to/ca.pem")),
             row![
                 self.labelled(c, &t("客户端证书", "Client certificate"), self.input(c, Field::Cert, "path/to/cert.pem")),
@@ -3086,6 +3202,14 @@ impl App {
                     .style(c.ghost_button())
                     .on_press(Msg::OpenLog(seq)),
             );
+        if log.ack.as_ref().is_some_and(|ack| ack.state == AckState::PendingAck) {
+            header = header.push(
+                button(text(t("确认", "Ack")).size(fs(10.0)))
+                    .padding([1, 6])
+                    .style(c.primary_button())
+                    .on_press(Msg::Ack(seq)),
+            );
+        }
         let mut content = column![header].spacing(2);
         if let Some(meta) = meta_line {
             content = content.push(text(meta).size(fs(10.0)).color(c.text_faint));
@@ -3170,7 +3294,7 @@ impl App {
         };
         let body = payload::sanitize_display_text(&body).into_owned();
         let topic = payload::sanitize_display_text(&log.topic).into_owned();
-        let header = row![
+        let mut header = row![
             self.detail_back(c),
             text(format!("{} · {}", log.time, log.kind))
                 .size(fs(11.0))
@@ -3202,6 +3326,14 @@ impl App {
         ]
         .spacing(8)
         .align_y(Alignment::Center);
+        if log.ack.as_ref().is_some_and(|ack| ack.state == AckState::PendingAck) {
+            header = header.push(
+                button(text(t("确认", "Ack")).size(fs(11.0)))
+                    .padding([3, 8])
+                    .style(c.primary_button())
+                    .on_press(Msg::Ack(log.seq)),
+            );
+        }
 
         let flags = log.flags();
         let props = log.props_text();

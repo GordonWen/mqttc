@@ -15,6 +15,31 @@ fn parse_interval_secs(text: &str) -> u32 {
     text.trim().parse::<u32>().unwrap_or(0).min(86_400)
 }
 
+/// Empty text box → 0 in the saved config ("omit this MQTT 5 property").
+fn empty_if_zero(value: impl PartialEq + From<u8> + ToString) -> String {
+    if value == 0u8.into() {
+        String::new()
+    } else {
+        value.to_string()
+    }
+}
+
+/// Lenient numeric field: empty / invalid / 0 → 0 ("omit this property"),
+/// otherwise clamp to the field's protocol range.
+fn parse_clamped_u32(text: &str, min: u32, max: u32) -> u32 {
+    match text.trim().parse::<u64>() {
+        Ok(0) | Err(_) => 0,
+        Ok(value) => value.clamp(min as u64, max as u64) as u32,
+    }
+}
+
+fn parse_clamped_u16(text: &str, min: u16, max: u16) -> u16 {
+    match text.trim().parse::<u64>() {
+        Ok(0) | Err(_) => 0,
+        Ok(value) => value.clamp(min as u64, max as u64) as u16,
+    }
+}
+
 /// One publish-preset row bound to the presets page.
 #[derive(Clone, Debug)]
 pub struct PresetRow {
@@ -106,6 +131,13 @@ pub struct FormState {
     pub protocol: i32,
     pub keep_alive: String,
     pub clean_session: bool,
+    /// MQTT 5 CONNECT options (empty = omit). Hidden on the 3.1.1 form.
+    pub session_expiry: String,
+    pub receive_max: String,
+    pub max_packet_size: String,
+    pub topic_alias_max: String,
+    pub manual_acks: bool,
+    pub tls_keylog: bool,
     pub auto_reconnect: bool,
     pub connect_timeout: String,
     pub will_topic: String,
@@ -154,6 +186,12 @@ impl FormState {
         self.protocol = ProtocolVersion::from_key(&cfg.protocol).to_index();
         self.keep_alive = cfg.keep_alive.to_string();
         self.clean_session = cfg.clean_session;
+        self.session_expiry = empty_if_zero(cfg.session_expiry);
+        self.receive_max = empty_if_zero(cfg.receive_max);
+        self.max_packet_size = empty_if_zero(cfg.max_packet_size);
+        self.topic_alias_max = empty_if_zero(cfg.topic_alias_max);
+        self.manual_acks = cfg.manual_acks;
+        self.tls_keylog = cfg.tls_keylog;
         self.auto_reconnect = cfg.auto_reconnect;
         self.connect_timeout = cfg.connect_timeout.to_string();
         self.will_topic = cfg.will_topic.clone();
@@ -231,6 +269,12 @@ impl FormState {
             protocol: 0,
             keep_alive: String::new(),
             clean_session: true,
+            session_expiry: String::new(),
+            receive_max: String::new(),
+            max_packet_size: String::new(),
+            topic_alias_max: String::new(),
+            manual_acks: false,
+            tls_keylog: false,
             auto_reconnect: true,
             connect_timeout: String::new(),
             will_topic: String::new(),
@@ -273,6 +317,13 @@ impl FormState {
         cfg.protocol = ProtocolVersion::from_index(self.protocol).to_key().to_string();
         cfg.keep_alive = parse_u16_clamped(&self.keep_alive, 1, 65535, 60);
         cfg.clean_session = self.clean_session;
+        cfg.session_expiry = parse_clamped_u32(&self.session_expiry, 0, u32::MAX);
+        cfg.receive_max = parse_clamped_u16(&self.receive_max, 1, 65535);
+        // MQTT packet size is a variable-byte integer: 1 … 268 435 455 bytes.
+        cfg.max_packet_size = parse_clamped_u32(&self.max_packet_size, 1, 268_435_455);
+        cfg.topic_alias_max = parse_clamped_u16(&self.topic_alias_max, 1, 65535);
+        cfg.manual_acks = self.manual_acks;
+        cfg.tls_keylog = self.tls_keylog;
         cfg.auto_reconnect = self.auto_reconnect;
         cfg.connect_timeout = parse_u16_clamped(&self.connect_timeout, 1, 300, 10);
         cfg.will_topic = self.will_topic.clone();
@@ -400,6 +451,12 @@ mod tests {
         cfg.pub_qos = 1;
         cfg.protocol = "5.0".into();
         cfg.timed_interval = 9;
+        cfg.session_expiry = 3600;
+        cfg.receive_max = 50;
+        cfg.max_packet_size = 1_048_576;
+        cfg.topic_alias_max = 10;
+        cfg.manual_acks = true;
+        cfg.tls_keylog = true;
         cfg.subscriptions.push(crate::config::SubscriptionConfig {
             topic: "a/#".into(),
             qos: 2,
@@ -437,6 +494,12 @@ mod tests {
         assert_eq!(back.pub_qos, 1);
         assert_eq!(back.protocol, "5.0");
         assert_eq!(back.timed_interval, 9);
+        assert_eq!(back.session_expiry, 3600);
+        assert_eq!(back.receive_max, 50);
+        assert_eq!(back.max_packet_size, 1_048_576);
+        assert_eq!(back.topic_alias_max, 10);
+        assert!(back.manual_acks);
+        assert!(back.tls_keylog);
         assert_eq!(back.publish_presets.len(), 1);
         assert_eq!(back.publish_presets[0].format, "json");
         assert!(back.publish_presets[0].retain);
@@ -459,6 +522,10 @@ mod tests {
         form.pub_qos = 9;
         form.sub_qos = -1;
         form.will_qos = 3;
+        form.receive_max = "0".into();
+        form.max_packet_size = "99999999999".into();
+        form.topic_alias_max = "abc".into();
+        form.session_expiry = "".into();
         form.name = "  ".into();
         form.host = "broker".into();
         form.port = "1883".into();
@@ -470,6 +537,10 @@ mod tests {
         assert_eq!(cfg.pub_qos, 2);
         assert_eq!(cfg.sub_qos, 0);
         assert_eq!(cfg.will_qos, 2);
+        assert_eq!(cfg.receive_max, 0);
+        assert_eq!(cfg.max_packet_size, 268_435_455);
+        assert_eq!(cfg.topic_alias_max, 0);
+        assert_eq!(cfg.session_expiry, 0);
         assert_eq!(cfg.name, "broker:1883");
     }
 

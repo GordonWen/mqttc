@@ -243,6 +243,97 @@ impl ConnStatus {
     }
 }
 
+/// Delivery stage of one PUBLISH / PUBACK / PUBCOMP exchange.
+///
+/// Only outgoing QoS 1/2 rows and inbound rows waiting for a manual ack carry
+/// this; SYS/ERR and QoS 0 rows have none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AckState {
+    /// Handed to rumqttc, packet id not seen yet.
+    Queued,
+    /// Written to the network. This is the terminal state for QoS 0.
+    Sent,
+    /// QoS 1 waiting for PUBACK, QoS 2 waiting for PUBREC.
+    AwaitingAck,
+    /// QoS 2: PUBREC received (rumqttc sent PUBREL), waiting for PUBCOMP.
+    AwaitingComp,
+    /// PUBACK / PUBCOMP reported success.
+    Acked,
+    /// Broker returned a non-success reason code.
+    Rejected,
+    /// No ack before the deadline (or the link dropped); not retransmitted by us.
+    Timeout,
+    /// Inbound QoS 1/2 row in manual-ack mode, waiting for the user.
+    PendingAck,
+    /// Manual ack request handed to rumqttc (PUBACK or PUBREC sent).
+    AckSent,
+}
+
+/// Per-row delivery status, updated in place as ack events arrive.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AckInfo {
+    pub state: AckState,
+    /// Packet id: broker ack id for SEND rows, inbound publish id for RECV rows.
+    pub pkid: Option<u16>,
+    /// QoS of the tracked message; inbound manual acks need it to pick PUBACK vs PUBREC.
+    pub qos: Option<u8>,
+    /// Time from "written" to the broker ack, filled on `Acked` / `Rejected`.
+    pub elapsed_ms: Option<u64>,
+    /// Broker reason code for `Rejected`.
+    pub reason: Option<String>,
+}
+
+impl AckInfo {
+    pub fn new(state: AckState) -> Self {
+        Self {
+            state,
+            pkid: None,
+            qos: None,
+            elapsed_ms: None,
+            reason: None,
+        }
+    }
+
+    pub fn with_pkid(mut self, pkid: u16) -> Self {
+        self.pkid = Some(pkid);
+        self
+    }
+
+    /// `(zh, en)` text for the row meta line. `None` keeps the row clean.
+    pub fn text(&self) -> Option<String> {
+        let text = match self.state {
+            AckState::Queued => i18n::t("排队中", "queued").to_string(),
+            AckState::Sent => i18n::t("已发出", "sent").to_string(),
+            AckState::AwaitingAck => i18n::t("等待确认", "awaiting ack").to_string(),
+            AckState::AwaitingComp => "等待 PUBCOMP".to_string(),
+            AckState::Acked => match self.elapsed_ms {
+                Some(ms) => i18n::t(
+                    &format!("已确认 {ms}ms"),
+                    &format!("acked {ms}ms"),
+                )
+                .to_string(),
+                None => i18n::t("已确认", "acked").to_string(),
+            },
+            AckState::Rejected => match &self.reason {
+                Some(reason) => i18n::t(
+                    &format!("确认失败: {reason}"),
+                    &format!("ack failed: {reason}"),
+                )
+                .to_string(),
+                None => i18n::t("确认失败", "ack failed").to_string(),
+            },
+            AckState::Timeout => {
+                i18n::t("结果未知（未收到确认）", "result unknown (no ack)").to_string()
+            }
+            AckState::PendingAck => {
+                i18n::t("待手动确认", "manual ack pending").to_string()
+            }
+            AckState::AckSent => i18n::t("已手动确认", "manually acked").to_string(),
+        };
+        Some(text)
+    }
+}
+
 /// MQTT metadata attached to one RECV/SEND row. Empty/default for SYS/ERR.
 #[derive(Clone, Debug, Default)]
 pub struct LogMeta {
@@ -273,6 +364,8 @@ pub struct LogRecord {
     pub dup: bool,
     pub props: Vec<(String, String)>,
     pub expiry: Option<u32>,
+    /// Delivery status for outgoing QoS 1/2 rows and manual-ack inbound rows.
+    pub ack: Option<AckInfo>,
 }
 
 impl LogRecord {
@@ -297,6 +390,9 @@ impl LogRecord {
                 &format!("过期 {expiry}s"),
                 &format!("expiry {expiry}s"),
             ));
+        }
+        if let Some(text) = self.ack.as_ref().and_then(AckInfo::text) {
+            parts.push(text);
         }
         parts.join(" · ")
     }

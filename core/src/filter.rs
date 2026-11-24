@@ -84,6 +84,7 @@ mod tests {
             dup: false,
             props: Vec::new(),
             expiry: None,
+            ack: None,
         }
     }
 

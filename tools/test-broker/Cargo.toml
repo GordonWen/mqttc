@@ -11,6 +11,7 @@ name = "mqttc-test-broker"
 path = "src/main.rs"
 
 [dependencies]
+bytes = "1"
 rumqttd = "0.20"
 rumqttc = { workspace = true }
 serde_json = { workspace = true }

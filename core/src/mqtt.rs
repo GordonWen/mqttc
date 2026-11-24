@@ -8,8 +8,8 @@
 //! never deliver events from a previous client.
 
 use rumqttc::{
-    Client, ConnectReturnCode, Event, Incoming, LastWill, MqttOptions, NetworkOptions, QoS,
-    TlsConfiguration, Transport,
+    Client, ConnectReturnCode, Event, Incoming, LastWill, MqttOptions, NetworkOptions, Outgoing,
+    QoS, TlsConfiguration, Transport,
 };
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 use rustls::{
@@ -18,7 +18,7 @@ use rustls::{
 };
 use std::fmt;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufReader, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -89,7 +89,67 @@ pub struct ConnectParams {
     pub ssl_ca: String,
     pub ssl_cert: String,
     pub ssl_key: String,
+    /// MQTT 5 CONNECT options; `None` leaves the rumqttc default (field omitted).
+    pub session_expiry: Option<u32>,
+    pub receive_maximum: Option<u16>,
+    pub max_packet_size: Option<u32>,
+    pub topic_alias_max: Option<u16>,
+    /// Hold PUBACK / PUBREC for inbound QoS 1/2 publishes until the UI calls ack.
+    pub manual_acks: bool,
+    /// Write TLS session secrets to `logs/tls-keys.log` (Wireshark-style key log).
+    pub tls_keylog: bool,
     pub protocol: ProtocolVersion,
+}
+
+/// Broker capabilities learned from CONNACK. Permissive defaults keep 3.1.1
+/// (which has no capability flags) and older code paths working unchanged.
+#[derive(Clone, Debug)]
+pub struct BrokerCaps {
+    pub v5: bool,
+    pub session_present: bool,
+    pub max_qos: u8,
+    pub retain_available: bool,
+    pub max_packet_size: Option<u32>,
+    pub receive_maximum: Option<u16>,
+    pub topic_alias_max: Option<u16>,
+    pub server_keep_alive: Option<u16>,
+    pub wildcard_available: bool,
+    pub shared_available: bool,
+    pub session_expiry: Option<u32>,
+    pub assigned_client_id: Option<String>,
+    /// reason string + user properties, shown as extra summary lines.
+    pub extra: Vec<(String, String)>,
+}
+
+impl Default for BrokerCaps {
+    fn default() -> Self {
+        Self {
+            v5: false,
+            session_present: false,
+            max_qos: 2,
+            retain_available: true,
+            max_packet_size: None,
+            receive_maximum: None,
+            topic_alias_max: None,
+            server_keep_alive: None,
+            wildcard_available: true,
+            shared_available: true,
+            session_expiry: None,
+            assigned_client_id: None,
+            extra: Vec::new(),
+        }
+    }
+}
+
+/// Broker ack for one of our PUBLISH packets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AckStage {
+    /// QoS 1 terminal ack.
+    PubAck,
+    /// QoS 2 first ack; our PUBREL follows automatically.
+    PubRec,
+    /// QoS 2 terminal ack.
+    PubComp,
 }
 
 /// MQTT 5-only PUBLISH properties. An empty struct sends a plain PUBLISH.
@@ -108,7 +168,7 @@ impl PublishOptions {
 /// Worker → runtime. Payload is raw bytes; the runtime decides how to display it.
 #[derive(Clone, Debug)]
 pub enum UiEvent {
-    Connected,
+    Connected { caps: BrokerCaps },
     Disconnected { reason: String },
     Recv {
         topic: String,
@@ -118,8 +178,23 @@ pub enum UiEvent {
         dup: bool,
         props: Vec<(String, String)>,
         expiry: Option<u32>,
+        /// Packet id of an inbound QoS 1/2 PUBLISH (0 for QoS 0).
+        pkid: u16,
     },
-    /// MQTT 5 acknowledgement with a reason code (PUBACK / SUBACK / UNSUBACK).
+    /// One of our PUBLISH packets was handed to the network with this packet id
+    /// (0 means QoS 0). Emitted when the event loop writes the packet.
+    PublishPkid { pkid: u16 },
+    /// Broker acknowledgement for one of our PUBLISH packets.
+    Ack {
+        pkid: u16,
+        stage: AckStage,
+        ok: bool,
+        reason: Option<String>,
+    },
+    /// rumqttc finished an inbound QoS 2 exchange after our manual PUBREC
+    /// (broker PUBREL arrived, PUBCOMP was sent automatically).
+    ManualComp { pkid: u16 },
+    /// MQTT 5 acknowledgement with a reason code (SUBACK / UNSUBACK).
     Reason {
         name: &'static str,
         pkid: u16,
@@ -219,6 +294,28 @@ impl LiveClient {
             }
         }
     }
+
+    /// Acknowledge one inbound PUBLISH in manual-ack mode. Only the packet id
+    /// and QoS are read by rumqttc, so a placeholder topic/payload is enough.
+    fn ack_incoming(&self, pkid: u16, qos: QoS) -> Result<(), String> {
+        match self {
+            Self::V311(client) => {
+                let mut publish = rumqttc::Publish::new("", qos, Vec::new());
+                publish.pkid = pkid;
+                client.ack(&publish).map_err(|err| err.to_string())
+            }
+            Self::V5(client) => {
+                let mut publish = rumqttc::v5::mqttbytes::v5::Publish::new(
+                    "",
+                    qos_v5(qos),
+                    Vec::new(),
+                    None,
+                );
+                publish.pkid = pkid;
+                client.ack(&publish).map_err(|err| err.to_string())
+            }
+        }
+    }
 }
 
 fn connack_reason(code: ConnectReturnCode) -> String {
@@ -261,6 +358,34 @@ fn connack_reason_v5(code: rumqttc::v5::mqttbytes::v5::ConnectReturnCode) -> Str
         Code::PacketTooLarge => i18n::t("报文过大", "Packet too large"),
         other => format!("{other:?}"),
     }
+}
+
+/// Sample the negotiated MQTT 5 CONNACK properties. Absent fields keep the
+/// spec defaults (QoS 2, retain and extended filters available).
+fn caps_from_connack_v5(ack: &rumqttc::v5::mqttbytes::v5::ConnAck) -> BrokerCaps {
+    let mut caps = BrokerCaps {
+        v5: true,
+        session_present: ack.session_present,
+        ..BrokerCaps::default()
+    };
+    let Some(props) = ack.properties.as_ref() else {
+        return caps;
+    };
+    caps.max_qos = props.max_qos.unwrap_or(2).min(2);
+    caps.retain_available = props.retain_available != Some(0);
+    caps.wildcard_available = props.wildcard_subscription_available != Some(0);
+    caps.shared_available = props.shared_subscription_available != Some(0);
+    caps.max_packet_size = props.max_packet_size;
+    caps.receive_maximum = props.receive_max;
+    caps.topic_alias_max = props.topic_alias_max;
+    caps.server_keep_alive = props.server_keep_alive;
+    caps.session_expiry = props.session_expiry_interval;
+    caps.assigned_client_id = props.assigned_client_identifier.clone();
+    if let Some(reason) = &props.reason_string {
+        caps.extra.push(("reason".into(), reason.clone()));
+    }
+    caps.extra.extend(props.user_properties.iter().cloned());
+    caps
 }
 
 impl Default for MqttHandle {
@@ -380,6 +505,17 @@ impl MqttHandle {
             .ok_or_else(|| i18n::t("未连接", "Not connected"))?;
         client.publish_with_options(topic, qos, retain, payload, options)
     }
+
+    /// Manual ack for an inbound PUBLISH (QoS 1 → PUBACK, QoS 2 → PUBREC).
+    /// Only meaningful when the session was opened with `manual_acks`.
+    pub fn ack_incoming(&self, pkid: u16, qos: u8) -> Result<(), String> {
+        let inner = self.inner.lock().expect("mqtt lock");
+        let client = inner
+            .client
+            .as_ref()
+            .ok_or_else(|| i18n::t("未连接", "Not connected"))?;
+        client.ack_incoming(pkid, qos_from_u8(qos))
+    }
 }
 
 fn spawn_worker(name: &str, f: impl FnOnce() + Send + 'static) {
@@ -404,6 +540,7 @@ fn start_v311<F>(
     let mut opts = MqttOptions::new(&params.client_id, &params.host, params.port);
     opts.set_keep_alive(Duration::from_secs(params.keep_alive.max(1) as u64));
     opts.set_clean_session(params.clean_session);
+    opts.set_manual_acks(params.manual_acks);
     if !params.username.is_empty() {
         opts.set_credentials(&params.username, &params.password);
     }
@@ -440,7 +577,11 @@ fn start_v311<F>(
             match notification {
                 Ok(Event::Incoming(Incoming::ConnAck(ack))) => {
                     if ack.code == ConnectReturnCode::Success {
-                        on_event(UiEvent::Connected);
+                        let caps = BrokerCaps {
+                            session_present: ack.session_present,
+                            ..BrokerCaps::default()
+                        };
+                        on_event(UiEvent::Connected { caps });
                     } else {
                         on_event(UiEvent::Error {
                             message: i18n::t(
@@ -462,7 +603,41 @@ fn start_v311<F>(
                         dup: packet.dup,
                         props: Vec::new(),
                         expiry: None,
+                        pkid: packet.pkid,
                     });
+                }
+                Ok(Event::Incoming(Incoming::PubAck(ack))) => {
+                    on_event(UiEvent::Ack {
+                        pkid: ack.pkid,
+                        stage: AckStage::PubAck,
+                        ok: true,
+                        reason: None,
+                    });
+                }
+                Ok(Event::Incoming(Incoming::PubRec(ack))) => {
+                    on_event(UiEvent::Ack {
+                        pkid: ack.pkid,
+                        stage: AckStage::PubRec,
+                        ok: true,
+                        reason: None,
+                    });
+                }
+                Ok(Event::Incoming(Incoming::PubComp(ack))) => {
+                    on_event(UiEvent::Ack {
+                        pkid: ack.pkid,
+                        stage: AckStage::PubComp,
+                        ok: true,
+                        reason: None,
+                    });
+                }
+                Ok(Event::Outgoing(Outgoing::Publish(pkid))) => {
+                    if pkid != 0 {
+                        on_event(UiEvent::PublishPkid { pkid });
+                    }
+                }
+                Ok(Event::Outgoing(Outgoing::PubComp(pkid))) => {
+                    // Only arrives for inbound QoS 2 after a manual PUBREC.
+                    on_event(UiEvent::ManualComp { pkid });
                 }
                 Err(err) => {
                     on_event(UiEvent::Error {
@@ -559,6 +734,11 @@ fn start_v5<F>(
     opts.set_keep_alive(Duration::from_secs(params.keep_alive.max(5) as u64));
     opts.set_clean_start(params.clean_session);
     opts.set_connection_timeout(params.connect_timeout.max(1) as u64);
+    opts.set_manual_acks(params.manual_acks);
+    opts.set_session_expiry_interval(params.session_expiry);
+    opts.set_receive_maximum(params.receive_maximum);
+    opts.set_max_packet_size(params.max_packet_size);
+    opts.set_topic_alias_max(params.topic_alias_max);
     if !params.username.is_empty() {
         opts.set_credentials(&params.username, &params.password);
     }
@@ -596,7 +776,9 @@ fn start_v5<F>(
                     rumqttc::v5::mqttbytes::v5::Packet::ConnAck(ack),
                 )) => {
                     if ack.code == rumqttc::v5::mqttbytes::v5::ConnectReturnCode::Success {
-                        on_event(UiEvent::Connected);
+                        on_event(UiEvent::Connected {
+                            caps: caps_from_connack_v5(&ack),
+                        });
                     } else {
                         on_event(UiEvent::Error {
                             message: i18n::t(
@@ -622,19 +804,58 @@ fn start_v5<F>(
                         dup: packet.dup,
                         props,
                         expiry,
+                        pkid: packet.pkid,
                     });
                 }
                 Ok(rumqttc::v5::Event::Incoming(
                     rumqttc::v5::mqttbytes::v5::Packet::PubAck(ack),
                 )) => {
-                    if ack.reason != rumqttc::v5::mqttbytes::v5::PubAckReason::Success {
-                        on_event(UiEvent::Reason {
-                            name: "PUBACK",
-                            pkid: ack.pkid,
-                            code: format!("{:?}", ack.reason),
-                            ok: false,
-                        });
+                    use rumqttc::v5::mqttbytes::v5::PubAckReason;
+                    let ok = matches!(
+                        ack.reason,
+                        PubAckReason::Success | PubAckReason::NoMatchingSubscribers
+                    );
+                    on_event(UiEvent::Ack {
+                        pkid: ack.pkid,
+                        stage: AckStage::PubAck,
+                        ok,
+                        reason: (!ok).then(|| format!("{:?}", ack.reason)),
+                    });
+                }
+                Ok(rumqttc::v5::Event::Incoming(
+                    rumqttc::v5::mqttbytes::v5::Packet::PubRec(ack),
+                )) => {
+                    use rumqttc::v5::mqttbytes::v5::PubRecReason;
+                    let ok = matches!(
+                        ack.reason,
+                        PubRecReason::Success | PubRecReason::NoMatchingSubscribers
+                    );
+                    on_event(UiEvent::Ack {
+                        pkid: ack.pkid,
+                        stage: AckStage::PubRec,
+                        ok,
+                        reason: (!ok).then(|| format!("{:?}", ack.reason)),
+                    });
+                }
+                Ok(rumqttc::v5::Event::Incoming(
+                    rumqttc::v5::mqttbytes::v5::Packet::PubComp(ack),
+                )) => {
+                    use rumqttc::v5::mqttbytes::v5::PubCompReason;
+                    let ok = ack.reason == PubCompReason::Success;
+                    on_event(UiEvent::Ack {
+                        pkid: ack.pkid,
+                        stage: AckStage::PubComp,
+                        ok,
+                        reason: (!ok).then(|| format!("{:?}", ack.reason)),
+                    });
+                }
+                Ok(rumqttc::v5::Event::Outgoing(Outgoing::Publish(pkid))) => {
+                    if pkid != 0 {
+                        on_event(UiEvent::PublishPkid { pkid });
                     }
+                }
+                Ok(rumqttc::v5::Event::Outgoing(Outgoing::PubComp(pkid))) => {
+                    on_event(UiEvent::ManualComp { pkid });
                 }
                 Ok(rumqttc::v5::Event::Incoming(
                     rumqttc::v5::mqttbytes::v5::Packet::SubAck(ack),
@@ -803,6 +1024,67 @@ fn load_trust_roots(ca_path: &str) -> Result<RootCertStore, String> {
     Ok(roots)
 }
 
+/// NSS key-log writer for Wireshark (`SSLKEYLOGFILE` format). Appends one
+/// `LABEL <client_random> <secret>` line per TLS secret.
+struct FileKeyLog {
+    file: Mutex<File>,
+}
+
+impl fmt::Debug for FileKeyLog {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("FileKeyLog")
+    }
+}
+
+impl FileKeyLog {
+    fn open() -> Result<Self, String> {
+        let dir = crate::config::log_dir();
+        std::fs::create_dir_all(&dir).map_err(|err| {
+            i18n::t(
+                &format!("创建日志目录失败: {err}"),
+                &format!("Failed to create log directory: {err}"),
+            )
+        })?;
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("tls-keys.log"))
+            .map_err(|err| {
+                i18n::t(
+                    &format!("创建 TLS 密钥日志失败: {err}"),
+                    &format!("Failed to create TLS key log: {err}"),
+                )
+            })?;
+        Ok(Self {
+            file: Mutex::new(file),
+        })
+    }
+}
+
+impl rustls::KeyLog for FileKeyLog {
+    fn log(&self, label: &str, client_random: &[u8], secret: &[u8]) {
+        let line = format!(
+            "{} {} {}\n",
+            label,
+            hex_bytes(client_random),
+            hex_bytes(secret)
+        );
+        if let Ok(mut file) = self.file.lock() {
+            let _ = file.write_all(line.as_bytes());
+            let _ = file.flush();
+        }
+    }
+}
+
+fn hex_bytes(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
 /// Custom CA and/or client cert when set; otherwise the native store.
 /// `ssl_verify = false` accepts any server certificate and ignores the CA
 /// path entirely, so lab brokers with self-signed certs need no CA file.
@@ -834,7 +1116,7 @@ fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
             )
         })?;
 
-    let config = if params.ssl_verify {
+    let mut config = if params.ssl_verify {
         if let (Some(certs), Some(key)) = (client_certs, client_key) {
             builder
                 .with_root_certificates(roots)
@@ -879,6 +1161,10 @@ fn build_tls_transport(params: &ConnectParams) -> Result<Transport, String> {
             .with_custom_certificate_verifier(Arc::new(NoServerVerification { provider }))
             .with_no_client_auth()
     };
+
+    if params.tls_keylog {
+        config.key_log = Arc::new(FileKeyLog::open()?);
+    }
 
     Ok(Transport::tls_with_config(TlsConfiguration::Rustls(
         Arc::new(config),
@@ -960,6 +1246,12 @@ mod tests {
             ssl_ca: String::new(),
             ssl_cert: String::new(),
             ssl_key: String::new(),
+            session_expiry: None,
+            receive_maximum: None,
+            max_packet_size: None,
+            topic_alias_max: None,
+            manual_acks: false,
+            tls_keylog: false,
             protocol: ProtocolVersion::V311,
         }
     }

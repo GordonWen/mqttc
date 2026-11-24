@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::model::{
-    clamp_log_limit, now_hms, now_timestamp, LogMeta, LogRecord, PayloadFormat, MAX_LOGS,
+    clamp_log_limit, now_hms, now_timestamp, AckInfo, LogMeta, LogRecord, PayloadFormat, MAX_LOGS,
 };
 use crate::payload;
 
@@ -42,12 +42,13 @@ impl LogStore {
         Self::default()
     }
 
-    pub fn push(&mut self, kind: &str, topic: &str, payload: Vec<u8>) {
-        self.push_meta(kind, topic, payload, LogMeta::default());
+    pub fn push(&mut self, kind: &str, topic: &str, payload: Vec<u8>) -> u64 {
+        self.push_meta(kind, topic, payload, LogMeta::default())
     }
 
     /// Push with MQTT metadata (QoS / retain / dup / MQTT 5 properties).
-    pub fn push_meta(&mut self, kind: &str, topic: &str, payload: Vec<u8>, meta: LogMeta) {
+    /// Returns the new row's sequence so callers can update its ack state later.
+    pub fn push_meta(&mut self, kind: &str, topic: &str, payload: Vec<u8>, meta: LogMeta) -> u64 {
         let seq = self.next_seq;
         self.next_seq += 1;
         self.bytes += payload.len();
@@ -63,8 +64,40 @@ impl LogStore {
             dup: meta.dup,
             props: meta.props,
             expiry: meta.expiry,
+            ack: None,
         });
         self.trim();
+        seq
+    }
+
+    /// Replace the ack status of a retained row. Rows evicted by the ring keep
+    /// no status, so callers must tolerate a stale `false`.
+    pub fn set_ack(&mut self, seq: u64, ack: Option<AckInfo>) -> bool {
+        let Some(offset) = seq.checked_sub(match self.first_seq() {
+            Some(first) => first,
+            None => return false,
+        }) else {
+            return false;
+        };
+        let Some(log) = self.items.get_mut(offset as usize) else {
+            return false;
+        };
+        if log.seq != seq {
+            return false;
+        }
+        log.ack = ack;
+        true
+    }
+
+    /// Update one field of an existing ack status, keeping the rest.
+    pub fn with_ack<R>(&mut self, seq: u64, f: impl FnOnce(&mut Option<AckInfo>) -> R) -> Option<R> {
+        let first = self.first_seq()?;
+        let offset = seq.checked_sub(first)? as usize;
+        let log = self.items.get_mut(offset)?;
+        if log.seq != seq {
+            return None;
+        }
+        Some(f(&mut log.ack))
     }
 
     /// Change the row cap and drop the oldest rows immediately.
@@ -217,5 +250,42 @@ mod tests {
         assert!(store.is_empty());
         store.push("SYS", "", b"b".to_vec());
         assert_eq!(store.iter().next().unwrap().seq, 1);
+    }
+
+    #[test]
+    fn ack_status_updates_in_place_and_evicts_with_row() {
+        let mut store = LogStore::new();
+        let seq = store.push("SEND", "a", b"x".to_vec());
+        assert!(store.set_ack(seq, Some(crate::model::AckInfo::new(crate::model::AckState::Sent))));
+        assert_eq!(
+            store.find(seq).unwrap().ack.as_ref().unwrap().state,
+            crate::model::AckState::Sent
+        );
+
+        // Evicted rows report failure instead of touching the wrong row.
+        store.set_limit(crate::model::LOG_LIMIT_MIN);
+        for i in 0..crate::model::LOG_LIMIT_MIN + 10 {
+            store.push("SYS", "", format!("{i}").into_bytes());
+        }
+        assert!(!store.set_ack(seq, None));
+        assert!(store.get_by_seq(seq).is_none());
+    }
+
+    #[test]
+    fn with_ack_can_mutate_existing_state() {
+        let mut store = LogStore::new();
+        let seq = store.push("RECV", "a", b"x".to_vec());
+        let changed = store.with_ack(seq, |slot| {
+            let ack = slot.get_or_insert_with(|| {
+                crate::model::AckInfo::new(crate::model::AckState::PendingAck)
+            });
+            ack.state = crate::model::AckState::AckSent;
+        });
+        assert!(changed.is_some());
+        assert_eq!(
+            store.find(seq).unwrap().ack.as_ref().unwrap().state,
+            crate::model::AckState::AckSent
+        );
+        assert!(store.with_ack(9999, |_| ()).is_none());
     }
 }

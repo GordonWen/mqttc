@@ -1,7 +1,10 @@
 //! Embeddable rumqttd broker plus fixture helpers.
 //!
 //! Used by `core/tests/broker_roundtrip.rs` and by the benchmark scripts, so the
-//! exact same broker configuration backs every measurement.
+//! exact same broker configuration backs every measurement. `fault` adds a
+//! scripted non-compliant broker for fault-injection tests.
+
+pub mod fault;
 
 use std::collections::HashMap;
 use std::net::{SocketAddr, TcpStream};
