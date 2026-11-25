@@ -49,6 +49,9 @@ pub struct PresetRow {
     pub qos: i32,
     pub retain: bool,
     pub format: i32,
+    /// MQTT 5 user properties (`k=v;k2=v2`) and expiry seconds.
+    pub props: String,
+    pub expiry: String,
 }
 
 impl Default for PresetRow {
@@ -60,6 +63,8 @@ impl Default for PresetRow {
             qos: 0,
             retain: false,
             format: 0,
+            props: String::new(),
+            expiry: String::new(),
         }
     }
 }
@@ -72,6 +77,8 @@ impl PresetRow {
         preset.qos = self.qos.clamp(0, 2) as u8;
         preset.retain = self.retain;
         preset.format = PayloadFormat::from_index(self.format).to_key().to_string();
+        preset.props = self.props.trim().to_string();
+        preset.expiry = parse_interval_secs(&self.expiry);
     }
 }
 
@@ -88,6 +95,9 @@ pub struct RuleRow {
     pub format: i32,
     /// Minimum seconds between replies; empty / 0 replies to every match.
     pub min_interval_secs: String,
+    /// MQTT 5 reply user properties and expiry seconds.
+    pub props: String,
+    pub expiry: String,
 }
 
 impl Default for RuleRow {
@@ -102,6 +112,8 @@ impl Default for RuleRow {
             retain: false,
             format: 0,
             min_interval_secs: String::new(),
+            props: String::new(),
+            expiry: String::new(),
         }
     }
 }
@@ -117,6 +129,8 @@ impl RuleRow {
         rule.retain = self.retain;
         rule.format = PayloadFormat::from_index(self.format).to_key().to_string();
         rule.min_interval_secs = parse_interval_secs(&self.min_interval_secs);
+        rule.props = self.props.trim().to_string();
+        rule.expiry = parse_interval_secs(&self.expiry);
     }
 }
 
@@ -229,6 +243,12 @@ impl FormState {
                 qos: preset.qos.min(2) as i32,
                 retain: preset.retain,
                 format: PayloadFormat::from_key(&preset.format).to_index(),
+                props: preset.props.clone(),
+                expiry: if preset.expiry == 0 {
+                    String::new()
+                } else {
+                    preset.expiry.to_string()
+                },
             })
             .collect();
         self.rules = cfg
@@ -247,6 +267,12 @@ impl FormState {
                     String::new()
                 } else {
                     rule.min_interval_secs.to_string()
+                },
+                props: rule.props.clone(),
+                expiry: if rule.expiry == 0 {
+                    String::new()
+                } else {
+                    rule.expiry.to_string()
                 },
             })
             .collect();
@@ -480,6 +506,8 @@ mod tests {
             qos: 1,
             retain: true,
             format: "json".into(),
+            props: "source=test".into(),
+            expiry: 30,
         });
         cfg.auto_reply_rules.push(AutoReplyRule {
             enabled: true,
@@ -491,6 +519,8 @@ mod tests {
             retain: false,
             format: "text".into(),
             min_interval_secs: 5,
+            props: "role=echo".into(),
+            expiry: 15,
         });
         cfg.auto_reply_echo = "rematch".into();
 
@@ -514,9 +544,13 @@ mod tests {
         assert_eq!(back.publish_presets.len(), 1);
         assert_eq!(back.publish_presets[0].format, "json");
         assert!(back.publish_presets[0].retain);
+        assert_eq!(back.publish_presets[0].props, "source=test");
+        assert_eq!(back.publish_presets[0].expiry, 30);
         assert_eq!(back.auto_reply_rules.len(), 1);
         assert_eq!(back.auto_reply_rules[0].match_topic, "in/#");
         assert_eq!(back.auto_reply_rules[0].min_interval_secs, 5);
+        assert_eq!(back.auto_reply_rules[0].props, "role=echo");
+        assert_eq!(back.auto_reply_rules[0].expiry, 15);
         assert_eq!(back.auto_reply_echo, "rematch");
         assert_eq!(back.subscriptions.len(), 1);
         assert!(!back.subscriptions[0].no_local);

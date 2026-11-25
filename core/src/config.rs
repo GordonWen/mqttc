@@ -44,6 +44,12 @@ pub struct PublishPreset {
     pub retain: bool,
     #[serde(default = "default_payload_format")]
     pub format: String,
+    /// MQTT 5 publish user properties, written as `key=value;key2=value2`.
+    #[serde(default)]
+    pub props: String,
+    /// MQTT 5 message expiry interval in seconds; 0 leaves it unset.
+    #[serde(default)]
+    pub expiry: u32,
 }
 
 impl Default for PublishPreset {
@@ -55,6 +61,8 @@ impl Default for PublishPreset {
             qos: 0,
             retain: false,
             format: default_payload_format(),
+            props: String::new(),
+            expiry: 0,
         }
     }
 }
@@ -174,6 +182,12 @@ pub struct AutoReplyRule {
     /// Minimum seconds between two replies from this rule; 0 replies to every match.
     #[serde(default)]
     pub min_interval_secs: u32,
+    /// MQTT 5 reply user properties (`key=value;key2=value2`).
+    #[serde(default)]
+    pub props: String,
+    /// MQTT 5 reply message expiry interval in seconds; 0 leaves it unset.
+    #[serde(default)]
+    pub expiry: u32,
 }
 
 impl Default for AutoReplyRule {
@@ -188,6 +202,8 @@ impl Default for AutoReplyRule {
             retain: false,
             format: default_payload_format(),
             min_interval_secs: 0,
+            props: String::new(),
+            expiry: 0,
         }
     }
 }
@@ -646,6 +662,8 @@ mod tests {
             qos: 1,
             retain: true,
             format: "hex".to_string(),
+            props: "source=test".to_string(),
+            expiry: 30,
         });
         conn.auto_reply_echo = "rematch".to_string();
         conn.auto_reply_rules.push(AutoReplyRule {
@@ -658,6 +676,8 @@ mod tests {
             retain: false,
             format: "text".to_string(),
             min_interval_secs: 3,
+            props: "role=echo".to_string(),
+            expiry: 15,
         });
         config.active_id = conn.id.clone();
         config.connections.push(conn);
@@ -697,6 +717,8 @@ mod tests {
         assert_eq!(back.connections[0].publish_presets[0].qos, 1);
         assert!(back.connections[0].publish_presets[0].retain);
         assert_eq!(back.connections[0].publish_presets[0].format, "hex");
+        assert_eq!(back.connections[0].publish_presets[0].props, "source=test");
+        assert_eq!(back.connections[0].publish_presets[0].expiry, 30);
         assert_eq!(back.connections[0].auto_reply_echo, "rematch");
         assert_eq!(back.connections[0].auto_reply_rules.len(), 1);
         assert!(back.connections[0].auto_reply_rules[0].enabled);
@@ -704,6 +726,8 @@ mod tests {
         assert_eq!(back.connections[0].auto_reply_rules[0].payload_contains, "ping");
         assert_eq!(back.connections[0].auto_reply_rules[0].reply_topic, "dev/out");
         assert_eq!(back.connections[0].auto_reply_rules[0].reply_payload, "pong");
+        assert_eq!(back.connections[0].auto_reply_rules[0].props, "role=echo");
+        assert_eq!(back.connections[0].auto_reply_rules[0].expiry, 15);
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);
         assert_eq!(back.skin, "green");
@@ -723,8 +747,8 @@ mod tests {
                 topic: "t1".into(),
                 payload: "p1".into(),
                 qos: 9,
-                retain: false,
                 format: String::new(),
+                ..PublishPreset::default()
             },
             PublishPreset {
                 name: "b".into(),

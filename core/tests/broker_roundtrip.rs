@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use mqttc_core::config::{AppConfig, AutoReplyRule, ConnectionConfig, SubscriptionConfig};
-use mqttc_core::form::PresetRow;
+use mqttc_core::form::{PresetRow, RuleRow};
 use mqttc_core::model::ConnStatus;
 use mqttc_core::runtime::AppRuntime;
 use mqttc_test_broker::{start_broker, start_broker_dual, wait_for_port};
@@ -48,6 +48,7 @@ fn app(port: u16, protocol: &str) -> AppRuntime {
         retain: false,
         format: "text".into(),
         min_interval_secs: 0,
+        ..Default::default()
     }];
 
     let mut cfg = AppConfig::default();
@@ -105,6 +106,7 @@ fn v311_roundtrip_preset_and_auto_reply() {
         qos: 0,
         retain: false,
         format: 0,
+        ..Default::default()
     }];
     assert!(rt.publish_preset(0), "preset publish failed");
     assert!(
@@ -192,6 +194,67 @@ fn v5_connect_publish_receive() {
         pump_until(&mut rt, 10, |rt| has_log(rt, "RECV", "mqttc/it/hello", b"hello")),
         "MQTT 5.0 round trip failed"
     );
+    rt.disconnect();
+    drop(broker);
+}
+
+#[test]
+fn v5_preset_and_reply_carry_properties() {
+    let broker = start_broker_dual(21907, 21908);
+    assert!(wait_for_port(21908, Duration::from_secs(10)), "v5 listener missing");
+
+    let mut rt = app(21908, "5.0");
+    assert!(rt.connect());
+    assert!(pump_until(&mut rt, 10, connected), "MQTT 5.0 never connected");
+
+    // Preset rows send their own user properties and expiry.
+    rt.form.presets = vec![PresetRow {
+        name: "props".into(),
+        topic: "mqttc/it/props".into(),
+        payload: "with-props".into(),
+        qos: 1,
+        props: "k=v".into(),
+        expiry: "30".into(),
+        ..Default::default()
+    }];
+    assert!(rt.publish_preset(0), "preset publish failed");
+    assert!(
+        pump_until(&mut rt, 10, |rt| {
+            rt.visible_logs().iter().any(|log| {
+                log.kind == "SEND"
+                    && log.topic == "mqttc/it/props"
+                    && log.props.iter().any(|(k, v)| k == "k" && v == "v")
+                    && log.expiry == Some(30)
+            })
+        }),
+        "preset properties missing from the SEND row"
+    );
+
+    // Auto replies use the same options path.
+    rt.form.rules = vec![RuleRow {
+        enabled: true,
+        match_topic: "mqttc/it/ping".into(),
+        reply_topic: "mqttc/it/rule-reply".into(),
+        reply_payload: "pong5".into(),
+        props: "role=echo".into(),
+        expiry: "15".into(),
+        ..Default::default()
+    }];
+    rt.form.pub_topic = "mqttc/it/ping".into();
+    rt.form.pub_payload = "ping5".into();
+    assert!(rt.publish_form());
+    assert!(
+        pump_until(&mut rt, 10, |rt| {
+            rt.visible_logs().iter().any(|log| {
+                log.kind == "SEND"
+                    && log.topic == "mqttc/it/rule-reply"
+                    && log.props.iter().any(|(k, v)| k == "role" && v == "echo")
+                    && log.expiry == Some(15)
+            })
+        }),
+        "reply properties missing from the SEND row"
+    );
+
     rt.disconnect();
     drop(broker);
 }

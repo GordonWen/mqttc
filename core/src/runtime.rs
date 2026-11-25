@@ -1277,16 +1277,25 @@ impl AppRuntime {
             }
         };
         let qos = preset.qos.min(2);
-        if let Some(err) = self.publish_check(&id, &topic, qos, preset.retain, payload.len(), 0) {
+        let options = publish_options(&preset.props, preset.expiry);
+        let props_len = options
+            .user_properties
+            .iter()
+            .map(|(k, v)| k.len() + v.len() + 4)
+            .sum::<usize>();
+        if let Some(err) =
+            self.publish_check(&id, &topic, qos, preset.retain, payload.len(), props_len)
+        {
             self.push_log(&id, "ERR", &topic, err.into_bytes());
             return false;
         }
         let mqtt = self.runtime_mut(&id).mqtt.clone();
-        match mqtt.publish(
+        match mqtt.publish_with_options(
             &topic,
             qos_from_u8(qos),
             preset.retain,
             payload.clone(),
+            &options,
         ) {
             Ok(()) => {
                 self.push_send(
@@ -1296,6 +1305,8 @@ impl AppRuntime {
                     LogMeta {
                         qos: Some(qos),
                         retain: preset.retain,
+                        props: options.user_properties.clone(),
+                        expiry: options.expiry,
                         ..LogMeta::default()
                     },
                 );
@@ -2048,12 +2059,31 @@ impl AppRuntime {
             }
         };
         let qos = rule.qos.min(2);
-        if let Some(err) = self.publish_check(conn_id, &reply_topic, qos, rule.retain, reply_bytes.len(), 0) {
+        let options = publish_options(&rule.props, rule.expiry);
+        let props_len = options
+            .user_properties
+            .iter()
+            .map(|(k, v)| k.len() + v.len() + 4)
+            .sum::<usize>();
+        if let Some(err) = self.publish_check(
+            conn_id,
+            &reply_topic,
+            qos,
+            rule.retain,
+            reply_bytes.len(),
+            props_len,
+        ) {
             self.push_log(conn_id, "ERR", &reply_topic, err.into_bytes());
             return;
         }
         let mqtt = self.runtime_mut(conn_id).mqtt.clone();
-        match mqtt.publish(&reply_topic, qos_from_u8(qos), rule.retain, reply_bytes.clone()) {
+        match mqtt.publish_with_options(
+            &reply_topic,
+            qos_from_u8(qos),
+            rule.retain,
+            reply_bytes.clone(),
+            &options,
+        ) {
             Ok(()) => {
                 {
                     let runtime = self.runtime_mut(conn_id);
@@ -2074,6 +2104,8 @@ impl AppRuntime {
                     LogMeta {
                         qos: Some(qos),
                         retain: rule.retain,
+                        props: options.user_properties.clone(),
+                        expiry: options.expiry,
                         ..LogMeta::default()
                     },
                 );

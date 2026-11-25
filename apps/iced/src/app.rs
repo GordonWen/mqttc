@@ -592,6 +592,8 @@ pub enum RuleTextField {
     Contains,
     ReplyTopic,
     ReplyPayload,
+    Props,
+    Expiry,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -599,6 +601,8 @@ pub enum PresetTextField {
     Name,
     Topic,
     Payload,
+    Props,
+    Expiry,
 }
 
 /// Connection-scoped panels shown below the session header.
@@ -1571,6 +1575,8 @@ impl App {
                         RuleTextField::Contains => rule.payload_contains = value,
                         RuleTextField::ReplyTopic => rule.reply_topic = value,
                         RuleTextField::ReplyPayload => rule.reply_payload = value,
+                        RuleTextField::Props => rule.props = value,
+                        RuleTextField::Expiry => rule.expiry = value,
                     }
                 }
                 self.rt.apply_form();
@@ -1612,6 +1618,8 @@ impl App {
                         PresetTextField::Name => preset.name = value,
                         PresetTextField::Topic => preset.topic = value,
                         PresetTextField::Payload => preset.payload = value,
+                        PresetTextField::Props => preset.props = value,
+                        PresetTextField::Expiry => preset.expiry = value,
                     }
                 }
                 self.rt.apply_form();
@@ -3904,10 +3912,11 @@ impl App {
         let mut list = column![].spacing(8);
         let hits = self.rt.active_rule_hits();
         let total = self.rt.form.rules.len();
+        // Publish properties exist only on 5.0; hide the whole line on 3.1.1.
+        let v5 = self.rt.form.protocol == 1;
         for (index, rule) in self.rt.form.rules.iter().enumerate() {
             let hit_count = hits.get(index).copied().unwrap_or(0);
-            let card = container(
-                column![
+            let mut card_body = column![
                     row![
                         checkbox(rule.enabled)
                             .label(t("启用", "Enabled"))
@@ -3989,10 +3998,37 @@ impl App {
                     .spacing(6)
                     .align_y(Alignment::Center),
                 ]
-                .spacing(6),
-            )
-            .padding(10)
-            .style(c.inset());
+                .spacing(6);
+            if v5 {
+                card_body = card_body.push(
+                    row![
+                        text(t("用户属性", "User props"))
+                            .size(fs(11.0))
+                            .color(c.text_faint),
+                        text_input("k=v;k2=v2", &rule.props)
+                            .size(fs(13.0))
+                            .padding([5, 7])
+                            .width(Length::Fill)
+                            .style(c.input_style())
+                            .on_input(move |v| Msg::RuleText(index, RuleTextField::Props, v)),
+                        text(t("过期 (s)", "Expiry (s)"))
+                            .size(fs(11.0))
+                            .color(c.text_faint),
+                        text_input("0", &rule.expiry)
+                            .size(fs(12.0))
+                            .padding([4, 6])
+                            .width(70)
+                            .style(c.input_style())
+                            .on_input(move |v| Msg::RuleText(index, RuleTextField::Expiry, v)),
+                        self.hint(c, t("仅 MQTT 5", "MQTT 5 only")),
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
+                );
+            }
+            let card = container(card_body)
+                .padding(10)
+                .style(c.inset());
             list = list.push(card);
         }
         if self.rt.form.rules.is_empty() {
@@ -4041,9 +4077,10 @@ impl App {
     fn page_presets(&self, c: &Colors) -> El<'_> {
         let mut list = column![].spacing(8);
         let count = self.rt.form.presets.len();
+        // Publish properties exist only on 5.0; hide the whole line on 3.1.1.
+        let v5 = self.rt.form.protocol == 1;
         for (index, preset) in self.rt.form.presets.iter().enumerate() {
-            let card = container(
-                column![
+            let mut card_body = column![
                     row![
                         text_input(l("名称", "Name"), &preset.name)
                             .size(fs(13.0))
@@ -4110,10 +4147,37 @@ impl App {
                     .spacing(5)
                     .align_y(Alignment::Center),
                 ]
-                .spacing(5),
-            )
-            .padding(10)
-            .style(c.inset());
+                .spacing(5);
+            if v5 {
+                card_body = card_body.push(
+                    row![
+                        text(t("用户属性", "User props"))
+                            .size(fs(11.0))
+                            .color(c.text_faint),
+                        text_input("k=v;k2=v2", &preset.props)
+                            .size(fs(13.0))
+                            .padding([5, 7])
+                            .width(Length::Fill)
+                            .style(c.input_style())
+                            .on_input(move |v| Msg::PresetText(index, PresetTextField::Props, v)),
+                        text(t("过期 (s)", "Expiry (s)"))
+                            .size(fs(11.0))
+                            .color(c.text_faint),
+                        text_input("0", &preset.expiry)
+                            .size(fs(12.0))
+                            .padding([4, 6])
+                            .width(70)
+                            .style(c.input_style())
+                            .on_input(move |v| Msg::PresetText(index, PresetTextField::Expiry, v)),
+                        self.hint(c, t("仅 MQTT 5", "MQTT 5 only")),
+                    ]
+                    .spacing(5)
+                    .align_y(Alignment::Center),
+                );
+            }
+            let card = container(card_body)
+                .padding(10)
+                .style(c.inset());
             list = list.push(card);
         }
         if self.rt.form.presets.is_empty() {
@@ -4787,6 +4851,42 @@ mod tests {
         assert_eq!(names(&app), ["a", "b", "c"]);
         let _ = app.update(Msg::MoveRuleTo(0, 2));
         assert_eq!(names(&app), ["b", "c", "a"]);
+    }
+
+    /// MQTT 5 property edits on preset and rule rows reach the saved config.
+    #[test]
+    fn preset_and_rule_props_reach_the_config() {
+        let mut app = App::for_test();
+        app.rt.form.presets = vec![PresetRow::default()];
+        app.rt.form.rules = vec![mqttc_core::form::RuleRow::default()];
+
+        let _ = app.update(Msg::PresetText(0, PresetTextField::Props, "k=v".into()));
+        let _ = app.update(Msg::PresetText(0, PresetTextField::Expiry, "30".into()));
+        let _ = app.update(Msg::RuleText(0, RuleTextField::Props, "role=echo".into()));
+        let _ = app.update(Msg::RuleText(0, RuleTextField::Expiry, "15".into()));
+
+        let idx = app.rt.active_index().expect("test runtime has a connection");
+        let cfg = &app.rt.config.connections[idx];
+        assert_eq!(cfg.publish_presets[0].props, "k=v");
+        assert_eq!(cfg.publish_presets[0].expiry, 30);
+        assert_eq!(cfg.auto_reply_rules[0].props, "role=echo");
+        assert_eq!(cfg.auto_reply_rules[0].expiry, 15);
+    }
+
+    /// Both rows render with the property line shown only for MQTT 5.
+    #[test]
+    fn rule_and_preset_pages_build_for_both_versions() {
+        let mut app = App::for_test();
+        app.rt.form.presets = vec![PresetRow::default()];
+        app.rt.form.rules = vec![mqttc_core::form::RuleRow::default()];
+        app.page = 1;
+        for protocol in [0, 1] {
+            app.rt.form.protocol = protocol;
+            for tab in [SessionTab::Rules, SessionTab::Presets] {
+                app.session_tab = tab;
+                let _page = app.view();
+            }
+        }
     }
 
     /// Buttons follow their names: two-character names stay narrow, long ones
