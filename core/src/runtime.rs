@@ -1230,6 +1230,26 @@ impl AppRuntime {
 
     // ------------------------------------------------------------- publish
 
+    /// Properties are only encoded and shown when the session really is 5.0;
+    /// 3.1.1 drops them on the floor, so the SEND row must not claim them.
+    fn options_for(
+        &self,
+        conn_id: &str,
+        props: &str,
+        expiry: u32,
+        format: PayloadFormat,
+    ) -> PublishOptions {
+        let v5 = self
+            .runtime(conn_id)
+            .map(|runtime| runtime.caps.v5)
+            .unwrap_or(false);
+        if v5 {
+            publish_options(props, expiry, format)
+        } else {
+            PublishOptions::default()
+        }
+    }
+
     /// Bottom "Publish" button.
     pub fn publish_form(&mut self) -> bool {
         self.apply_form();
@@ -1277,12 +1297,8 @@ impl AppRuntime {
             }
         };
         let qos = preset.qos.min(2);
-        let options = publish_options(&preset.props, preset.expiry);
-        let props_len = options
-            .user_properties
-            .iter()
-            .map(|(k, v)| k.len() + v.len() + 4)
-            .sum::<usize>();
+        let options = self.options_for(&id, &preset.props, preset.expiry, format);
+        let props_len = options.estimated_len();
         if let Some(err) =
             self.publish_check(&id, &topic, qos, preset.retain, payload.len(), props_len)
         {
@@ -1305,7 +1321,7 @@ impl AppRuntime {
                     LogMeta {
                         qos: Some(qos),
                         retain: preset.retain,
-                        props: options.user_properties.clone(),
+                        props: display_props(&options),
                         expiry: options.expiry,
                         ..LogMeta::default()
                     },
@@ -1394,12 +1410,8 @@ impl AppRuntime {
         } else {
             (cfg.pub_props.clone(), cfg.pub_expiry)
         };
-        let options = publish_options(&props_text, expiry);
-        let props_len = options
-            .user_properties
-            .iter()
-            .map(|(k, v)| k.len() + v.len() + 4)
-            .sum::<usize>();
+        let options = self.options_for(conn_id, &props_text, expiry, format);
+        let props_len = options.estimated_len();
         if let Some(err) = self.publish_check(
             conn_id,
             &topic,
@@ -1422,7 +1434,7 @@ impl AppRuntime {
                     LogMeta {
                         qos: Some(qos),
                         retain,
-                        props: options.user_properties.clone(),
+                        props: display_props(&options),
                         expiry: options.expiry,
                         ..LogMeta::default()
                     },
@@ -1801,6 +1813,8 @@ impl AppRuntime {
                 dup,
                 props,
                 expiry,
+                response_topic,
+                correlation_data,
                 pkid,
             } => {
                 let meta = LogMeta {
@@ -1828,7 +1842,13 @@ impl AppRuntime {
                     runtime.logs.set_ack(seq, Some(ack));
                     runtime.incoming_by_pkid.insert(pkid, seq);
                 }
-                self.maybe_auto_reply(conn_id, &topic, &payload);
+                self.maybe_auto_reply(
+                    conn_id,
+                    &topic,
+                    &payload,
+                    response_topic.as_deref(),
+                    correlation_data.as_deref(),
+                );
             }
             UiEvent::PublishPkid { pkid } => {
                 let runtime = self.runtime_mut(conn_id);
@@ -1988,7 +2008,14 @@ impl AppRuntime {
         }
     }
 
-    fn maybe_auto_reply(&mut self, conn_id: &str, topic: &str, payload: &[u8]) {
+    fn maybe_auto_reply(
+        &mut self,
+        conn_id: &str,
+        topic: &str,
+        payload: &[u8],
+        response_topic: Option<&str>,
+        correlation_data: Option<&[u8]>,
+    ) {
         if !self.is_connected(conn_id) {
             return;
         }
@@ -2040,7 +2067,19 @@ impl AppRuntime {
             return;
         };
         let rule = self.config.connections[idx].auto_reply_rules[rule_idx].clone();
-        let reply_topic = rule.reply_topic.trim().to_string();
+        // A request that names a response topic wins over the fixed reply
+        // topic, but only when the rule opts in; otherwise the row behaves
+        // exactly as before.
+        let followed = if rule.reply_to_response_topic {
+            response_topic
+                .map(str::trim)
+                .filter(|topic| !topic.is_empty())
+        } else {
+            None
+        };
+        let reply_topic = followed
+            .map(str::to_string)
+            .unwrap_or_else(|| rule.reply_topic.trim().to_string());
         if reply_topic.is_empty() {
             self.push_log(
                 conn_id,
@@ -2059,12 +2098,11 @@ impl AppRuntime {
             }
         };
         let qos = rule.qos.min(2);
-        let options = publish_options(&rule.props, rule.expiry);
-        let props_len = options
-            .user_properties
-            .iter()
-            .map(|(k, v)| k.len() + v.len() + 4)
-            .sum::<usize>();
+        let mut options = self.options_for(conn_id, &rule.props, rule.expiry, format);
+        if rule.reply_to_response_topic {
+            options.correlation_data = correlation_data.map(<[u8]>::to_vec);
+        }
+        let props_len = options.estimated_len();
         if let Some(err) = self.publish_check(
             conn_id,
             &reply_topic,
@@ -2104,7 +2142,7 @@ impl AppRuntime {
                     LogMeta {
                         qos: Some(qos),
                         retain: rule.retain,
-                        props: options.user_properties.clone(),
+                        props: display_props(&options),
                         expiry: options.expiry,
                         ..LogMeta::default()
                     },
@@ -2601,11 +2639,41 @@ fn parse_user_properties(text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn publish_options(props: &str, expiry: u32) -> PublishOptions {
+/// Derive the MQTT 5 properties a publish carries from its editor format:
+/// JSON is declared as `application/json`, text and JSON are UTF-8 payloads,
+/// base64 / hex stay untyped binary.
+fn publish_options(props: &str, expiry: u32, format: PayloadFormat) -> PublishOptions {
+    let (content_type, payload_format) = match format {
+        PayloadFormat::Json => (Some("application/json".to_string()), Some(1)),
+        PayloadFormat::Text => (None, Some(1)),
+        PayloadFormat::Base64 | PayloadFormat::Hex => (None, None),
+    };
     PublishOptions {
         user_properties: parse_user_properties(props),
         expiry: (expiry > 0).then_some(expiry),
+        content_type,
+        payload_format,
+        correlation_data: None,
     }
+}
+
+/// Flatten the options into the same label/value pairs the log panel shows
+/// for inbound properties, so SEND and RECV rows read alike.
+fn display_props(options: &PublishOptions) -> Vec<(String, String)> {
+    let mut props = options.user_properties.clone();
+    if let Some(kind) = &options.content_type {
+        props.push(("content-type".into(), kind.clone()));
+    }
+    if let Some(format) = options.payload_format {
+        props.push(("payload-format".into(), format.to_string()));
+    }
+    if let Some(data) = &options.correlation_data {
+        props.push((
+            "correlation-data".into(),
+            String::from_utf8_lossy(data).into_owned(),
+        ));
+    }
+    props
 }
 
 /// First matching enabled rule wins.
@@ -2844,6 +2912,8 @@ mod tests {
                 dup: false,
                 props: Vec::new(),
                 expiry: None,
+                response_topic: None,
+                correlation_data: None,
                 pkid: 5,
             },
         );
@@ -2902,6 +2972,8 @@ mod tests {
                 dup: false,
                 props: Vec::new(),
                 expiry: None,
+                response_topic: None,
+                correlation_data: None,
                 pkid: 0,
             },
         );
@@ -3000,11 +3072,57 @@ mod tests {
             ("b".into(), "2".into()),
             ("flag".into(), String::new()),
         ]);
-        let opts = publish_options("k=v", 0);
+        let opts = publish_options("k=v", 0, PayloadFormat::Text);
         assert!(!opts.is_empty());
         assert_eq!(opts.expiry, None);
-        assert_eq!(publish_options("", 60).expiry, Some(60));
-        assert!(publish_options("", 0).is_empty());
+        assert_eq!(opts.payload_format, Some(1));
+        assert_eq!(publish_options("", 60, PayloadFormat::Hex).expiry, Some(60));
+        assert!(publish_options("", 0, PayloadFormat::Hex).is_empty());
+    }
+
+    #[test]
+    fn properties_are_gated_on_v5_sessions() {
+        let mut rt = runtime_with_conn();
+        let id = rt.active_id().unwrap();
+        connected(&mut rt, false, BrokerCaps::default());
+        assert!(
+            rt.options_for(&id, "k=v", 30, PayloadFormat::Json).is_empty(),
+            "3.1.1 must not claim MQTT 5 properties"
+        );
+
+        connected(
+            &mut rt,
+            false,
+            BrokerCaps {
+                v5: true,
+                ..Default::default()
+            },
+        );
+        let opts = rt.options_for(&id, "k=v", 30, PayloadFormat::Json);
+        assert_eq!(opts.user_properties, vec![("k".into(), "v".into())]);
+        assert_eq!(opts.expiry, Some(30));
+        assert_eq!(opts.content_type.as_deref(), Some("application/json"));
+        assert_eq!(opts.payload_format, Some(1));
+    }
+
+    #[test]
+    fn json_format_declares_content_type() {
+        let json = publish_options("", 0, PayloadFormat::Json);
+        assert_eq!(json.content_type.as_deref(), Some("application/json"));
+        assert_eq!(json.payload_format, Some(1));
+        assert_eq!(
+            json.estimated_len(),
+            2 + 3 + "application/json".len()
+        );
+
+        let text = publish_options("", 0, PayloadFormat::Text);
+        assert!(text.content_type.is_none());
+        assert_eq!(text.payload_format, Some(1));
+
+        let binary = publish_options("", 0, PayloadFormat::Base64);
+        assert!(binary.content_type.is_none());
+        assert!(binary.payload_format.is_none());
+        assert!(binary.is_empty());
     }
 
     #[test]

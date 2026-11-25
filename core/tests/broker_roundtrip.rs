@@ -12,6 +12,9 @@ use mqttc_core::form::{PresetRow, RuleRow};
 use mqttc_core::model::ConnStatus;
 use mqttc_core::runtime::AppRuntime;
 use mqttc_test_broker::{start_broker, start_broker_dual, wait_for_port};
+use rumqttc::v5::mqttbytes::v5::PublishProperties;
+use rumqttc::v5::mqttbytes::QoS as V5QoS;
+use rumqttc::v5::{Client as V5Client, MqttOptions as V5Options};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -253,6 +256,91 @@ fn v5_preset_and_reply_carry_properties() {
             })
         }),
         "reply properties missing from the SEND row"
+    );
+
+    rt.disconnect();
+    drop(broker);
+}
+
+#[test]
+fn v5_reply_follows_response_topic() {
+    let broker = start_broker_dual(21910, 21911);
+    assert!(wait_for_port(21911, Duration::from_secs(10)), "v5 listener missing");
+
+    let mut rt = app(21911, "5.0");
+    // Fixed reply topic is a decoy: following the response topic must win.
+    rt.form.rules = vec![RuleRow {
+        enabled: true,
+        match_topic: "mqttc/it/req".into(),
+        reply_topic: "mqttc/it/fixed".into(),
+        reply_payload: "pong-r".into(),
+        reply_to_response_topic: true,
+        ..Default::default()
+    }];
+    assert!(rt.connect());
+    assert!(pump_until(&mut rt, 10, connected), "MQTT 5.0 never connected");
+
+    // A separate MQTT 5 client sends a request carrying Response Topic and
+    // Correlation Data; the reply must land on the response topic and echo
+    // the correlation data.
+    let mut opts = V5Options::new(unique_client_id(), "127.0.0.1", 21911);
+    opts.set_keep_alive(Duration::from_secs(10));
+    let (client, mut connection) = V5Client::new(opts, 8);
+    let (connected_tx, connected_rx) = std::sync::mpsc::channel();
+    let (queued_tx, queued_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut events = connection.iter();
+        if events.next().is_some() {
+            let _ = connected_tx.send(());
+        }
+        if queued_rx.recv_timeout(Duration::from_secs(5)).is_err() {
+            return;
+        }
+        // Sends the queued publish, then parks waiting for packets.
+        let _ = events.next();
+    });
+    connected_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("request client never connected");
+    client
+        .publish_with_properties(
+            "mqttc/it/req",
+            V5QoS::AtLeastOnce,
+            false,
+            "ping-r".as_bytes().to_vec(),
+            PublishProperties {
+                response_topic: Some("mqttc/it/resp/42".into()),
+                correlation_data: Some(bytes::Bytes::from_static(b"abc-123")),
+                ..Default::default()
+            },
+        )
+        .expect("queue request");
+    queued_tx.send(()).ok();
+
+    assert!(
+        pump_until(&mut rt, 10, |rt| {
+            rt.visible_logs().iter().any(|log| {
+                log.kind == "SEND"
+                    && log.topic == "mqttc/it/resp/42"
+                    && log.payload.as_ref() == b"pong-r"
+                    && log
+                        .props
+                        .iter()
+                        .any(|(k, v)| k == "correlation-data" && v == "abc-123")
+            })
+        }),
+        "reply did not follow the response topic; SEND rows: {:?}",
+        rt.visible_logs()
+            .iter()
+            .filter(|log| log.kind == "SEND")
+            .map(|log| (log.topic.clone(), log.props.clone()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !rt.visible_logs()
+            .iter()
+            .any(|log| log.kind == "SEND" && log.topic == "mqttc/it/fixed"),
+        "reply used the fixed topic despite a response topic"
     );
 
     rt.disconnect();

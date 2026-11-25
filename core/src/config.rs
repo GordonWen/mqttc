@@ -188,6 +188,10 @@ pub struct AutoReplyRule {
     /// MQTT 5 reply message expiry interval in seconds; 0 leaves it unset.
     #[serde(default)]
     pub expiry: u32,
+    /// Reply to the inbound request's Response Topic (and echo its
+    /// Correlation Data) instead of the fixed reply topic.
+    #[serde(default)]
+    pub reply_to_response_topic: bool,
 }
 
 impl Default for AutoReplyRule {
@@ -204,6 +208,7 @@ impl Default for AutoReplyRule {
             min_interval_secs: 0,
             props: String::new(),
             expiry: 0,
+            reply_to_response_topic: false,
         }
     }
 }
@@ -678,6 +683,7 @@ mod tests {
             min_interval_secs: 3,
             props: "role=echo".to_string(),
             expiry: 15,
+            reply_to_response_topic: true,
         });
         config.active_id = conn.id.clone();
         config.connections.push(conn);
@@ -728,6 +734,7 @@ mod tests {
         assert_eq!(back.connections[0].auto_reply_rules[0].reply_payload, "pong");
         assert_eq!(back.connections[0].auto_reply_rules[0].props, "role=echo");
         assert_eq!(back.connections[0].auto_reply_rules[0].expiry, 15);
+        assert!(back.connections[0].auto_reply_rules[0].reply_to_response_topic);
         assert_eq!(back.log_format, "base64");
         assert!(!back.auto_scroll);
         assert_eq!(back.skin, "green");

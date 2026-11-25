@@ -560,6 +560,7 @@ pub enum Msg {
     MoveRuleTo(usize, usize),
     RuleEnabled(usize, bool),
     RuleRetain(usize, bool),
+    RuleResponseTopic(usize, bool),
     RuleNum(usize, i32),
     RuleFormat(usize, i32),
     RuleText(usize, RuleTextField, String),
@@ -1553,6 +1554,12 @@ impl App {
             Msg::RuleRetain(index, on) => {
                 if let Some(rule) = self.rt.form.rules.get_mut(index) {
                     rule.retain = on;
+                }
+                self.rt.apply_form();
+            }
+            Msg::RuleResponseTopic(index, on) => {
+                if let Some(rule) = self.rt.form.rules.get_mut(index) {
+                    rule.reply_to_response_topic = on;
                 }
                 self.rt.apply_form();
             }
@@ -3527,7 +3534,10 @@ impl App {
                 .width(70)
                 .style(c.input_style())
                 .on_input(|v| Msg::Field(Field::PubExpiry, v)),
-            self.hint(c, t("仅 MQTT 5", "MQTT 5 only")),
+            self.hint(
+                c,
+                t("JSON 自动带 content-type", "JSON adds content-type"),
+            ),
         ]
         .spacing(6)
         .align_y(Alignment::Center);
@@ -3580,7 +3590,12 @@ impl App {
                 })
                 .into()
         } else {
-            let rows = container(column![topic_row, props_row].spacing(6))
+            // MQTT 5-only properties stay out of the way on 3.1.1.
+            let mut stack = column![topic_row].spacing(6);
+            if f.protocol == 1 {
+                stack = stack.push(props_row);
+            }
+            let rows = container(stack)
                 .width(Length::Fill)
                 .padding(Padding {
                     right: 8.0,
@@ -4020,6 +4035,26 @@ impl App {
                             .width(70)
                             .style(c.input_style())
                             .on_input(move |v| Msg::RuleText(index, RuleTextField::Expiry, v)),
+                        tooltip(
+                            checkbox(rule.reply_to_response_topic)
+                                .label(t("跟随响应 Topic", "Follow response topic"))
+                                .size(fs(15.0))
+                                .text_size(fs(12.0))
+                                .style(c.checkbox_style())
+                                .on_toggle(move |v| Msg::RuleResponseTopic(index, v)),
+                            container(
+                                text(t(
+                                    "请求带 Response Topic 时回复到该 Topic，并原样回传 Correlation Data；否则用上面的回复 Topic",
+                                    "Reply to the request's Response Topic and echo its Correlation Data when present; otherwise use the reply topic above"
+                                ))
+                                .size(fs(11.0))
+                                .color(c.text_primary),
+                            )
+                            .padding([4, 7])
+                            .style(c.inset()),
+                            tooltip::Position::Top,
+                        )
+                        .delay(Duration::from_millis(300)),
                         self.hint(c, t("仅 MQTT 5", "MQTT 5 only")),
                     ]
                     .spacing(6)

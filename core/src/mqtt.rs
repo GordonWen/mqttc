@@ -157,11 +157,43 @@ pub enum AckStage {
 pub struct PublishOptions {
     pub user_properties: Vec<(String, String)>,
     pub expiry: Option<u32>,
+    /// Declared payload type; derived from the editor's format picker.
+    pub content_type: Option<String>,
+    /// 1 = UTF-8 payload (text / JSON), unset for base64 and hex bytes.
+    pub payload_format: Option<u8>,
+    /// Echoed back on responses when the request carried correlation data.
+    pub correlation_data: Option<Vec<u8>>,
 }
 
 impl PublishOptions {
     pub fn is_empty(&self) -> bool {
-        self.user_properties.is_empty() && self.expiry.is_none()
+        self.user_properties.is_empty()
+            && self.expiry.is_none()
+            && self.content_type.is_none()
+            && self.payload_format.is_none()
+            && self.correlation_data.is_none()
+    }
+
+    /// Upper bound of the encoded property block, matching rumqttc's layout:
+    /// identifier byte + two-byte length per string/binary value.
+    pub fn estimated_len(&self) -> usize {
+        let mut len = 0;
+        if self.payload_format.is_some() {
+            len += 2;
+        }
+        if self.expiry.is_some() {
+            len += 5;
+        }
+        if let Some(data) = &self.correlation_data {
+            len += 3 + data.len();
+        }
+        for (key, value) in &self.user_properties {
+            len += 5 + key.len() + value.len();
+        }
+        if let Some(kind) = &self.content_type {
+            len += 3 + kind.len();
+        }
+        len
     }
 }
 
@@ -178,6 +210,10 @@ pub enum UiEvent {
         dup: bool,
         props: Vec<(String, String)>,
         expiry: Option<u32>,
+        /// MQTT 5 request target and binary correlation token, kept raw so an
+        /// auto reply can echo both without a lossy string conversion.
+        response_topic: Option<String>,
+        correlation_data: Option<Vec<u8>>,
         /// Packet id of an inbound QoS 1/2 PUBLISH (0 for QoS 0).
         pkid: u16,
     },
@@ -285,6 +321,12 @@ impl LiveClient {
                     let properties = rumqttc::v5::mqttbytes::v5::PublishProperties {
                         user_properties: options.user_properties.clone(),
                         message_expiry_interval: options.expiry,
+                        content_type: options.content_type.clone(),
+                        payload_format_indicator: options.payload_format,
+                        correlation_data: options
+                            .correlation_data
+                            .clone()
+                            .map(bytes::Bytes::from),
                         ..Default::default()
                     };
                     client
@@ -603,6 +645,8 @@ fn start_v311<F>(
                         dup: packet.dup,
                         props: Vec::new(),
                         expiry: None,
+                        response_topic: None,
+                        correlation_data: None,
                         pkid: packet.pkid,
                     });
                 }
@@ -796,6 +840,12 @@ fn start_v5<F>(
                 )) => {
                     let topic = String::from_utf8_lossy(&packet.topic).into_owned();
                     let (props, expiry) = v5_publish_meta(packet.properties.as_ref());
+                    let response_topic =
+                        packet.properties.as_ref().and_then(|p| p.response_topic.clone());
+                    let correlation_data = packet
+                        .properties
+                        .as_ref()
+                        .and_then(|p| p.correlation_data.as_ref().map(|data| data.to_vec()));
                     on_event(UiEvent::Recv {
                         topic,
                         payload: packet.payload.to_vec(),
@@ -804,6 +854,8 @@ fn start_v5<F>(
                         dup: packet.dup,
                         props,
                         expiry,
+                        response_topic,
+                        correlation_data,
                         pkid: packet.pkid,
                     });
                 }

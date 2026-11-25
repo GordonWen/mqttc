@@ -4676,6 +4676,7 @@ name = "mqttc-core"
 version = "1.2.0"
 dependencies = [
  "base64 0.23.1",
+ "bytes",
  "chrono",
  "mqttc-test-broker",
  "rumqttc",

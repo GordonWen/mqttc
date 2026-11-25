@@ -98,6 +98,8 @@ pub struct RuleRow {
     /// MQTT 5 reply user properties and expiry seconds.
     pub props: String,
     pub expiry: String,
+    /// Send the reply to the request's Response Topic when it has one.
+    pub reply_to_response_topic: bool,
 }
 
 impl Default for RuleRow {
@@ -114,6 +116,7 @@ impl Default for RuleRow {
             min_interval_secs: String::new(),
             props: String::new(),
             expiry: String::new(),
+            reply_to_response_topic: false,
         }
     }
 }
@@ -131,6 +134,7 @@ impl RuleRow {
         rule.min_interval_secs = parse_interval_secs(&self.min_interval_secs);
         rule.props = self.props.trim().to_string();
         rule.expiry = parse_interval_secs(&self.expiry);
+        rule.reply_to_response_topic = self.reply_to_response_topic;
     }
 }
 
@@ -274,6 +278,7 @@ impl FormState {
                 } else {
                     rule.expiry.to_string()
                 },
+                reply_to_response_topic: rule.reply_to_response_topic,
             })
             .collect();
         self.auto_reply_echo = if normalize_auto_reply_echo(&cfg.auto_reply_echo) == "rematch" {
@@ -521,6 +526,7 @@ mod tests {
             min_interval_secs: 5,
             props: "role=echo".into(),
             expiry: 15,
+            reply_to_response_topic: true,
         });
         cfg.auto_reply_echo = "rematch".into();
 
@@ -551,6 +557,7 @@ mod tests {
         assert_eq!(back.auto_reply_rules[0].min_interval_secs, 5);
         assert_eq!(back.auto_reply_rules[0].props, "role=echo");
         assert_eq!(back.auto_reply_rules[0].expiry, 15);
+        assert!(back.auto_reply_rules[0].reply_to_response_topic);
         assert_eq!(back.auto_reply_echo, "rematch");
         assert_eq!(back.subscriptions.len(), 1);
         assert!(!back.subscriptions[0].no_local);
