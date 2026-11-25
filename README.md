@@ -12,9 +12,9 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows 10/11 x64 | `mqttc-v1.2.0-windows-x64.zip` | 解压运行 `mqttc.exe` |
-| Linux x64 | `mqttc-v1.2.0-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
-| macOS 11+ | `mqttc-v1.2.0-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
+| Windows 10/11 x64 | `mqttc-v1.3.0-windows-x64.zip` | 解压运行 `mqttc.exe` |
+| Linux x64 | `mqttc-v1.3.0-linux-x64.tar.gz` | 需要 glibc 2.35+、libxkbcommon、Wayland 或 X11 |
+| macOS 11+ | `mqttc-v1.3.0-macos-universal.zip` | Apple Silicon + Intel 通用；未签名 |
 
 配置 `mqttc.json` 与导出的 `logs/` 都在可执行文件同目录，不写注册表、不写用户目录，
 整个文件夹可以放在 U 盘里带走。
@@ -117,7 +117,7 @@ GPUI 的差异见 [docs/PARITY.md](docs/PARITY.md)；三者的架构、构建与
 
 ```bash
 cargo test -p mqttc-core        # 编解码、通配符、筛选、配置迁移、自动回复、表单钳制
-cargo test -p mqttc-iced        # 17 个页面构建冒烟
+cargo test -p mqttc-iced        # 20 个页面构建冒烟
 cargo test -p mqttc-core --test broker_roundtrip   # 内嵌 rumqttd Broker 端到端
 cargo test -p mqttc-core --test fault_injection    # 延迟/丢失/乱序 PUBACK、重复投递、手动 ACK
 ```

@@ -12,9 +12,9 @@ Get the latest build from [Releases](https://github.com/GordonWen/mqttc/releases
 
 | Platform | File | Notes |
 |---|---|---|
-| Windows 10/11 x64 | `mqttc-v1.2.0-windows-x64.zip` | Unzip and run `mqttc.exe` |
-| Linux x64 | `mqttc-v1.2.0-linux-x64.tar.gz` | Requires glibc 2.35+, libxkbcommon, Wayland or X11 |
-| macOS 11+ | `mqttc-v1.2.0-macos-universal.zip` | Universal (Apple Silicon + Intel); unsigned |
+| Windows 10/11 x64 | `mqttc-v1.3.0-windows-x64.zip` | Unzip and run `mqttc.exe` |
+| Linux x64 | `mqttc-v1.3.0-linux-x64.tar.gz` | Requires glibc 2.35+, libxkbcommon, Wayland or X11 |
+| macOS 11+ | `mqttc-v1.3.0-macos-universal.zip` | Universal (Apple Silicon + Intel); unsigned |
 
 `mqttc.json` and exported `logs/` live next to the executable. Nothing is written to the
 registry or the user profile, so the whole folder can travel on a USB stick.
@@ -132,7 +132,7 @@ build and test details for all three are in
 
 ```bash
 cargo test -p mqttc-core        # codec, wildcards, filtering, config migration, auto-reply, form clamping
-cargo test -p mqttc-iced        # 17 page build smoke tests
+cargo test -p mqttc-iced        # 20 page build smoke tests
 cargo test -p mqttc-core --test broker_roundtrip   # end-to-end with embedded rumqttd broker
 ```
 
