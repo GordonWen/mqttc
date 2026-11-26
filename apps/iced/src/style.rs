@@ -248,6 +248,9 @@ impl Colors {
                     | checkbox::Status::Hovered { is_checked: true }
                     | checkbox::Status::Disabled { is_checked: true }
             );
+            // Disabled labels follow the faint text used by disabled inputs
+            // and pickers, so a locked settings page reads as one state.
+            let disabled = matches!(status, checkbox::Status::Disabled { .. });
 
             // Tint the box while checked. Besides the clearer affordance,
             // this is what keeps the checkmark whole: iced 0.14 computes the
@@ -270,7 +273,7 @@ impl Colors {
                     width: 1.0,
                     radius: 4.0.into(),
                 },
-                text_color: Some(c.text_body),
+                text_color: Some(if disabled { c.text_faint } else { c.text_body }),
             }
         }
     }
