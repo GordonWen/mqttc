@@ -1242,7 +1242,9 @@ impl App {
                 return iced::widget::operation::focus(iced::widget::Id::new("log-search"));
             }
             Msg::DroppedFile(path) => {
-                if self.fill_cert_path(&path) {
+                // Connection settings are locked while a session is live, so
+                // a drop must not rewrite certificate paths either.
+                if !self.settings_locked() && self.fill_cert_path(&path) {
                     return self.touched();
                 }
             }
@@ -2254,13 +2256,59 @@ impl App {
         text(text_value).size(fs(11.0)).color(c.text_faint).into()
     }
 
+    fn settings_locked(&self) -> bool {
+        self.rt
+            .active_id()
+            .map(|id| self.rt.status_of(&id) != ConnStatus::Disconnected)
+            .unwrap_or(false)
+    }
+
     fn input(&self, c: &Colors, field: Field, placeholder: &'static str) -> El<'_> {
-        text_input(placeholder, field.get(&self.rt.form))
+        // A connected session owns these values; a disabled text input is the
+        // only way to keep protocol switches from invalidating its labels.
+        let mut widget = text_input(placeholder, field.get(&self.rt.form))
             .size(fs(13.0))
             .padding([7, 9])
             .width(Length::Fill)
-            .style(c.input_style())
-            .on_input(move |v| Msg::Field(field, v))
+            .style(c.input_style());
+        if !self.settings_locked() {
+            widget = widget.on_input(move |v| Msg::Field(field, v));
+        }
+        widget.into()
+    }
+
+    fn pick_setting<'a, F>(
+        &self,
+        c: &Colors,
+        options: &[Opt],
+        current: i32,
+        locked: bool,
+        on: F,
+    ) -> El<'a>
+    where
+        F: Fn(i32) -> Msg + 'a,
+    {
+        if !locked {
+            return pick(c, options, current, on);
+        }
+        let c = *c;
+        let label = options
+            .iter()
+            .find(|o| o.value == current)
+            .map(|o| o.label.clone())
+            .unwrap_or_default();
+        container(text(label).size(fs(13.0)).color(c.text_faint))
+            .padding([6, 8])
+            .style(move |_| container::Style {
+                text_color: Some(c.text_faint),
+                background: Some(iced::Background::Color(c.panel_bg)),
+                border: iced::Border {
+                    color: c.hover_bg,
+                    width: 1.0,
+                    radius: 6.0.into(),
+                },
+                ..container::Style::default()
+            })
             .into()
     }
 
@@ -2272,29 +2320,30 @@ impl App {
 
     fn page_editor(&self, c: &Colors) -> El<'_> {
         let f = &self.rt.form;
-        let connected = self
-            .rt
-            .active_id()
-            .map(|id| self.rt.status_of(&id) != ConnStatus::Disconnected)
-            .unwrap_or(false);
+        let locked = self.settings_locked();
+        let connected = locked;
 
         let general = column![
-            self.section(c, &t("连接设置", "Connection settings")),
             row![
                 self.labelled(c, &t("名称", "Name"), self.input(c, Field::Name, "Local bench")),
-                self.labelled(c, &t("协议", "Protocol"), pick(c, &proto_opts(), f.protocol, |v| Msg::Num(Num::Protocol, v))),
+                self.labelled(c, &t("协议", "Protocol"), self.pick_setting(c, &proto_opts(), f.protocol, locked, |v| Msg::Num(Num::Protocol, v))),
             ]
             .spacing(10),
             row![
                 self.labelled(c, &t("主机", "Host"), self.input(c, Field::Host, "127.0.0.1")),
                 column![
                     text(t("端口", "Port")).size(fs(11.0)).color(c.text_faint),
-                    text_input("1883", &f.port)
-                        .size(fs(13.0))
-                        .padding([7, 9])
-                        .width(120)
-                        .style(c.input_style())
-                        .on_input(|v| Msg::Field(Field::Port, v)),
+                    {
+                        let mut port = text_input("1883", &f.port)
+                            .size(fs(13.0))
+                            .padding([7, 9])
+                            .width(120)
+                            .style(c.input_style());
+                        if !locked {
+                            port = port.on_input(|v| Msg::Field(Field::Port, v));
+                        }
+                        port
+                    },
                 ]
                 .spacing(3)
                 .width(120),
@@ -2302,24 +2351,32 @@ impl App {
             .spacing(10),
             row![
                 self.labelled(c, &t("客户端 ID", "Client ID"), self.input(c, Field::ClientId, "auto")),
-                button(text(t("生成", "Generate")).size(fs(12.0)))
-                    .padding([7, 10])
-                    .style(c.ghost_button())
-                    .on_press(Msg::GenId),
+                {
+                    let generate = button(text(t("生成", "Generate")).size(fs(12.0)))
+                        .padding([7, 10])
+                        .style(c.ghost_button());
+                    if locked {
+                        generate
+                    } else {
+                        generate.on_press(Msg::GenId)
+                    }
+                },
             ]
             .spacing(8)
             .align_y(Alignment::End),
             row![
                 self.labelled(c, &t("用户名", "Username"), self.input(c, Field::Username, "")),
                 self.labelled(c, &t("密码", "Password"), {
-                    text_input("", &f.password)
+                    let mut password = text_input("", &f.password)
                         .secure(true)
                         .size(fs(13.0))
                         .padding([7, 9])
                         .width(Length::Fill)
-                        .style(c.input_style())
-                        .on_input(|v| Msg::Field(Field::Password, v))
-                        .into()
+                        .style(c.input_style());
+                    if !locked {
+                        password = password.on_input(|v| Msg::Field(Field::Password, v));
+                    }
+                    password.into()
                 }),
             ]
             .spacing(10),
@@ -2355,7 +2412,9 @@ impl App {
                     checkbox(f.clean_session)
                         .size(fs(15.0))
                         .style(c.checkbox_style())
-                        .on_toggle(|v| Msg::Flag(Flag::CleanSession, v)),
+                        .on_toggle_maybe(
+                            (!locked).then_some(|v| Msg::Flag(Flag::CleanSession, v)),
+                        ),
                 ]
                 .spacing(3),
                 column![
@@ -2363,7 +2422,9 @@ impl App {
                     checkbox(f.auto_reconnect)
                         .size(fs(15.0))
                         .style(c.checkbox_style())
-                        .on_toggle(|v| Msg::Flag(Flag::AutoReconnect, v)),
+                        .on_toggle_maybe(
+                            (!locked).then_some(|v| Msg::Flag(Flag::AutoReconnect, v)),
+                        ),
                 ]
                 .spacing(3),
             ]
@@ -2413,7 +2474,9 @@ impl App {
                     .size(fs(15.0))
                     .text_size(fs(12.0))
                     .style(c.checkbox_style())
-                    .on_toggle(|v| Msg::Flag(Flag::ManualAcks, v)),
+                    .on_toggle_maybe(
+                        (!locked).then_some(|v| Msg::Flag(Flag::ManualAcks, v)),
+                    ),
                 self.hint(
                     c,
                     t(
@@ -2458,19 +2521,19 @@ impl App {
                     .size(fs(15.0))
                     .text_size(fs(12.0))
                     .style(c.checkbox_style())
-                    .on_toggle(|v| Msg::Flag(Flag::Ssl, v)),
+                    .on_toggle_maybe((!locked).then_some(|v| Msg::Flag(Flag::Ssl, v))),
                 checkbox(f.ssl_verify)
                     .label(t("校验服务器证书", "Verify certificate"))
                     .size(fs(15.0))
                     .text_size(fs(12.0))
                     .style(c.checkbox_style())
-                    .on_toggle(|v| Msg::Flag(Flag::SslVerify, v)),
+                    .on_toggle_maybe((!locked).then_some(|v| Msg::Flag(Flag::SslVerify, v))),
                 checkbox(f.tls_keylog)
                     .label(t("TLS 密钥日志", "TLS key log"))
                     .size(fs(15.0))
                     .text_size(fs(12.0))
                     .style(c.checkbox_style())
-                    .on_toggle(|v| Msg::Flag(Flag::TlsKeylog, v)),
+                    .on_toggle_maybe((!locked).then_some(|v| Msg::Flag(Flag::TlsKeylog, v))),
                 // Keep the current trust behaviour in sight, right next to the
                 // checkbox that controls it.
                 text(tls_note)
@@ -2514,7 +2577,7 @@ impl App {
                 self.labelled(c, &t("Will Payload", "Will payload"), self.input(c, Field::WillPayload, "offline")),
                 column![
                     text(t("Will QoS", "Will QoS")).size(fs(11.0)).color(c.text_faint),
-                    pick(c, &qos_opts(), f.will_qos, |v| Msg::Num(Num::WillQos, v)),
+                    self.pick_setting(c, &qos_opts(), f.will_qos, locked, |v| Msg::Num(Num::WillQos, v)),
                 ]
                 .spacing(3)
                 .width(100),
@@ -2525,46 +2588,61 @@ impl App {
                 .size(fs(15.0))
                 .text_size(fs(12.0))
                 .style(c.checkbox_style())
-                .on_toggle(|v| Msg::Flag(Flag::WillRetain, v)),
+                .on_toggle_maybe((!locked).then_some(|v| Msg::Flag(Flag::WillRetain, v))),
         ]
         .spacing(10);
 
-        let actions = row![
+        // Page title, note and actions share one header row, matching the
+        // session page; the scrolling form below carries fields only.
+        let header = row![
+            text(t("连接设置", "Connection settings"))
+                .size(fs(18.0))
+                .color(c.text_title)
+                .width(Length::Fill)
+                .wrapping(Wrapping::WordOrGlyph),
+            self.hint(
+                c,
+                if locked {
+                    t(
+                        "连接中：设置已锁定，断开后可编辑",
+                        "Session active: settings are locked; disconnect to edit",
+                    )
+                } else {
+                    t(
+                        "修改会保存到 exe 同目录的 mqttc.json",
+                        "Changes are saved to mqttc.json next to the exe",
+                    )
+                }
+                .to_string(),
+            ),
+            button(text(t("会话页", "Session")).size(fs(12.0)))
+                .padding([6, 12])
+                .style(c.ghost_button())
+                .on_press(Msg::Page(1)),
             if connected {
-                button(text(t("断开", "Disconnect")).size(fs(13.0)))
-                    .padding([8, 18])
+                button(text(t("断开", "Disconnect")).size(fs(12.0)))
+                    .padding([6, 12])
                     .style(c.danger_outline_button())
                     .on_press(Msg::Disconnect)
             } else {
-                button(text(t("连接", "Connect")).size(fs(13.0)))
-                    .padding([8, 18])
+                button(text(t("连接", "Connect")).size(fs(12.0)))
+                    .padding([6, 12])
                     .style(c.primary_button())
                     .on_press(Msg::Connect)
             },
-            button(text(t("会话页", "Session")).size(fs(13.0)))
-                .padding([8, 14])
-                .style(c.ghost_button())
-                .on_press(Msg::Page(1)),
-            self.hint(
-                c,
-                if connected {
-                    t("连接中编辑不会生效，请先断开", "Editing while connected has no effect; disconnect first")
-                } else {
-                    t("修改会保存到 exe 同目录的 mqttc.json", "Changes are saved to mqttc.json next to the exe")
-                },
-            ),
         ]
         .spacing(10)
         .align_y(Alignment::Center);
 
         container(
-            scrollable(
-                column![general, advanced, ssl, will, actions]
-                    .spacing(12)
-                    .padding(8),
-            )
-            .height(Length::Fill),
+            column![
+                header,
+                scrollable(column![general, advanced, ssl, will].spacing(12))
+                    .height(Length::Fill),
+            ]
+            .spacing(8),
         )
+        .padding(8)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -4719,6 +4797,19 @@ mod tests {
             app.page = page;
             let _page = app.view();
         }
+    }
+
+    /// A live session locks the connection editor; the locked build must still
+    /// lay out (disabled inputs, static pick labels, top-right actions).
+    #[test]
+    fn editor_page_builds_while_connected() {
+        let mut app = App::for_test();
+        let id = app.rt.active_id().unwrap();
+        assert!(!app.settings_locked());
+        app.rt.runtime_mut(&id).status = ConnStatus::Connected;
+        assert!(app.settings_locked());
+        app.page = 0;
+        let _page = app.view();
     }
 
     /// The four presets must map back to their own index even after a
